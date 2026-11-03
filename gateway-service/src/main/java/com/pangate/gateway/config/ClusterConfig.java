@@ -18,7 +18,9 @@ import com.pangate.gateway.registry.RedisSeqReader;
 import com.pangate.gateway.registry.RegistryWriter;
 import com.pangate.gateway.registry.RetryQueue;
 import com.pangate.gateway.upstream.LifecyclePublisher;
+import com.pangate.gateway.upstream.UpstreamPressure;
 import com.pangate.gateway.upstream.UpstreamPublisher;
+import com.pangate.gateway.loop.LoopRegistry;
 import com.pangate.gateway.server.NodeState;
 import com.pangate.gateway.server.TickScheduler;
 import java.time.Duration;
@@ -143,5 +145,12 @@ public class ClusterConfig {
   UpstreamPublisher upstreamPublisher(GatewayProperties p, KafkaClients kafka, TopicNames topics, NodeState node,
       TenantLimitsStore tenants, GatewayMetrics metrics) {
     return new UpstreamPublisher(kafka, topics, node, p.cell(), tenants, metrics, System::currentTimeMillis);
+  }
+
+  @Bean
+  UpstreamPressure upstreamPressure(KafkaClients kafka, LoopRegistry loops, TickScheduler tick, GatewayMetrics metrics) {
+    UpstreamPressure pressure = new UpstreamPressure(kafka::maxBufferRatio, loops, metrics);
+    tick.scheduleAtFixedRate(pressure::sample, Duration.ofMillis(100));
+    return pressure;
   }
 }

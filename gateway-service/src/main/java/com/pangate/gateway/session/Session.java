@@ -61,6 +61,11 @@ public final class Session extends WheelNode implements Deadlined {
   long lastRefillNanos;
   int strikes;
   long lastStrikeSec = Long.MIN_VALUE;
+  // Upstream bytes in the current 10 s window (Kafka buffer pressure, spec §5.5 step 7).
+  private long upstreamBytes;
+  private long upstreamWindowSec;
+  private boolean upstreamWindowStarted;
+  private boolean upstreamPaused;
   private String closeReason;
 
   public Session(LoopContext loop, Channel channel, long sessionKey, long acceptedAtSec, LimitsHolder limits,
@@ -226,6 +231,28 @@ public final class Session extends WheelNode implements Deadlined {
 
   public long lastSeenSec() {
     return lastSeenSec;
+  }
+
+  public void addUpstreamBytes(int n, long nowSec) {
+    if (!upstreamWindowStarted || nowSec - upstreamWindowSec >= 10) {
+      upstreamWindowStarted = true;
+      upstreamWindowSec = nowSec;
+      upstreamBytes = 0;
+    }
+    upstreamBytes += n;
+  }
+
+  public long upstreamBytes10s(long nowSec) {
+    return !upstreamWindowStarted || nowSec - upstreamWindowSec >= 10 ? 0 : upstreamBytes;
+  }
+
+  public boolean upstreamPaused() {
+    return upstreamPaused;
+  }
+
+  public void upstreamPaused(boolean paused) {
+    checkLoop();
+    upstreamPaused = paused;
   }
 
   /** Consecutive seconds with an upstream rate violation (spec §5.5). */

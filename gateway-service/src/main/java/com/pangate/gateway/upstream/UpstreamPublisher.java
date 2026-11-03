@@ -97,6 +97,7 @@ public final class UpstreamPublisher {
       count(type, 2);
       return;
     }
+    s.addUpstreamBytes(f.getPayload().size(), s.loop().nowSec());
     Session.Identity id = s.identity();
     UpstreamRecord.Builder rec = UpstreamRecord.newBuilder()
         .setMsgId(f.getMsgId())
