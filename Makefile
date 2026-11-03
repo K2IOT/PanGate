@@ -22,7 +22,7 @@ COMPOSE := docker compose -f platform-devenv/docker-compose.yml
 GATEWAY_JAR := gateway-service/target/gateway-service-0.1.0-SNAPSHOT.jar
 DEVTOOLS_JAR := gateway-devtools/target/gateway-devtools-0.1.0-SNAPSHOT-exec.jar
 
-.PHONY: doctor run-local images up down logs smoke local-check memory-check
+.PHONY: doctor run-local images up down logs smoke local-check memory-check load-check
 
 ## Check JDK 21, Docker and free ports.
 doctor:
@@ -59,3 +59,8 @@ local-check:
 
 memory-check:
 	platform-devenv/scripts/idle-memory.sh $(GATEWAY_JAR) $(DEVTOOLS_JAR) 10000
+
+## Idle-session load check; TODO: N=50000 on a machine with ulimit -n >= 120000.
+N ?= 18000
+load-check:
+	platform-devenv/scripts/idle-load.sh $(GATEWAY_JAR) $(DEVTOOLS_JAR) $(N)

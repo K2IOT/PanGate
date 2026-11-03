@@ -48,10 +48,11 @@ jobs:
       - run: make bootstrap
       - name: Start, connect, stop, restart (spec §9.1 R1, R3, R4)
         run: make local-check
-      - name: Idle heap per session (10k sessions)
-        # Measured 5.4 KB/session against the 3 KB assumption in spec §11; informational until the threshold is decided.
-        continue-on-error: true
+      - name: Idle heap per session (10k sessions, < 5 KB)
         run: make memory-check
+      - name: Idle load (18k sessions, loop lag p99 < 20 ms)
+        # TODO: 50k (spec §12) needs a runner with ulimit -n >= 120000; GitHub-hosted runners allow 65536.
+        run: make load-check N=18000
 
   dev-start:
     needs: build

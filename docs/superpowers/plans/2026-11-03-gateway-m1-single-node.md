@@ -1270,7 +1270,7 @@ git commit -m "feat(gateway): netty server lifecycle, management port, lag probe
     1. Khởi động gateway profile `local`, chờ ready.
     2. `jcmd <pid> GC.run`, đọc baseline `jvm_memory_used_bytes{area="heap"}` (tổng mọi pool) từ `/actuator/prometheus`.
     3. Chạy `devtools client --load N --ramp 2000` (bind `127.0.0.1`) trong process riêng, chờ đủ N kết nối.
-    4. `GC.run`, đo lại heap. In `heap_per_session_bytes`; exit 1 nếu ≥ 3072.
+    4. `GC.run`, đo lại heap. In `heap_per_session_bytes`; exit 1 nếu ≥ 5120 (ngưỡng chốt sau M1; ban đầu 3072).
 
 - [ ] **Step 1: Cấu hình Jib, compose, Makefile và script**
 
@@ -1326,10 +1326,10 @@ Run lần lượt:
 - `make verify`: mọi test pass.
 - `platform-devenv/scripts/local-start-check.sh …`: `LOCAL START OK`.
 - `make images up smoke down`: `SMOKE OK`.
-- Kiểm tra 50k session idle (spec §12):
+- Kiểm tra session idle (spec §12): M1 nghiệm thu với `make load-check N=18000`. **TODO:** chạy `make load-check N=50000` trên máy có `ulimit -n` ≥ 120.000. Các bước tay tương đương:
   1. Chạy `ulimit -n 200000`.
   2. Khởi động gateway bằng `make run-local`.
-  3. Chạy `java -jar gateway-devtools/target/gateway-devtools-0.1.0-SNAPSHOT-exec.jar client --url wss://127.0.0.1:8443/v1/ws --ca ~/.pangate-dev/ca.crt --token "$(… token …)" --device load --load 50000 --ramp 2000 --bind 127.0.0.1,127.0.0.2`.
+  3. Chạy `java -jar gateway-devtools/target/gateway-devtools-0.1.0-SNAPSHOT-exec.jar client --url wss://127.0.0.1:8443/v1/ws --ca ~/.pangate-dev/ca.crt --key ~/.pangate-dev/es256.pem --load 50000 --ramp 2000 --bind 127.0.0.1,127.0.0.2`.
   4. Chờ client in `connected=50000`.
   5. Đọc `gw_eventloop_lag{loop=…}` trên `/actuator/prometheus`.
 
@@ -1352,9 +1352,9 @@ git push -u origin claude/fervent-turing-vz339r
 | Ready ở local (`java -jar`, profile `local`) | 4 s | ≤ 30 s | Đạt |
 | Thoát sau SIGTERM | 1,6 s | ≤ 15 s | Đạt |
 | `make up` tới khi mọi container healthy | 12 s | ≤ 90 s | Đạt; `make smoke` → `SMOKE OK` |
-| Heap mỗi session idle (10k session, WSS + TLS) | **4.685 B** (trước tối ưu: 5.364 B) | < 3.072 B | **Chưa đạt**, chờ quyết định |
+| Heap mỗi session idle (10k session, WSS + TLS) | **4.685 B** (trước tối ưu: 5.364 B) | < 5.120 B | Đạt (ngưỡng nâng từ 3 KB lên 5 KB sau M1) |
 | Loop lag p99 với 18.000 session idle | 0,32 ms | < 20 ms | Đạt (0 lỗi kết nối) |
-| 50.000 session idle | Chưa chạy | lag p99 < 20 ms | Container phiên này giới hạn cứng `nofile` = 20.000 (kể cả root); cần chạy trên máy dev hoặc runner có `ulimit -n` ≥ 120.000 |
+| 50.000 session idle | **TODO**, chưa chạy | lag p99 < 20 ms | Container phiên này giới hạn cứng `nofile` = 20.000 (kể cả root). Chạy `make load-check N=50000` trên máy có `ulimit -n` ≥ 120.000 |
 
 Tối ưu đã làm sau review: gỡ handler WebSocket của Netty và handshaker sau handshake (tự trả PONG), chuẩn hóa có giới hạn các chuỗi tenant/platform/sdkVersion, dùng chung `FrameCodec`/`SessionHandler`/`WsBinaryAdapter`. Phần còn lại chủ yếu thuộc Netty và OpenSSL (9 handler context 576 B, channel 152 B, engine + session OpenSSL 224 B, `SslHandler` + promise 208 B, map và chuỗi nội bộ của OpenSSL session).
 

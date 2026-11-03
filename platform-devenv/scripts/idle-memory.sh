@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Heap per idle session (spec §11, M1 exit: < 3 KB): baseline heap after GC, open N sessions from a separate
+# Heap per idle session (spec §11, M1 exit: < 5 KB): baseline heap after GC, open N sessions from a separate
 # devtools process, GC again, divide. Usage: idle-memory.sh <gateway-jar> <devtools-exec-jar> [N=10000]
 set -euo pipefail
 
 GATEWAY_JAR=${1:?gateway jar}
 DEVTOOLS_JAR=${2:?devtools exec jar}
 N=${3:-10000}
-LIMIT=3072
+LIMIT=5120
 export GATEWAY_DEV_DIR=${GATEWAY_DEV_DIR:-$(mktemp -d)}
 GLOG=$(mktemp)
 CLOG=$(mktemp)

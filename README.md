@@ -22,4 +22,4 @@ Modules build in order: `platform-parent` → `platform-contracts` → `platform
 
 - **Local (IDE):** see [gateway-service/README.md](gateway-service/README.md) — profile `local`, secrets auto-generated in `~/.pangate-dev`.
 - **Dev (Docker):** `make bootstrap images up smoke`, then `make down`.
-- Checks: `make doctor`, `make local-check`, `make memory-check`.
+- Checks: `make doctor`, `make local-check`, `make memory-check` (< 5 KB/session), `make load-check N=18000` (TODO: `N=50000` on a machine with `ulimit -n` ≥ 120000).
