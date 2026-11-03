@@ -86,6 +86,7 @@ public final class SessionHandler extends ChannelInboundHandlerAdapter {
   }
 
   private static boolean sameOwner(Session s, ConnectClaims c) {
-    return s.identity().principalId().equals(c.principal()) && s.identity().deviceId().equals(c.device());
+    return s.identity().tenantId().equals(c.tenant()) && s.identity().principalId().equals(c.principal())
+        && s.identity().deviceId().equals(c.device());
   }
 }

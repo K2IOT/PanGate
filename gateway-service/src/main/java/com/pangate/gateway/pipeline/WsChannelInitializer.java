@@ -44,7 +44,7 @@ public final class WsChannelInitializer extends ChannelInitializer<SocketChannel
     p.addLast("flush", new FlushConsolidationHandler(256, true));
     p.addLast("http", new HttpServerCodec());
     p.addLast("aggregator", new HttpObjectAggregator(8192));
-    p.addLast("upgradeGuard", new UpgradeGuard(deps.props(), deps.loops(), deps.node(), ThreadLocalRandom.current()));
+    p.addLast("upgradeGuard", new UpgradeGuard(deps.props(), deps.limits(), deps.loops(), deps.node(), ThreadLocalRandom.current()));
     p.addLast("ws", new WebSocketServerProtocolHandler(wsConfig));
     p.addLast("wsBinary", new WsBinaryAdapter());
     p.addLast("frameCodec", new FrameCodec(deps.limits()));

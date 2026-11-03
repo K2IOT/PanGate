@@ -143,6 +143,12 @@ class JwtVerifierTest {
   }
 
   @Test
+  void tenantContainingColonRejected() throws Exception {
+    assertThat(verifier.verify(mint(b -> b.claim("tenant", "a:b").subject("a:b:c")), NOW))
+        .isInstanceOf(JwtResult.Rejected.class);
+  }
+
+  @Test
   void tooManyTopicPatternsRejected() throws Exception {
     assertThat(verifier.verify(mint(b -> b.claim("topics", Collections.nCopies(9, "t1:x"))), NOW))
         .isInstanceOf(JwtResult.Rejected.class);

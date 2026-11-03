@@ -27,12 +27,15 @@ public final class UpgradeGuard extends ChannelInboundHandlerAdapter {
   static final String SUBPROTOCOL = "pangate.v1";
 
   private final GatewayProperties props;
+  private final com.pangate.gateway.config.LimitsHolder limits;
   private final LoopRegistry loops;
   private final NodeState node;
   private final RandomGenerator rnd;
 
-  public UpgradeGuard(GatewayProperties props, LoopRegistry loops, NodeState node, RandomGenerator rnd) {
+  public UpgradeGuard(GatewayProperties props, com.pangate.gateway.config.LimitsHolder limits, LoopRegistry loops,
+      NodeState node, RandomGenerator rnd) {
     this.props = props;
+    this.limits = limits;
     this.loops = loops;
     this.node = node;
     this.rnd = rnd;
@@ -53,7 +56,7 @@ public final class UpgradeGuard extends ChannelInboundHandlerAdapter {
       reject(ctx, req, HttpResponseStatus.UPGRADE_REQUIRED, 0);
       return;
     }
-    if (node.draining() || loops.totalActive() >= props.limits().softCap()) {
+    if (node.draining() || loops.totalActive() >= limits.current().softCap()) {
       reject(ctx, req, HttpResponseStatus.SERVICE_UNAVAILABLE, 5 + rnd.nextInt(26));
       return;
     }

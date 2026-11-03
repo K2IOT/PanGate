@@ -31,6 +31,9 @@ class PrincipalHandshakeLimiterTest {
     for (int i = 0; i < 2_000; i++) {
       limiter.tryAcquire("t1:new" + (i % 3));
     }
+    assertThat(limiter.trackedPrincipals()).as("tryAcquire never sweeps on the event loop").isEqualTo(4);
+
+    limiter.sweepIdle();
 
     assertThat(limiter.trackedPrincipals()).isEqualTo(3);
   }

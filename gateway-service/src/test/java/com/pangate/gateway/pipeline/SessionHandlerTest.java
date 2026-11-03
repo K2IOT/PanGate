@@ -116,6 +116,28 @@ class SessionHandlerTest {
   }
 
   @Test
+  void reauthForSamePrincipalStringInOtherTenantAuthFailed() throws Exception {
+    session.close(CloseCode.NORMAL, "reset");
+    f.channel.runPendingTasks();
+    LoopFixture g = new LoopFixture();
+    AuthFixture a = new AuthFixture(g::now);
+    g.channel.attr(ChannelAttrs.TRANSPORT).set(ChannelAttrs.TransportKind.TCP);
+    g.channel.attr(ChannelAttrs.PROTOCOL_READY).set(true);
+    Session s = g.tracker.admit(g.channel, g.loop, InetAddress.getLoopbackAddress());
+    s.activate(new Session.Identity("t0", "t1:u1", "d1", "ios", "1.0", Set.of()), "CONN", g.now(), g.now() + 3_600,
+        0, List.of());
+    g.channel.pipeline().addLast(new SessionHandler(a.tickets, a.flow,
+        new com.pangate.gateway.auth.PrincipalHandshakeLimiter(20, () -> g.now() * 1000), g.limits, "cell-1"),
+        new ErrorTerminator());
+
+    g.channel.writeInbound(Frame.newBuilder().setType(FrameType.FRAME_TYPE_REAUTH)
+        .setPayload(Reauth.newBuilder().setJwt(a.jwt("t1:u1", "d1", g.now())).build().toByteString()).build());
+    g.channel.runPendingTasks();
+
+    assertThat(s.closeCode()).isEqualTo(CloseCode.AUTH_FAILED);
+  }
+
+  @Test
   void unsupportedFramesGetNonFatalError() throws Exception {
     for (FrameType t : List.of(FrameType.FRAME_TYPE_UPSTREAM, FrameType.FRAME_TYPE_SUBSCRIBE,
         FrameType.FRAME_TYPE_UNSUBSCRIBE, FrameType.FRAME_TYPE_RPC_RES)) {

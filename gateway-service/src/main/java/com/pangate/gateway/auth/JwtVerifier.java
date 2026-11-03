@@ -90,6 +90,9 @@ public final class JwtVerifier {
     if (bytes(tenant) > MAX_TENANT_BYTES || bytes(sub) > MAX_PRINCIPAL_BYTES || bytes(device) > MAX_DEVICE_BYTES) {
       return new JwtResult.Rejected("tenant, sub or device too long");
     }
+    if (tenant.indexOf(':') >= 0) {
+      return new JwtResult.Rejected("tenant must not contain ':'");
+    }
     if (!sub.startsWith(tenant + ":")) {
       return new JwtResult.Rejected("subject is outside the token's tenant");
     }

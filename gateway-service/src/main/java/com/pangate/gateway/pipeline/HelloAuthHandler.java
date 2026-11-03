@@ -48,6 +48,7 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
   private final ArrayDeque<Object> held = new ArrayDeque<>();
   private boolean verifying;
   private boolean done;
+  private boolean failed;
 
   public HelloAuthHandler(ResumeTicketService tickets, JwtAuthFlow jwt, SessionTracker tracker,
       PrincipalHandshakeLimiter limiter, LimitsHolder limits, String cell, GatewayMetrics metrics) {
@@ -84,6 +85,10 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
 
   @Override
   public void channelRead(ChannelHandlerContext ctx, Object msg) {
+    if (failed) {
+      io.netty.util.ReferenceCountUtil.release(msg);
+      return;
+    }
     if (verifying || done) {
       held.add(msg);
       return;
@@ -183,6 +188,7 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
   }
 
   private void fail(Session session, CloseCode code, String result) {
+    failed = true;
     metrics.handshake(result);
     held.forEach(io.netty.util.ReferenceCountUtil::release);
     held.clear();

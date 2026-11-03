@@ -114,6 +114,19 @@ class HelloAuthHandlerTest {
   }
 
   @Test
+  void framesAfterAFailedHelloInTheSameReadAreIgnored() throws Exception {
+    String good = ticket("cell-1", f.now(), f.now() + 100);
+    String bad = good.substring(0, 10) + (good.charAt(10) == 'A' ? 'B' : 'A') + good.substring(11);
+
+    f.channel.writeInbound(bytes(hello(ticketHello(bad, "d1"))), bytes(hello(ticketHello(good, "d1"))));
+    List<Frame> out = outbound();
+
+    assertThat(out).extracting(Frame::getType).containsExactly(FrameType.FRAME_TYPE_ERROR);
+    assertThat(session.state()).isEqualTo(SessionState.CLOSED);
+    assertThat(f.principals.principalCount()).isZero();
+  }
+
+  @Test
   void helloWithJwtSendsConnected() throws Exception {
     Connected c = send(jwtHello(auth.jwt("t1:u1", "d1", f.now()), "d1"));
 

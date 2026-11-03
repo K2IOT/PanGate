@@ -43,7 +43,9 @@ class UpgradeGuardTest {
   }
 
   private void guard(int softCap) {
-    f.channel.pipeline().addLast(new UpgradeGuard(props(softCap), f.loops, node, new SplittableRandom(1)));
+    f.limits.set(new com.pangate.gateway.config.GatewayLimits(700_000, softCap, 200, 65_536, 8_192,
+        Duration.ofSeconds(5), Duration.ofSeconds(10), 20, Duration.ofSeconds(30), Duration.ofHours(24)));
+    f.channel.pipeline().addLast(new UpgradeGuard(props(softCap), f.limits, f.loops, node, new SplittableRandom(1)));
   }
 
   private static FullHttpRequest upgrade(String path, String subprotocol) {
@@ -91,6 +93,19 @@ class UpgradeGuardTest {
     FullHttpResponse r = response();
     assertThat(r.status().code()).isEqualTo(503);
     assertThat(Integer.parseInt(r.headers().get(HttpHeaderNames.RETRY_AFTER))).isBetween(5, 30);
+    r.release();
+  }
+
+  @Test
+  void softCapFollowsHotReloadedLimits() {
+    guard(550_000);
+    f.limits.set(new com.pangate.gateway.config.GatewayLimits(700_000, 1, 200, 65_536, 8_192, Duration.ofSeconds(5),
+        Duration.ofSeconds(10), 20, Duration.ofSeconds(30), Duration.ofHours(24)));
+
+    f.channel.writeInbound(upgrade("/v1/ws", "pangate.v1"));
+
+    FullHttpResponse r = response();
+    assertThat(r.status().code()).isEqualTo(503);
     r.release();
   }
 

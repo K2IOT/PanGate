@@ -124,8 +124,11 @@ public class GatewayConfig {
   }
 
   @Bean
-  PrincipalHandshakeLimiter principalHandshakeLimiter(LimitsHolder limits) {
-    return new PrincipalHandshakeLimiter(limits.current().handshakesPerPrincipalPerMin(), System::currentTimeMillis);
+  PrincipalHandshakeLimiter principalHandshakeLimiter(LimitsHolder limits, TickScheduler tick) {
+    PrincipalHandshakeLimiter limiter =
+        new PrincipalHandshakeLimiter(limits.current().handshakesPerPrincipalPerMin(), System::currentTimeMillis);
+    tick.scheduleAtFixedRate(limiter::sweepIdle, Duration.ofSeconds(30));
+    return limiter;
   }
 
   @Bean

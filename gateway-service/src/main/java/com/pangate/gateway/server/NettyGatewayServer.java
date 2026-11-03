@@ -44,6 +44,7 @@ public final class NettyGatewayServer implements SmartLifecycle {
   private final ChannelInitializer<SocketChannel> tcpInitializer;
   private final List<Channel> listeners = new ArrayList<>();
   private volatile boolean running;
+  private final java.util.concurrent.atomic.AtomicBoolean stopping = new java.util.concurrent.atomic.AtomicBoolean();
 
   public NettyGatewayServer(GatewayProperties props, IoGroups io, LoopRegistry loops, NodeState node,
       AdmissionController admission, EventLoopLagProbe lagProbe, ChannelInitializer<SocketChannel> wsInitializer,
@@ -106,6 +107,11 @@ public final class NettyGatewayServer implements SmartLifecycle {
 
   @Override
   public void stop(Runnable callback) {
+    // /admin/drain and Spring shutdown may both call stop(); only the first one tears down.
+    if (!stopping.compareAndSet(false, true)) {
+      callback.run();
+      return;
+    }
     node.draining(true);
     listeners.forEach(Channel::close);
     listeners.clear();
