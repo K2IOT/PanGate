@@ -1353,6 +1353,8 @@ git push -u origin claude/fervent-turing-vz339r
 | Thoát sau SIGTERM | 1,6 s | ≤ 15 s | Đạt |
 | `make up` tới khi mọi container healthy | 12 s | ≤ 90 s | Đạt; `make smoke` → `SMOKE OK` |
 | Heap mỗi session idle (10k session, WSS + TLS) | **5.364 B** | < 3.072 B | **Chưa đạt**, chờ quyết định |
+| Loop lag p99 với 18.000 session idle | 0,32 ms | < 20 ms | Đạt (0 lỗi kết nối) |
+| 50.000 session idle | Chưa chạy | lag p99 < 20 ms | Container phiên này giới hạn cứng `nofile` = 20.000 (kể cả root); cần chạy trên máy dev hoặc runner có `ulimit -n` ≥ 120.000 |
 
 Phân bổ heap mỗi session (class histogram, 10k session): 10 `DefaultChannelHandlerContext` 640 B; 17 `String` + `byte[]` khoảng 1 KB (connId, principal, device, tenant, platform, sdkVersion, origin, khóa index); `EpollSocketChannel` 152 B; `ReferenceCountedOpenSslEngine` + session 224 B; `SslHandler` + promise 208 B; `Session` 136 B; attribute 120 B; phần còn lại là map và config.
 

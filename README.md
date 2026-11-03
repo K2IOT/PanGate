@@ -17,3 +17,9 @@ Modules build in order: `platform-parent` → `platform-contracts` → `platform
 
 - Design spec: [docs/superpowers/specs/2026-11-03-gateway-service-design.md](docs/superpowers/specs/2026-11-03-gateway-service-design.md)
 - Dev environment: [platform-devenv/README.md](platform-devenv/README.md)
+
+## Run
+
+- **Local (IDE):** see [gateway-service/README.md](gateway-service/README.md) — profile `local`, secrets auto-generated in `~/.pangate-dev`.
+- **Dev (Docker):** `make bootstrap images up smoke`, then `make down`.
+- Checks: `make doctor`, `make local-check`, `make memory-check`.
