@@ -15,6 +15,7 @@ import com.pangate.gateway.metrics.GatewayMetrics;
 import com.pangate.gateway.mgmt.ReadinessCheck;
 import com.pangate.gateway.registry.NodeIdentity;
 import com.pangate.gateway.registry.RedisSeqReader;
+import com.pangate.gateway.registry.RegistryResync;
 import com.pangate.gateway.registry.RegistryWriter;
 import com.pangate.gateway.registry.RetryQueue;
 import com.pangate.gateway.upstream.LifecyclePublisher;
@@ -152,5 +153,18 @@ public class ClusterConfig {
     UpstreamPressure pressure = new UpstreamPressure(kafka::maxBufferRatio, loops, metrics);
     tick.scheduleAtFixedRate(pressure::sample, Duration.ofMillis(100));
     return pressure;
+  }
+
+  /** After a lost lease and a new epoch: re-register and re-announce every ACTIVE session (spec §6.1). */
+  @Bean
+  RegistryResync registryResync(LoopRegistry loops, RegistryWriter registry, LifecyclePublisher lifecycle,
+      NodeIdentity identity, GatewayMetrics metrics) {
+    RegistryResync resync = new RegistryResync(loops, s -> {
+      registry.register(s, false);
+      lifecycle.publish(s, com.pangate.contracts.v1.EventType.EVENT_TYPE_CONNECTED);
+    }, 300);
+    metrics.gauge("gw.registry.resync.pending", resync, RegistryResync::pending);
+    identity.onReEpoch(e -> resync.resync());
+    return resync;
   }
 }
