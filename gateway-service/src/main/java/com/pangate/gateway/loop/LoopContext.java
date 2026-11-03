@@ -92,9 +92,11 @@ public final class LoopContext {
 
   /** One task per loop per second advances the wheel; no per-channel timers. */
   public void startTicker() {
-    loop.scheduleAtFixedRate(() -> {
-      long now = nowSec();
-      wheel.advanceTo(now, n -> ((Deadlined) n).onDeadline(now));
-    }, 1, 1, TimeUnit.SECONDS);
+    loop.scheduleAtFixedRate(() -> advance(nowSec()), 1, 1, TimeUnit.SECONDS);
+  }
+
+  /** Runs every deadline due at {@code nowSec}; called by the ticker (and directly by tests). */
+  public void advance(long nowSec) {
+    wheel.advanceTo(nowSec, n -> ((Deadlined) n).onDeadline(nowSec));
   }
 }

@@ -31,6 +31,15 @@ public final class LoopRegistry {
     return new LoopRegistry(List.copyOf(list), map);
   }
 
+  /** Registry over existing contexts (each context's own event loop is its key). */
+  public static LoopRegistry fromContexts(List<LoopContext> contexts) {
+    Map<EventExecutor, LoopContext> map = new IdentityHashMap<>();
+    for (LoopContext c : contexts) {
+      map.put(c.eventLoop(), c);
+    }
+    return new LoopRegistry(List.copyOf(contexts), map);
+  }
+
   public LoopContext get(int idx) {
     return contexts.get(idx);
   }
