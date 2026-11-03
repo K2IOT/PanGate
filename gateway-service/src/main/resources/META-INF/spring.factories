@@ -1,0 +1,6 @@
+org.springframework.boot.env.EnvironmentPostProcessor=\
+com.pangate.gateway.dev.DevSecretsEnvironmentPostProcessor
+org.springframework.boot.diagnostics.FailureAnalyzer=\
+com.pangate.gateway.diagnostics.ListenerBindFailureAnalyzer,\
+com.pangate.gateway.diagnostics.SecretNotFoundFailureAnalyzer,\
+com.pangate.gateway.diagnostics.JwksConfigFailureAnalyzer
