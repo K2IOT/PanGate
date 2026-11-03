@@ -55,6 +55,18 @@ public final class GatewayMetrics {
     }
   }
 
+  /**
+   * A counter registered once; hot-path callers keep the returned instance. Tags are alternating key, value pairs
+   * with bounded values (spec §8).
+   */
+  public Counter counter(String name, String... tags) {
+    return Counter.builder(name).tags(tags).register(registry);
+  }
+
+  public <T> void gauge(String name, T obj, java.util.function.ToDoubleFunction<T> value) {
+    Gauge.builder(name, obj, value).register(registry);
+  }
+
   public MeterRegistry registry() {
     return registry;
   }
