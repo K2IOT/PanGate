@@ -77,9 +77,9 @@ public final class SessionHandler extends ChannelInboundHandlerAdapter {
       ConnectClaims c = v.claims();
       long exp = now + limits.current().sessionTtl().toSeconds();
       long jtiHash = ResumeTicketService.jtiHash(c.jti());
-      session.reauth(now, exp, jtiHash, c.topics());
       String ticket = tickets.issue(new ResumeTicket(cell, c.tenant(), c.principal(), c.device(), now, exp, jtiHash,
           c.topics()));
+      session.reauth(now, exp, jtiHash, c.topics());
       ctx.writeAndFlush(Frames.reauth(Reauth.newBuilder().setResumeTicket(ticket)
           .setSessionExpiresAtMs(exp * 1000).build()));
     });

@@ -16,6 +16,11 @@ import java.util.Optional;
 /** Offline ES256 connect-token verification against {@link JwksCache} (spec §4.6). Cheap enough for the loop. */
 public final class JwtVerifier {
 
+  /** UTF-8 byte caps that keep a resume ticket within its fixed buffer (spec §4.7, 2 KB). */
+  static final int MAX_TENANT_BYTES = 64;
+  static final int MAX_PRINCIPAL_BYTES = 256;
+  static final int MAX_DEVICE_BYTES = 128;
+
   private final JwksCache cache;
   private final String audience;
   private final String issuer;
@@ -82,6 +87,9 @@ public final class JwtVerifier {
     if (blank(sub) || blank(tenant) || blank(device) || blank(jti)) {
       return new JwtResult.Rejected("sub, tenant, device and jti are required");
     }
+    if (bytes(tenant) > MAX_TENANT_BYTES || bytes(sub) > MAX_PRINCIPAL_BYTES || bytes(device) > MAX_DEVICE_BYTES) {
+      return new JwtResult.Rejected("tenant, sub or device too long");
+    }
     if (!sub.startsWith(tenant + ":")) {
       return new JwtResult.Rejected("subject is outside the token's tenant");
     }
@@ -96,6 +104,10 @@ public final class JwtVerifier {
       }
     }
     return new JwtResult.Verified(new ConnectClaims(tenant, sub, device, jti, topics, expSec));
+  }
+
+  private static int bytes(String s) {
+    return s.getBytes(StandardCharsets.UTF_8).length;
   }
 
   private static boolean blank(String s) {

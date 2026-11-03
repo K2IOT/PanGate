@@ -156,6 +156,7 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
   }
 
   private void activate(ChannelHandlerContext ctx, Session session, Hello hello, ResumeTicket t) {
+    String ticket = tickets.issue(t);  // first: if this throws, no session state has been touched
     done = true;
     String connId = tracker.newConnId(session);
     session.activate(new Session.Identity(t.tenant(), t.principal(), t.device(), hello.getPlatform(),
@@ -167,7 +168,7 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
         .setConnId(connId)
         .setCell(cell)
         .setHeartbeatSec((int) limits.current().heartbeatInterval().toSeconds())
-        .setResumeTicket(tickets.issue(t))
+        .setResumeTicket(ticket)
         .setServerTimeMs(System.currentTimeMillis())
         .setSessionExpiresAtMs(t.expSec() * 1000)
         .setSeq(0)

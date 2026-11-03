@@ -133,6 +133,16 @@ class JwtVerifierTest {
   }
 
   @Test
+  void overLongClaimsRejected() throws Exception {
+    assertThat(verifier.verify(mint(b -> b.subject("t1:" + "u".repeat(254))), NOW)).isInstanceOf(JwtResult.Rejected.class);
+    assertThat(verifier.verify(mint(b -> b.claim("device", "d".repeat(129))), NOW)).isInstanceOf(JwtResult.Rejected.class);
+    String tenant = "t".repeat(65);
+    assertThat(verifier.verify(mint(b -> b.claim("tenant", tenant).subject(tenant + ":u")), NOW))
+        .isInstanceOf(JwtResult.Rejected.class);
+    assertThat(verifier.verify(mint(b -> b.subject("t1:" + "u".repeat(253))), NOW)).isInstanceOf(JwtResult.Verified.class);
+  }
+
+  @Test
   void tooManyTopicPatternsRejected() throws Exception {
     assertThat(verifier.verify(mint(b -> b.claim("topics", Collections.nCopies(9, "t1:x"))), NOW))
         .isInstanceOf(JwtResult.Rejected.class);

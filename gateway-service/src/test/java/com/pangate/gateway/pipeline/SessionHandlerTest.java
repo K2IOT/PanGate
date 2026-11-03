@@ -136,6 +136,19 @@ class SessionHandlerTest {
   }
 
   @Test
+  void jwtAuthFlowCallbackFailureIsRoutedToThePipeline() throws Exception {
+    ECKey rotated = AuthFixture.newKey();
+    auth.published.add(rotated);
+
+    auth.flow.verify(f.channel, auth.jwt(rotated, "t1:u1", "d1", f.now()), f.now(), r -> {
+      throw new IllegalStateException("boom");
+    });
+    f.channel.runPendingTasks();
+
+    assertThat(f.channel.isOpen()).isFalse();
+  }
+
+  @Test
   void jwtAuthFlowRefreshesUnknownKidOnLoop() throws Exception {
     ECKey rotated = AuthFixture.newKey();
     String jwt = auth.jwt(rotated, "t1:u1", "d1", f.now());

@@ -36,6 +36,9 @@ public final class JwtAuthFlow {
           }
           try {
             onLoop.accept(again);
+          } catch (RuntimeException e) {
+            // Never let a callback failure escape to the event loop: the pipeline's ErrorTerminator closes (4500).
+            ch.pipeline().fireExceptionCaught(e);
           } finally {
             if (ch.isActive()) {
               ch.config().setAutoRead(true);
