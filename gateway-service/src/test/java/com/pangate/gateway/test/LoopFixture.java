@@ -15,7 +15,10 @@ import java.util.concurrent.atomic.AtomicLong;
 /** One EmbeddedChannel bound to a LoopContext with a fake clock, plus the tracking collaborators. */
 public final class LoopFixture {
 
+  /** Monotonic seconds: drives the wheel and session deadlines. */
   public final AtomicLong clockSec = new AtomicLong(1_762_000_000L);
+  /** Wall-clock epoch seconds: token and ticket times. Moves with clockSec unless a test makes it jump. */
+  public final AtomicLong wallOffset = new AtomicLong();
   public final EmbeddedChannel channel;
   public final LoopContext loop;
   public final LoopRegistry loops;
@@ -28,7 +31,7 @@ public final class LoopFixture {
 
   public LoopFixture() {
     channel = new EmbeddedChannel();
-    loop = new LoopContext(0, channel.eventLoop(), 128, clockSec::get);
+    loop = new LoopContext(0, channel.eventLoop(), 128, clockSec::get, () -> clockSec.get() + wallOffset.get());
     loops = LoopRegistry.fromContexts(List.of(loop));
     tracker = new SessionTracker(loops, principals, ips, limits, metrics, () -> clockSec.get() * 1000);
   }
@@ -42,5 +45,9 @@ public final class LoopFixture {
 
   public long now() {
     return clockSec.get();
+  }
+
+  public long wallNow() {
+    return clockSec.get() + wallOffset.get();
   }
 }

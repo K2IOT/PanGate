@@ -97,6 +97,22 @@ class SessionTest {
   }
 
   @Test
+  void wallClockJumpDoesNotCloseOrFreezeSessions() {
+    Session s = admit();
+    s.activate(id(), "CONN", f.wallNow(), f.wallNow() + 86_400, 0, List.of());
+    long start = f.now();
+
+    f.wallOffset.set(7_200);
+    f.advanceTo(start + 10);
+    assertThat(f.channel.isOpen()).isTrue();
+    assertThat(s.expAtSec()).isEqualTo(start + 86_400);
+
+    f.wallOffset.set(-7_200);
+    f.advanceTo(start + 90);
+    assertThat(s.closeReason()).isEqualTo("HEARTBEAT_TIMEOUT");
+  }
+
+  @Test
   void closeIsIdempotent() {
     Session s = admit();
 

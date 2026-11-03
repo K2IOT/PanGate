@@ -21,10 +21,16 @@ public final class LoopRegistry {
   }
 
   public static LoopRegistry create(EventLoopGroup group, int wheelSlots, LongSupplier epochSec) {
+    return create(group, wheelSlots, epochSec, epochSec);
+  }
+
+  /** @see LoopContext#LoopContext(int, EventLoop, int, LongSupplier, LongSupplier) */
+  public static LoopRegistry create(EventLoopGroup group, int wheelSlots, LongSupplier monoSec,
+      LongSupplier wallSec) {
     List<LoopContext> list = new ArrayList<>();
     Map<EventExecutor, LoopContext> map = new IdentityHashMap<>();
     for (EventExecutor e : group) {
-      LoopContext ctx = new LoopContext(list.size(), (EventLoop) e, wheelSlots, epochSec);
+      LoopContext ctx = new LoopContext(list.size(), (EventLoop) e, wheelSlots, monoSec, wallSec);
       list.add(ctx);
       map.put(e, ctx);
     }

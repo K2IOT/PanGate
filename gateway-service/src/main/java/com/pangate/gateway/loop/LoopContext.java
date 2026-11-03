@@ -15,17 +15,29 @@ public final class LoopContext {
 
   private final int index;
   private final EventLoop loop;
-  private final LongSupplier epochSec;
+  private final LongSupplier monoSec;
+  private final LongSupplier wallSec;
   private final DeadlineWheel wheel;
   private final Long2ObjectOpenHashMap<Session> sessions = new Long2ObjectOpenHashMap<>();
   private long counter;
   private volatile int activeCount;
 
+  /** Same clock for deadlines and wall time (tests). */
   public LoopContext(int index, EventLoop loop, int wheelSlots, LongSupplier epochSec) {
+    this(index, loop, wheelSlots, epochSec, epochSec);
+  }
+
+  /**
+   * @param monoSec monotonic seconds: drive the wheel and every session deadline, so wall-clock steps (NTP, VM
+   *     resume) neither close all sessions nor freeze timeouts
+   * @param wallSec epoch seconds: token and ticket times only
+   */
+  public LoopContext(int index, EventLoop loop, int wheelSlots, LongSupplier monoSec, LongSupplier wallSec) {
     this.index = index;
     this.loop = loop;
-    this.epochSec = epochSec;
-    this.wheel = new DeadlineWheel(wheelSlots, epochSec.getAsLong());
+    this.monoSec = monoSec;
+    this.wallSec = wallSec;
+    this.wheel = new DeadlineWheel(wheelSlots, monoSec.getAsLong());
   }
 
   public int index() {
@@ -40,8 +52,14 @@ public final class LoopContext {
     return loop.inEventLoop();
   }
 
+  /** Monotonic seconds for deadlines. */
   public long nowSec() {
-    return epochSec.getAsLong();
+    return monoSec.getAsLong();
+  }
+
+  /** Epoch seconds for JWT and resume-ticket times. */
+  public long wallSec() {
+    return wallSec.getAsLong();
   }
 
   /** {@code (index << 40) | counter}: the loop index is recoverable from the key. */

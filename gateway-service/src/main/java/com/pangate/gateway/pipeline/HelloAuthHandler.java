@@ -100,7 +100,7 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
       throw new ProtocolException(CloseCode.BAD_FRAME, "malformed HELLO");
     }
     Session session = ctx.channel().attr(Session.KEY).get();
-    long now = session.loop().nowSec();
+    long now = session.loop().wallSec();
     switch (hello.getCredentialCase()) {
       case RESUME_TICKET -> withTicket(ctx, session, hello, now);
       case JWT -> {

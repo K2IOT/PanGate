@@ -39,8 +39,8 @@ public final class SessionHandler extends ChannelInboundHandlerAdapter {
       return;
     }
     Session session = ctx.channel().attr(Session.KEY).get();
-    long now = session.loop().nowSec();
-    session.touch(now);
+    session.touch(session.loop().nowSec());
+    long now = session.loop().wallSec();
     switch (frame.getType()) {
       case FRAME_TYPE_PING -> ctx.writeAndFlush(Frames.pong(frame.getMsgId()));
       case FRAME_TYPE_HELLO -> throw new ProtocolException(CloseCode.BAD_FRAME, "duplicate HELLO");

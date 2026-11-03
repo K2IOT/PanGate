@@ -71,7 +71,8 @@ public class GatewayConfig {
 
   @Bean
   LoopRegistry loopRegistry(IoGroups io) {
-    return LoopRegistry.create(io.group(), WHEEL_SLOTS, () -> System.currentTimeMillis() / 1000);
+    return LoopRegistry.create(io.group(), WHEEL_SLOTS, () -> System.nanoTime() / 1_000_000_000L,
+        () -> System.currentTimeMillis() / 1000);
   }
 
   @Bean

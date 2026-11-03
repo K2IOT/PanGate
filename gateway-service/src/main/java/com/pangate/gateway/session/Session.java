@@ -38,6 +38,7 @@ public final class Session extends WheelNode implements Deadlined {
   private String origin;
   private long authAtSec;
   private long expAtSec;
+  private long expMonoSec = Long.MAX_VALUE;
   private long authJtiHash;
   private List<String> topicPatterns = List.of();
   private long lastSeenSec;
@@ -61,12 +62,13 @@ public final class Session extends WheelNode implements Deadlined {
     reschedule();
   }
 
+  /** {@code authAtSec}/{@code expAtSec} are epoch seconds; expiry is tracked on the monotonic clock. */
   public void activate(Identity id, String connId, long authAtSec, long expAtSec, long authJtiHash,
       List<String> topics) {
     this.identity = id;
     this.connId = connId;
     this.authAtSec = authAtSec;
-    this.expAtSec = expAtSec;
+    setExpiry(expAtSec);
     this.authJtiHash = authJtiHash;
     this.topicPatterns = List.copyOf(topics);
     this.lastSeenSec = loop.nowSec();
@@ -76,10 +78,15 @@ public final class Session extends WheelNode implements Deadlined {
 
   public void reauth(long authAtSec, long expAtSec, long jtiHash, List<String> topics) {
     this.authAtSec = authAtSec;
-    this.expAtSec = expAtSec;
+    setExpiry(expAtSec);
     this.authJtiHash = jtiHash;
     this.topicPatterns = List.copyOf(topics);
     reschedule();
+  }
+
+  private void setExpiry(long expAtWallSec) {
+    this.expAtSec = expAtWallSec;
+    this.expMonoSec = loop.nowSec() + (expAtWallSec - loop.wallSec());
   }
 
   /** Any inbound frame: a plain field write, the wheel catches up lazily. */
@@ -91,7 +98,7 @@ public final class Session extends WheelNode implements Deadlined {
     GatewayLimits l = limits.current();
     return switch (state) {
       case HANDSHAKING -> Math.min(acceptedAtSec + l.handshakeTimeout().toSeconds(), helloDeadlineSec);
-      case ACTIVE -> Math.min(lastSeenSec + l.idleTimeoutSec(), expAtSec);
+      case ACTIVE -> Math.min(lastSeenSec + l.idleTimeoutSec(), expMonoSec);
       case CLOSED -> Long.MAX_VALUE;
     };
   }
@@ -104,7 +111,7 @@ public final class Session extends WheelNode implements Deadlined {
     if (nowSec >= nextDeadlineSec()) {
       if (state == SessionState.HANDSHAKING) {
         close(CloseCode.HELLO_TIMEOUT, "HELLO_TIMEOUT");
-      } else if (nowSec >= expAtSec) {
+      } else if (nowSec >= expMonoSec) {
         close(CloseCode.SESSION_EXPIRED, "SESSION_EXPIRED");
       } else {
         close(CloseCode.GOING_AWAY, "HEARTBEAT_TIMEOUT");
