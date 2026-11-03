@@ -24,7 +24,8 @@ public final class WsChannelInitializer extends ChannelInitializer<SocketChannel
     this.wsConfig = WebSocketServerProtocolConfig.newBuilder()
         .websocketPath(deps.props().listeners().ws().path())
         .subprotocols(UpgradeGuard.SUBPROTOCOL)
-        .checkStartsWith(false)
+        // UpgradeGuard already enforces the exact path (query ignored); let Netty accept "/v1/ws?query".
+        .checkStartsWith(true)
         .handleCloseFrames(false)
         .handshakeTimeoutMillis(10_000)
         .decoderConfig(WebSocketDecoderConfig.newBuilder()

@@ -150,6 +150,14 @@ class GatewayLocalIT {
   }
 
   @Test
+  void queryStringInUpgradeUrlIsAccepted() {
+    URI withQuery = URI.create("wss://localhost:" + ports.ws() + "/v1/ws?sdk=js&v=1");
+    try (GatewayClient c = GatewayClient.connect(withQuery, tls(), T)) {
+      assertThat(c.hello(Hellos.jwt(token(principal(), "d1"), "d1"), T).getConnId()).hasSize(26);
+    }
+  }
+
+  @Test
   void ticketReconnectKeepsExpiry() {
     Connected first;
     try (GatewayClient c = GatewayClient.connect(wss(ports), tls(), T)) {

@@ -101,6 +101,19 @@ class HelloAuthHandlerTest {
   }
 
   @Test
+  void nonFrameMessageIsReleasedAndClosesBadFrame() {
+    io.netty.handler.codec.http.FullHttpRequest req = new io.netty.handler.codec.http.DefaultFullHttpRequest(
+        io.netty.handler.codec.http.HttpVersion.HTTP_1_1, io.netty.handler.codec.http.HttpMethod.GET, "/x",
+        Unpooled.buffer(16).writeZero(16));
+
+    f.channel.pipeline().fireChannelRead(req);
+    f.channel.runPendingTasks();
+
+    assertThat(req.refCnt()).isZero();
+    assertThat(f.channel.isOpen()).isFalse();
+  }
+
+  @Test
   void helloWithJwtSendsConnected() throws Exception {
     Connected c = send(jwtHello(auth.jwt("t1:u1", "d1", f.now()), "d1"));
 

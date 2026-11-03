@@ -89,6 +89,8 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
       return;
     }
     if (!(msg instanceof Frame frame) || frame.getType() != FrameType.FRAME_TYPE_HELLO) {
+      // Anything that is not a Frame (e.g. an HTTP request that slipped past the upgrade) may hold pooled memory.
+      io.netty.util.ReferenceCountUtil.release(msg);
       metrics.handshake("bad_frame");
       throw new ProtocolException(CloseCode.BAD_FRAME, "expected HELLO");
     }
