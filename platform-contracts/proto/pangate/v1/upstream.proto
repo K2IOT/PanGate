@@ -1,0 +1,20 @@
+// Client UPSTREAM frames as published by the gateway to <prefix>.gw.upstream.<type>, key = principal_id (spec §5.5).
+syntax = "proto3";
+
+package pangate.v1;
+
+option java_package = "com.pangate.contracts.v1";
+option java_multiple_files = true;
+
+message UpstreamRecord {
+  string msg_id = 1;
+  string tenant_id = 2;
+  string principal_id = 3;
+  string device_id = 4;
+  string conn_id = 5;
+  string node_id = 6;
+  string cell_id = 7;
+  int64 received_at_ms = 8;
+  map<string, string> headers = 9;  // frame headers except "type"
+  bytes payload = 10;
+}

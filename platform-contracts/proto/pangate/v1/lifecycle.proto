@@ -1,0 +1,30 @@
+// Connection lifecycle events published by the gateway to <prefix>.gw.lifecycle, key = principal_id (spec §3.2).
+syntax = "proto3";
+
+package pangate.v1;
+
+option java_package = "com.pangate.contracts.v1";
+option java_multiple_files = true;
+
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_CONNECTED = 1;
+  EVENT_TYPE_DISCONNECTED = 2;
+  EVENT_TYPE_HEARTBEAT_TIMEOUT = 3;
+  EVENT_TYPE_KICKED = 4;
+}
+
+message ConnectionEvent {
+  EventType type = 1;
+  string conn_id = 2;
+  string tenant_id = 3;
+  string principal_id = 4;
+  string device_id = 5;
+  string node_id = 6;
+  uint64 epoch = 7;
+  string cell_id = 8;
+  string platform = 9;
+  string sdk_version = 10;
+  uint32 close_code = 11;  // DISCONNECTED / HEARTBEAT_TIMEOUT / KICKED
+  int64 at_ms = 12;
+}

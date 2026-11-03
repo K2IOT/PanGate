@@ -1,0 +1,80 @@
+// Control plane events on the compacted topic gw.control (spec §6.8). The gateway replays the whole topic at boot.
+//
+// Record key contract (compaction key; a record with an empty value is a tombstone that removes the state):
+//   revoke:p:<principal>            Revoke{principal_id}
+//   revoke:d:<principal>/<device>   Revoke{device}
+//   revoke:j:<jti>                  Revoke{jti}
+//   cellmap:<tenant>                CellMap
+//   tenantcfg:fleet                 TenantCfg{scope=FLEET}
+//   tenantcfg:cell:<cell>           TenantCfg{scope=CELL}
+//   tenantcfg:tenant:<tenant>       TenantCfg{scope=TENANT}
+syntax = "proto3";
+
+package pangate.v1;
+
+option java_package = "com.pangate.contracts.v1";
+option java_multiple_files = true;
+
+message ControlEvent {
+  oneof event {
+    Revoke revoke = 1;
+    CellMap cell_map = 2;
+    TenantCfg tenant_cfg = 3;
+  }
+  int64 issued_at_ms = 4;
+}
+
+message Revoke {
+  oneof target {
+    string principal_id = 1;
+    DeviceRef device = 2;  // a device id is only unique within its principal
+    string jti = 3;
+  }
+  int64 expires_at_ms = 4;
+}
+
+message DeviceRef {
+  string principal_id = 1;
+  string device_id = 2;
+}
+
+message CellMap {
+  string tenant_id = 1;
+  string cell = 2;
+}
+
+enum Scope {
+  SCOPE_UNSPECIFIED = 0;
+  SCOPE_FLEET = 1;
+  SCOPE_CELL = 2;
+  SCOPE_TENANT = 3;
+}
+
+// Effective policy = defaults <- fleet <- cell <- tenant; only fields that are present override.
+message TenantCfg {
+  Scope scope = 1;
+  string scope_id = 2;  // cell id or tenant id; empty for FLEET
+  TenantLimits limits = 3;
+  KillSwitches switches = 4;
+}
+
+message TenantLimits {
+  optional uint32 max_conns = 1;
+  optional uint32 inbound_rate = 2;
+  optional uint32 inbound_burst = 3;
+  optional uint32 topics_per_conn = 4;
+  optional string min_sdk_version = 5;
+  repeated string origin_allowlist = 6;  // empty = does not override (an empty effective list allows every origin)
+  optional bool single_session = 7;
+}
+
+message KillSwitches {
+  optional uint32 heartbeat_interval_sec = 1;
+  optional uint32 admission_rate_per_node = 2;
+  optional bool broadcast_enabled = 3;
+  optional bool delivery_downgrade_reliable = 4;
+  optional bool upstream_telemetry_enabled = 5;
+  optional bool tenant_blocked = 6;
+  optional bool sse_fallback_enabled = 7;
+  optional bool recycle_enabled = 8;
+}
