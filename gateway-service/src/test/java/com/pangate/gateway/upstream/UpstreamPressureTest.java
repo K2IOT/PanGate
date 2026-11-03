@@ -103,4 +103,19 @@ class UpstreamPressureTest {
     s.addUpstreamBytes(7, f.now() + 11);
     assertThat(s.upstreamBytes10s(f.now() + 11)).isEqualTo(7);
   }
+  @Test
+  void pausedSessionsAreNotClosedForMissedHeartbeats() {
+    sample(0.95);
+    Session paused = sessions.get(199);
+    long start = f.now();
+
+    f.advanceTo(start + 200);
+    assertThat(paused.state()).isEqualTo(com.pangate.gateway.session.SessionState.ACTIVE);
+
+    sample(0.4);
+    f.advanceTo(start + 289);
+    assertThat(paused.state()).isEqualTo(com.pangate.gateway.session.SessionState.ACTIVE);
+    f.advanceTo(start + 291);
+    assertThat(paused.closeReason()).isEqualTo("HEARTBEAT_TIMEOUT");
+  }
 }

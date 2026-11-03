@@ -144,4 +144,21 @@ class NodeIdentityIT {
     assertThat(fx.sync.get("node:{n1}")).isNull();
     assertThat(fx.sync.zscore("nodes:live", "n1")).isNull();
   }
+  @Test
+  void staleProcessThatLostItsLeaseFencesInsteadOfStealingFromNewerIncarnation() throws Exception {
+    NodeState nodeA = new NodeState();
+    NodeIdentity a = identity(nodeA);
+    a.start();
+    NodeState nodeB = new NodeState();
+    NodeIdentity b = identity(nodeB);
+    b.start();
+    mono.addAndGet(16_000);  // A was stalled (GC/VM pause) for longer than the lease TTL
+
+    a.renew().toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+    assertThat(exits).singleElement().asString().startsWith("2:").contains("fenced");
+    assertThat(nodeA.draining()).isTrue();
+    assertThat(fx.sync.get("node:{n1}")).isEqualTo("2");
+    assertThat(fx.sync.get("node:epoch:{n1}")).isEqualTo("2");
+  }
 }

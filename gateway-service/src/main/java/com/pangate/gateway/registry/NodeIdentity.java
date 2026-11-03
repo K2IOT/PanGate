@@ -143,8 +143,23 @@ public final class NodeIdentity implements SmartLifecycle {
     });
   }
 
-  /** After a lost lease: a new incarnation number, then the lease, then listeners (resync). */
+  /**
+   * After a lost lease: a new incarnation number, then the lease, then listeners (resync). If a newer incarnation
+   * took the lease meanwhile (this process was stalled past the TTL), this one fences instead (spec §6.1).
+   */
   public CompletionStage<Long> reEpoch() {
+    long own = epoch;
+    return redis.registry().get(RegistryKeys.node(nodeId)).thenCompose(holder -> {
+      long current = holder == null ? 0 : Long.parseLong(holder);
+      if (current > own) {
+        fence(own);
+        return CompletableFuture.completedFuture(own);
+      }
+      return takeNewEpoch();
+    });
+  }
+
+  private CompletionStage<Long> takeNewEpoch() {
     return redis.registry().incr(RegistryKeys.epoch(nodeId)).thenCompose(e -> lease(e).thenCompose(r -> {
       if (r == -1L) {
         fence(e);

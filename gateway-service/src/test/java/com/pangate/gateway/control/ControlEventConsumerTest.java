@@ -121,4 +121,16 @@ class ControlEventConsumerTest {
     assertThat(exits.get(0)).startsWith("1:").contains("not caught up");
     assertThat(node.controlCaughtUp()).isFalse();
   }
+  @Test
+  void consumerThatCannotBeCreatedExitsInsteadOfStayingUnready() {
+    consumer = new ControlEventConsumer(() -> {
+      throw new org.apache.kafka.common.KafkaException("bad config");
+    }, TOPIC, node, List.of(recorder), new GatewayMetrics(registry), (status, reason) -> exits.add(status + ":"
+        + reason), Duration.ofMinutes(5), mono::get);
+
+    consumer.start();
+
+    await().atMost(Duration.ofSeconds(5)).until(() -> !exits.isEmpty());
+    assertThat(exits.get(0)).startsWith("1:").contains("bad config");
+  }
 }

@@ -70,7 +70,7 @@ public final class KafkaClients implements AutoCloseable {
     }
   }
 
-  private Map<String, Object> producerProps(String name, String acks, boolean idempotent, long buffer) {
+  Map<String, Object> producerProps(String name, String acks, boolean idempotent, long buffer) {
     Map<String, Object> p = new HashMap<>();
     p.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, cfg.bootstrap());
     p.put(ProducerConfig.CLIENT_ID_CONFIG, "gw-" + nodeId + "-" + name);
@@ -83,6 +83,9 @@ public final class KafkaClients implements AutoCloseable {
     p.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 0);
     p.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 5_000);
     p.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 10_000);
+    // The topic set is small and fixed; with max.block.ms=0 a topic evicted after the default 5 min idle would fail
+    // its next send at once. One year, not Long.MAX_VALUE: Kafka adds it to the last access time.
+    p.put(ProducerConfig.METADATA_MAX_IDLE_CONFIG, java.time.Duration.ofDays(365).toMillis());
     p.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
     p.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
     return p;

@@ -79,7 +79,15 @@ public final class ControlEventConsumer {
   }
 
   private void run() {
-    Consumer<String, byte[]> c = factory.get();
+    Consumer<String, byte[]> c;
+    try {
+      c = factory.get();
+    } catch (RuntimeException e) {
+      // Without a consumer the node would stay unready forever: exit like a missed catch-up (spec §10).
+      log.error("cannot create the gw.control consumer", e);
+      exit.exit(1, "gw.control consumer cannot be created: " + e.getMessage());
+      return;
+    }
     consumer = c;
     Map<TopicPartition, Long> target = null;
     int errorsInRow = 0;

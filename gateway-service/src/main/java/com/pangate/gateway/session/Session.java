@@ -131,7 +131,8 @@ public final class Session extends WheelNode implements Deadlined {
     GatewayLimits l = limits.current();
     return switch (state) {
       case HANDSHAKING -> Math.min(acceptedAtSec + l.handshakeTimeout().toSeconds(), helloDeadlineSec);
-      case ACTIVE -> Math.min(lastSeenSec + idleTimeoutSec(), expMonoSec);
+      // Reads paused for Kafka back-pressure: PINGs cannot arrive, so no heartbeat timeout meanwhile (spec §0.2).
+      case ACTIVE -> upstreamPaused ? expMonoSec : Math.min(lastSeenSec + idleTimeoutSec(), expMonoSec);
       case DRAINING -> Math.min(Math.min(lastSeenSec + idleTimeoutSec(), expMonoSec), drainDeadlineSec);
       case CLOSED -> Long.MAX_VALUE;
     };
@@ -289,9 +290,14 @@ public final class Session extends WheelNode implements Deadlined {
     return upstreamPaused;
   }
 
+  /** Resuming counts as a sign of life: the heartbeat clock restarts from now. */
   public void upstreamPaused(boolean paused) {
     checkLoop();
     upstreamPaused = paused;
+    if (!paused) {
+      lastSeenSec = loop.nowSec();
+    }
+    reschedule();
   }
 
   /** Consecutive seconds with an upstream rate violation (spec §5.5). */
