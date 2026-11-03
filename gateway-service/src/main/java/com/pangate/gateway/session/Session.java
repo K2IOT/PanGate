@@ -48,6 +48,7 @@ public final class Session extends WheelNode implements Deadlined {
   private String connId;
   private Identity identity;
   private String origin;
+  private long connectedAtMs;
   private long authAtSec;
   private long expAtSec;
   private long expMonoSec = Long.MAX_VALUE;
@@ -76,11 +77,12 @@ public final class Session extends WheelNode implements Deadlined {
   }
 
   /** {@code authAtSec}/{@code expAtSec} are epoch seconds; expiry is tracked on the monotonic clock. */
-  public void activate(Identity id, String connId, long authAtSec, long expAtSec, long authJtiHash,
-      List<String> topics) {
+  public void activate(Identity id, String connId, long connectedAtMs, long authAtSec, long expAtSec,
+      long authJtiHash, List<String> topics) {
     checkLoop();
     this.identity = id;
     this.connId = connId;
+    this.connectedAtMs = connectedAtMs;
     this.authAtSec = authAtSec;
     setExpiry(expAtSec);
     this.authJtiHash = authJtiHash;
@@ -194,6 +196,11 @@ public final class Session extends WheelNode implements Deadlined {
 
   public Identity identity() {
     return identity;
+  }
+
+  /** Wall-clock time of activation (epoch ms); written to the registry and compared by KICK. */
+  public long connectedAtMs() {
+    return connectedAtMs;
   }
 
   public long authAtSec() {

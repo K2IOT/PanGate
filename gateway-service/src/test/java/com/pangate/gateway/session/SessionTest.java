@@ -56,7 +56,7 @@ class SessionTest {
   @Test
   void idleActiveSessionClosesAfter90s() {
     Session s = admit();
-    s.activate(id(), "CONN", f.now(), f.now() + 86_400, 0, List.of());
+    s.activate(id(), "CONN", 0L, f.now(), f.now() + 86_400, 0, List.of());
 
     f.advanceTo(f.now() + 89);
     assertThat(f.channel.isOpen()).isTrue();
@@ -70,7 +70,7 @@ class SessionTest {
   @Test
   void touchPostponesIdleTimeout() {
     Session s = admit();
-    s.activate(id(), "CONN", f.now(), f.now() + 86_400, 0, List.of());
+    s.activate(id(), "CONN", 0L, f.now(), f.now() + 86_400, 0, List.of());
     long start = f.now();
 
     f.advanceTo(start + 60);
@@ -85,7 +85,7 @@ class SessionTest {
   @Test
   void expiryClosesWith4002() {
     Session s = admit();
-    s.activate(id(), "CONN", f.now(), f.now() + 50, 0, List.of());
+    s.activate(id(), "CONN", 0L, f.now(), f.now() + 50, 0, List.of());
     long start = f.now();
 
     for (long t = start + 10; t <= start + 50; t += 10) {
@@ -99,7 +99,7 @@ class SessionTest {
   @Test
   void wallClockJumpDoesNotCloseOrFreezeSessions() {
     Session s = admit();
-    s.activate(id(), "CONN", f.wallNow(), f.wallNow() + 86_400, 0, List.of());
+    s.activate(id(), "CONN", 0L, f.wallNow(), f.wallNow() + 86_400, 0, List.of());
     long start = f.now();
 
     f.wallOffset.set(7_200);
@@ -145,7 +145,7 @@ class SessionTest {
   @Test
   void activationRegistersPrincipalAndCloseCleansUp() {
     Session s = admit();
-    s.activate(id(), "CONN", f.now(), f.now() + 86_400, 0, List.of());
+    s.activate(id(), "CONN", 0L, f.now(), f.now() + 86_400, 0, List.of());
     f.tracker.onActivated(s);
     assertThat(f.principals.get("t1:u1")).containsExactly(new ConnRef(0, s.sessionKey()));
 

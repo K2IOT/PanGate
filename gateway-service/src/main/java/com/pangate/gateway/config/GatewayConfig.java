@@ -24,6 +24,7 @@ import com.pangate.gateway.server.NettyGatewayServer;
 import com.pangate.gateway.server.NodeState;
 import com.pangate.gateway.server.TickScheduler;
 import com.pangate.gateway.session.PrincipalIndex;
+import com.pangate.gateway.session.SessionListener;
 import com.pangate.gateway.session.SessionTracker;
 import com.pangate.gateway.shed.AdmissionController;
 import com.pangate.gateway.shed.IpConnectionCounter;
@@ -99,8 +100,8 @@ public class GatewayConfig {
 
   @Bean
   SessionTracker sessionTracker(LoopRegistry loops, PrincipalIndex principals, IpConnectionCounter ips,
-      LimitsHolder limits, GatewayMetrics metrics) {
-    return new SessionTracker(loops, principals, ips, limits, metrics, System::currentTimeMillis);
+      LimitsHolder limits, GatewayMetrics metrics, List<SessionListener> listeners) {
+    return new SessionTracker(loops, principals, ips, limits, metrics, System::currentTimeMillis, listeners);
   }
 
   @Bean

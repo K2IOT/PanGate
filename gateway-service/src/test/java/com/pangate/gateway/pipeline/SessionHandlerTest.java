@@ -35,7 +35,7 @@ class SessionHandlerTest {
     f.channel.attr(ChannelAttrs.PROTOCOL_READY).set(true);
     f.channel.attr(ChannelAttrs.AUTHENTICATED).set(true);
     session = f.tracker.admit(f.channel, f.loop, InetAddress.getLoopbackAddress());
-    session.activate(new Session.Identity("t1", "t1:u1", "d1", "ios", "1.0", Set.of()), "CONN",
+    session.activate(new Session.Identity("t1", "t1:u1", "d1", "ios", "1.0", Set.of()), "CONN", 0L,
         f.now() - 100, f.now() + 3_600, 7, List.of("t1:news.*"));
     f.channel.pipeline().addLast(new SessionHandler(auth.tickets, auth.flow, limiter, f.limits, "cell-1"), new ErrorTerminator());
   }
@@ -124,7 +124,7 @@ class SessionHandlerTest {
     g.channel.attr(ChannelAttrs.TRANSPORT).set(ChannelAttrs.TransportKind.TCP);
     g.channel.attr(ChannelAttrs.PROTOCOL_READY).set(true);
     Session s = g.tracker.admit(g.channel, g.loop, InetAddress.getLoopbackAddress());
-    s.activate(new Session.Identity("t0", "t1:u1", "d1", "ios", "1.0", Set.of()), "CONN", g.now(), g.now() + 3_600,
+    s.activate(new Session.Identity("t0", "t1:u1", "d1", "ios", "1.0", Set.of()), "CONN", 0L, g.now(), g.now() + 3_600,
         0, List.of());
     g.channel.pipeline().addLast(new SessionHandler(a.tickets, a.flow,
         new com.pangate.gateway.auth.PrincipalHandshakeLimiter(20, () -> g.now() * 1000), g.limits, "cell-1"),

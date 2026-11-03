@@ -14,6 +14,8 @@ import com.pangate.gateway.lifecycle.TopicNames;
 import com.pangate.gateway.metrics.GatewayMetrics;
 import com.pangate.gateway.mgmt.ReadinessCheck;
 import com.pangate.gateway.registry.NodeIdentity;
+import com.pangate.gateway.registry.RegistryWriter;
+import com.pangate.gateway.registry.RetryQueue;
 import com.pangate.gateway.server.NodeState;
 import com.pangate.gateway.server.TickScheduler;
 import java.time.Duration;
@@ -105,5 +107,16 @@ public class ClusterConfig {
   @Bean
   ReadinessCheck controlCaughtUpCheck(NodeState node) {
     return () -> node.controlCaughtUp() ? Optional.empty() : Optional.of("gw.control not caught up");
+  }
+
+  @Bean
+  RetryQueue registryRetryQueue(TickScheduler tick, GatewayMetrics metrics) {
+    return new RetryQueue((r, d) -> tick.executor().schedule(r, d, java.util.concurrent.TimeUnit.MILLISECONDS),
+        10_000, metrics);
+  }
+
+  @Bean
+  RegistryWriter registryWriter(RedisConnections redis, NodeState node, RetryQueue retry, GatewayMetrics metrics) {
+    return new RegistryWriter(redis, node, retry, metrics);
   }
 }

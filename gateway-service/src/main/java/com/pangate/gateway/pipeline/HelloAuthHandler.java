@@ -181,7 +181,8 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
     done = true;
     String connId = tracker.newConnId(session);
     session.activate(new Session.Identity(t.tenant(), t.principal(), t.device(), hello.getPlatform(),
-        hello.getSdkVersion(), java.util.Set.copyOf(hello.getCapabilitiesList())), connId, t.authAtSec(), t.expSec(),
+        hello.getSdkVersion(), java.util.Set.copyOf(hello.getCapabilitiesList())), connId, System.currentTimeMillis(),
+        t.authAtSec(), t.expSec(),
         t.authJtiHash(), t.topicPatterns());
     ctx.channel().attr(ChannelAttrs.AUTHENTICATED).set(true);
     tracker.onActivated(session);
