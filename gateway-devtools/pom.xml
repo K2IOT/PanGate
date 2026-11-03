@@ -80,6 +80,20 @@
           </execution>
         </executions>
       </plugin>
+      <plugin>
+        <groupId>com.google.cloud.tools</groupId>
+        <artifactId>jib-maven-plugin</artifactId>
+        <configuration>
+          <to>
+            <image>pangate/gateway-devtools:dev</image>
+          </to>
+          <container>
+            <mainClass>${devtools.main}</mainClass>
+            <ports><port>8090</port><port>9443</port></ports>
+            <creationTime>USE_CURRENT_TIMESTAMP</creationTime>
+          </container>
+        </configuration>
+      </plugin>
     </plugins>
   </build>
 </project>

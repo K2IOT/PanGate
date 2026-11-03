@@ -195,6 +195,20 @@
           </execution>
         </executions>
       </plugin>
+      <plugin>
+        <groupId>com.google.cloud.tools</groupId>
+        <artifactId>jib-maven-plugin</artifactId>
+        <configuration>
+          <to>
+            <image>pangate/gateway-service:dev</image>
+          </to>
+          <container>
+            <mainClass>${start-class}</mainClass>
+            <ports><port>8443</port><port>8883</port><port>8081</port></ports>
+            <creationTime>USE_CURRENT_TIMESTAMP</creationTime>
+          </container>
+        </configuration>
+      </plugin>
     </plugins>
   </build>
 </project>

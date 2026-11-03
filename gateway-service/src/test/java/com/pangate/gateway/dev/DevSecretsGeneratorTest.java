@@ -54,6 +54,22 @@ class DevSecretsGeneratorTest {
   }
 
   @Test
+  void privateKeysOwnerOnlyPublicFilesReadable(@TempDir Path d) throws Exception {
+    DevSecretsGenerator.ensure(d);
+
+    for (String f : List.of("ca.key", "gateway.key", "es256.pem", "ticket-keys/current", "principal-hash.key")) {
+      assertThat(java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(d.resolve(f))))
+          .as(f).isEqualTo("rw-------");
+    }
+    for (String f : List.of("ca.crt", "gateway.crt", "jwks.json")) {
+      assertThat(java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(d.resolve(f))))
+          .as(f).isEqualTo("rw-r--r--");
+    }
+    assertThat(java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(d)))
+        .isEqualTo("rwxr-xr-x");
+  }
+
+  @Test
   void secondRunKeepsExistingFiles(@TempDir Path d) throws Exception {
     DevSecretsGenerator.ensure(d);
     Map<String, byte[]> before = snapshot(d);

@@ -1,0 +1,56 @@
+# PanGate dev environment (spec §2.4, §9.1). One file, compose profiles:
+#   (default)  infrastructure (Kafka, Redis) — arrives with M2; `make infra-up` exposes it on localhost
+#   app        issuer + gateway, built with `make images`
+#   tools      devtools container for `make smoke`
+name: pangate
+
+x-healthcheck: &hc
+  interval: 5s
+  timeout: 4s
+  retries: 20
+  start_period: 10s
+
+services:
+  issuer:
+    profiles: ["app"]
+    image: pangate/gateway-devtools:dev
+    user: "0"
+    command: ["issuer", "--port", "8090", "--key", "/dev-secrets/es256.pem"]
+    volumes:
+      - dev-secrets:/dev-secrets
+    ports:
+      - "8090:8090"
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.devtools.Main", "health",
+             "http://127.0.0.1:8090/.well-known/jwks.json"]
+
+  gateway:
+    profiles: ["app"]
+    image: pangate/gateway-service:dev
+    user: "0"
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      JAVA_TOOL_OPTIONS: "-Xmx1g -XX:MaxDirectMemorySize=1g"
+    volumes:
+      - dev-secrets:/dev-secrets
+    ports:
+      - "8443:8443"
+      - "8883:8883"
+      - "8081:8081"
+    depends_on:
+      issuer:
+        condition: service_healthy
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.gateway.tools.HealthCheck",
+             "http://127.0.0.1:8081/ready"]
+
+  devtools:
+    profiles: ["tools"]
+    image: pangate/gateway-devtools:dev
+    volumes:
+      - dev-secrets:/dev-secrets:ro
+
+volumes:
+  dev-secrets:

@@ -1347,4 +1347,12 @@ git push -u origin claude/fervent-turing-vz339r
 
 ## Kết quả đo M1
 
-_(Điền ở Task 19 và Task 20: heap/session, lag p99 khi có 50k session, thời gian ready ở local và dev.)_
+| Chỉ số | Kết quả | Ngưỡng | Ghi chú |
+|---|---|---|---|
+| Ready ở local (`java -jar`, profile `local`) | 4 s | ≤ 30 s | Đạt |
+| Thoát sau SIGTERM | 1,6 s | ≤ 15 s | Đạt |
+| `make up` tới khi mọi container healthy | 12 s | ≤ 90 s | Đạt; `make smoke` → `SMOKE OK` |
+| Heap mỗi session idle (10k session, WSS + TLS) | **5.364 B** | < 3.072 B | **Chưa đạt**, chờ quyết định |
+
+Phân bổ heap mỗi session (class histogram, 10k session): 10 `DefaultChannelHandlerContext` 640 B; 17 `String` + `byte[]` khoảng 1 KB (connId, principal, device, tenant, platform, sdkVersion, origin, khóa index); `EpollSocketChannel` 152 B; `ReferenceCountedOpenSslEngine` + session 224 B; `SslHandler` + promise 208 B; `Session` 136 B; attribute 120 B; phần còn lại là map và config.
+

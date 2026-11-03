@@ -63,7 +63,7 @@ public final class DevSecretsGenerator {
   public static void ensure(Path dir) {
     try {
       Files.createDirectories(dir);
-      restrict(dir, "rwx------");
+      restrict(dir, "rwxr-xr-x");
       Files.createDirectories(dir.resolve("ticket-keys"));
       ensureCertificates(dir);
       ensureEs256(dir);
@@ -95,7 +95,7 @@ public final class DevSecretsGenerator {
           Date.from(now.plus(Duration.ofDays(3650))), name, ca.getPublic());
       b.addExtension(Extension.basicConstraints, true, new BasicConstraints(0));
       b.addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.keyCertSign | KeyUsage.cRLSign));
-      write(caCrt, pem(certificate(b, ca.getPrivate())));
+      writePublic(caCrt, pem(certificate(b, ca.getPrivate())));
       write(caKey, pkcs8(ca.getPrivate()));
       Files.deleteIfExists(dir.resolve("gateway.crt"));
     }
@@ -116,7 +116,7 @@ public final class DevSecretsGenerator {
           new GeneralName(GeneralName.iPAddress, InetAddress.getByName("::1").getHostAddress())}));
       b.addExtension(Extension.extendedKeyUsage, false, new ExtendedKeyUsage(KeyPurposeId.id_kp_serverAuth));
       b.addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.digitalSignature));
-      write(gwCrt, pem(certificate(b, caPrivate)));
+      writePublic(gwCrt, pem(certificate(b, caPrivate)));
       write(gwKey, pkcs8(gw.getPrivate()));
     }
   }
@@ -136,7 +136,7 @@ public final class DevSecretsGenerator {
       ECKey key = JWK.parseFromPEMEncodedObjects(Files.readString(pem, StandardCharsets.US_ASCII)).toECKey();
       ECKey pub = new ECKey.Builder(key.toPublicJWK()).keyID(key.computeThumbprint().toString())
           .keyUse(KeyUse.SIGNATURE).algorithm(JWSAlgorithm.ES256).build();
-      write(jwks, new JWKSet(pub).toString(true));
+      writePublic(jwks, new JWKSet(pub).toString(true));
     }
   }
 
@@ -185,10 +185,20 @@ public final class DevSecretsGenerator {
     return b;
   }
 
+  /** Private key material: owner read/write only. */
   private static void write(Path target, String content) throws IOException {
+    write(target, content, "rw-------");
+  }
+
+  /** Certificates and the public JWKS: readable by other users (e.g. a non-root client container). */
+  private static void writePublic(Path target, String content) throws IOException {
+    write(target, content, "rw-r--r--");
+  }
+
+  private static void write(Path target, String content, String perms) throws IOException {
     Path tmp = Files.createTempFile(target.getParent(), ".tmp-", ".part");
     Files.writeString(tmp, content, StandardCharsets.US_ASCII);
-    restrict(tmp, "rw-------");
+    restrict(tmp, perms);
     Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
   }
 
