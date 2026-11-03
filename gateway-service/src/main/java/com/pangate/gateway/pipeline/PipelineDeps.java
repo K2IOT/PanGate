@@ -8,6 +8,7 @@ import com.pangate.gateway.config.LimitsHolder;
 import com.pangate.gateway.loop.LoopRegistry;
 import com.pangate.gateway.metrics.GatewayMetrics;
 import com.pangate.gateway.registry.SeqReader;
+import com.pangate.gateway.upstream.UpstreamPublisher;
 import com.pangate.gateway.server.NodeState;
 import com.pangate.gateway.session.SessionTracker;
 
@@ -24,7 +25,8 @@ public record PipelineDeps(
     SessionTracker tracker,
     PrincipalHandshakeLimiter handshakeLimiter,
     GatewayMetrics metrics,
-    SeqReader seq) {
+    SeqReader seq,
+    UpstreamPublisher upstream) {
 
   static final ErrorTerminator ERROR_TERMINATOR = new ErrorTerminator();
 
@@ -33,6 +35,6 @@ public record PipelineDeps(
   }
 
   SessionHandler sessionHandler() {
-    return new SessionHandler(tickets, jwt, handshakeLimiter, limits, props.cell());
+    return new SessionHandler(tickets, jwt, handshakeLimiter, limits, props.cell(), upstream);
   }
 }

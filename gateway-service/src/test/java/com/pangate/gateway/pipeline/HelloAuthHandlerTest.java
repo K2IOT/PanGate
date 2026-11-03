@@ -61,7 +61,7 @@ class HelloAuthHandlerTest {
     session = f.tracker.admit(f.channel, f.loop, InetAddress.getLoopbackAddress());
     f.channel.pipeline().addLast(new FrameCodec(f.limits),
         new HelloAuthHandler(auth.tickets, auth.flow, f.tracker, limiter, f.limits, "cell-1", f.metrics, seq),
-        new SessionHandler(auth.tickets, auth.flow, limiter, f.limits, "cell-1"), new ErrorTerminator());
+        new SessionHandler(auth.tickets, auth.flow, limiter, f.limits, "cell-1", f.upstream), new ErrorTerminator());
   }
 
   private static ByteBuf bytes(Frame frame) {

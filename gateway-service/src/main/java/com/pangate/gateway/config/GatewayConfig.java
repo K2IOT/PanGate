@@ -20,6 +20,7 @@ import com.pangate.gateway.pipeline.SslContextProvider;
 import com.pangate.gateway.pipeline.TcpChannelInitializer;
 import com.pangate.gateway.pipeline.WsChannelInitializer;
 import com.pangate.gateway.registry.SeqReader;
+import com.pangate.gateway.upstream.UpstreamPublisher;
 import com.pangate.gateway.server.IoGroups;
 import com.pangate.gateway.server.NettyGatewayServer;
 import com.pangate.gateway.server.NodeState;
@@ -142,9 +143,10 @@ public class GatewayConfig {
   PipelineDeps pipelineDeps(GatewayProperties p, LimitsHolder limits, LoopRegistry loops, NodeState node,
       IpConnectionCounter ips, AdmissionController admission, SessionTracker tracker, GatewayMetrics metrics,
       SslContextProvider tls, ResumeTicketService tickets, JwtAuthFlow jwt, PrincipalHandshakeLimiter limiter,
-      SeqReader seq) {
+      SeqReader seq, UpstreamPublisher upstream) {
     AcceptGate gate = new AcceptGate(node, loops, limits, ips, admission, tracker, metrics);
-    return new PipelineDeps(p, limits, loops, node, gate, tls, tickets, jwt, tracker, limiter, metrics, seq);
+    return new PipelineDeps(p, limits, loops, node, gate, tls, tickets, jwt, tracker, limiter, metrics, seq,
+        upstream);
   }
 
   @Bean

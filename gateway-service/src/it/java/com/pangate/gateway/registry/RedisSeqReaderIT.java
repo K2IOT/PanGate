@@ -20,7 +20,8 @@ class RedisSeqReaderIT {
 
   @BeforeEach
   void setUp() {
-    fx = new RedisFixture();
+    // Command timeout far above 200 ms: a fast answer below proves the reader's own budget cut it short.
+    fx = new RedisFixture(Duration.ofSeconds(5));
     reader = new RedisSeqReader(fx.redis, tick, Duration.ofMillis(200));
   }
 
@@ -69,7 +70,7 @@ class RedisSeqReaderIT {
       OptionalLong r = read("t1:u1");
 
       assertThat(r).isEmpty();
-      assertThat(Duration.ofNanos(System.nanoTime() - t0)).isLessThan(Duration.ofMillis(500));
+      assertThat(Duration.ofNanos(System.nanoTime() - t0)).isLessThan(Duration.ofSeconds(1));
     } finally {
       RedisFixture.unpause();
     }

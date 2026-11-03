@@ -1,6 +1,14 @@
 package com.pangate.gateway.test;
 
 import com.pangate.gateway.config.LimitsHolder;
+import com.pangate.gateway.control.TenantLimitsStore;
+import com.pangate.gateway.lifecycle.TestKafka;
+import com.pangate.gateway.lifecycle.TopicNames;
+import com.pangate.gateway.server.NodeState;
+import com.pangate.gateway.upstream.UpstreamPublisher;
+import org.apache.kafka.clients.producer.MockProducer;
+import org.apache.kafka.common.serialization.ByteArraySerializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import com.pangate.gateway.loop.LoopContext;
 import com.pangate.gateway.loop.LoopRegistry;
 import com.pangate.gateway.metrics.GatewayMetrics;
@@ -32,6 +40,15 @@ public final class LoopFixture {
   /** Listeners the tracker notifies; tests add to it before admitting sessions. */
   public final List<SessionListener> listeners = new CopyOnWriteArrayList<>();
   public final SessionTracker tracker;
+  public final NodeState node = new NodeState();
+  public final TenantLimitsStore tenants = new TenantLimitsStore("cell-1", () -> limits.current());
+  public final TopicNames topics = new TopicNames("c1", List.of("telemetry", "cmd", "cmd_result", "read"));
+  /** Not auto-completing: tests call completeNext() / errorNext(). */
+  public final MockProducer<String, byte[]> reliable =
+      new MockProducer<>(false, new StringSerializer(), new ByteArraySerializer());
+  public final MockProducer<String, byte[]> telemetry =
+      new MockProducer<>(true, new StringSerializer(), new ByteArraySerializer());
+  public final UpstreamPublisher upstream;
 
   public LoopFixture() {
     channel = new EmbeddedChannel();
@@ -39,6 +56,10 @@ public final class LoopFixture {
     loops = LoopRegistry.fromContexts(List.of(loop));
     tracker = new SessionTracker(loops, principals, ips, limits, metrics, () -> clockSec.get() * 1000,
         listeners);
+    node.nodeId("n1");
+    node.epoch(7);
+    upstream = new UpstreamPublisher(TestKafka.of(reliable, telemetry), topics, node, "cell-1", tenants, metrics,
+        () -> clockSec.get() * 1000);
   }
 
   /** Moves the clock and runs the wheel as the per-second ticker would. */

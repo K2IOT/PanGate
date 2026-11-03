@@ -15,6 +15,11 @@ public final class Frames {
     return Frame.newBuilder().setType(FrameType.FRAME_TYPE_PONG).setMsgId(msgId).build();
   }
 
+  /** Kafka accepted the client's cmd / cmd_result (spec §5.5 step 6). */
+  public static Frame upstreamAck(String msgId) {
+    return Frame.newBuilder().setType(FrameType.FRAME_TYPE_UPSTREAM_ACK).setMsgId(msgId).build();
+  }
+
   public static Frame connected(Connected c) {
     return Frame.newBuilder().setType(FrameType.FRAME_TYPE_CONNECTED).setPayload(c.toByteString()).build();
   }

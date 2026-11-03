@@ -16,10 +16,13 @@ final class RedisFixture implements AutoCloseable {
   final RedisCommands<String, String> sync;
 
   RedisFixture() {
+    this(Duration.ofMillis(500));
+  }
+
+  RedisFixture(Duration commandTimeout) {
     InfraContainers.flushRedis();
     String uri = InfraContainers.redisUri();
-    redis = new RedisConnections(new GatewayProperties.Redis(RedisTopology.STANDALONE, uri, uri,
-        Duration.ofMillis(500)));
+    redis = new RedisConnections(new GatewayProperties.Redis(RedisTopology.STANDALONE, uri, uri, commandTimeout));
     redis.connect();
     client = RedisClient.create(uri);
     sync = client.connect().sync();

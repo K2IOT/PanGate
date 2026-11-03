@@ -15,10 +15,11 @@ import com.pangate.gateway.protocol.Frames;
 import com.pangate.gateway.protocol.ProtocolException;
 import com.pangate.gateway.session.Session;
 import com.pangate.gateway.session.SessionState;
+import com.pangate.gateway.upstream.UpstreamPublisher;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 
-/** Frames of an authenticated session (spec §5): PING, REAUTH; M2 features answer UNSUPPORTED for now. */
+/** Frames of an authenticated session (spec §5): PING, REAUTH, UPSTREAM, RPC_RES; SUBSCRIBE answers UNSUPPORTED until M2b. */
 @io.netty.channel.ChannelHandler.Sharable
 public final class SessionHandler extends ChannelInboundHandlerAdapter {
 
@@ -27,14 +28,16 @@ public final class SessionHandler extends ChannelInboundHandlerAdapter {
   private final PrincipalHandshakeLimiter limiter;
   private final LimitsHolder limits;
   private final String cell;
+  private final UpstreamPublisher upstream;
 
   public SessionHandler(ResumeTicketService tickets, JwtAuthFlow jwt, PrincipalHandshakeLimiter limiter,
-      LimitsHolder limits, String cell) {
+      LimitsHolder limits, String cell, UpstreamPublisher upstream) {
     this.tickets = tickets;
     this.jwt = jwt;
     this.limiter = limiter;
     this.limits = limits;
     this.cell = cell;
+    this.upstream = upstream;
   }
 
   @Override
@@ -51,6 +54,8 @@ public final class SessionHandler extends ChannelInboundHandlerAdapter {
       case FRAME_TYPE_HELLO -> throw new ProtocolException(CloseCode.BAD_FRAME, "duplicate HELLO");
       case FRAME_TYPE_REAUTH -> reauth(ctx, session, frame, now);
       case FRAME_TYPE_ACK -> { }
+      case FRAME_TYPE_UPSTREAM -> upstream.publish(ctx, session, frame, null);
+      case FRAME_TYPE_RPC_RES -> upstream.publish(ctx, session, frame, "cmd_result");
       default -> ctx.writeAndFlush(Frames.error(CloseCode.INTERNAL.code(), "UNSUPPORTED", false, false));
     }
   }

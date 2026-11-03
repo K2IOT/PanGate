@@ -17,6 +17,8 @@ import com.pangate.gateway.registry.NodeIdentity;
 import com.pangate.gateway.registry.RedisSeqReader;
 import com.pangate.gateway.registry.RegistryWriter;
 import com.pangate.gateway.registry.RetryQueue;
+import com.pangate.gateway.upstream.LifecyclePublisher;
+import com.pangate.gateway.upstream.UpstreamPublisher;
 import com.pangate.gateway.server.NodeState;
 import com.pangate.gateway.server.TickScheduler;
 import java.time.Duration;
@@ -129,5 +131,17 @@ public class ClusterConfig {
       seq.start();
     }, () -> { });
     return seq;
+  }
+
+  @Bean
+  LifecyclePublisher lifecyclePublisher(GatewayProperties p, KafkaClients kafka, TopicNames topics, NodeState node,
+      GatewayMetrics metrics) {
+    return new LifecyclePublisher(kafka, topics, node, p.cell(), metrics, System::currentTimeMillis);
+  }
+
+  @Bean
+  UpstreamPublisher upstreamPublisher(GatewayProperties p, KafkaClients kafka, TopicNames topics, NodeState node,
+      TenantLimitsStore tenants, GatewayMetrics metrics) {
+    return new UpstreamPublisher(kafka, topics, node, p.cell(), tenants, metrics, System::currentTimeMillis);
   }
 }

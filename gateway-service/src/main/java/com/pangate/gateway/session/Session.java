@@ -56,6 +56,11 @@ public final class Session extends WheelNode implements Deadlined {
   private List<String> topicPatterns = List.of();
   private long lastSeenSec;
   private CloseCode closeCode;
+  // Inbound rate limit state (SessionRateLimiter); tokens < 0 = not initialised yet.
+  float tokens = -1;
+  long lastRefillNanos;
+  int strikes;
+  long lastStrikeSec = Long.MIN_VALUE;
   private String closeReason;
 
   public Session(LoopContext loop, Channel channel, long sessionKey, long acceptedAtSec, LimitsHolder limits,
@@ -221,6 +226,11 @@ public final class Session extends WheelNode implements Deadlined {
 
   public long lastSeenSec() {
     return lastSeenSec;
+  }
+
+  /** Consecutive seconds with an upstream rate violation (spec §5.5). */
+  public int strikes() {
+    return strikes;
   }
 
   public CloseCode closeCode() {
