@@ -7,6 +7,7 @@ import com.pangate.gateway.config.GatewayProperties;
 import com.pangate.gateway.config.LimitsHolder;
 import com.pangate.gateway.loop.LoopRegistry;
 import com.pangate.gateway.metrics.GatewayMetrics;
+import com.pangate.gateway.registry.SeqReader;
 import com.pangate.gateway.server.NodeState;
 import com.pangate.gateway.session.SessionTracker;
 
@@ -22,12 +23,13 @@ public record PipelineDeps(
     JwtAuthFlow jwt,
     SessionTracker tracker,
     PrincipalHandshakeLimiter handshakeLimiter,
-    GatewayMetrics metrics) {
+    GatewayMetrics metrics,
+    SeqReader seq) {
 
   static final ErrorTerminator ERROR_TERMINATOR = new ErrorTerminator();
 
   HelloAuthHandler helloAuth() {
-    return new HelloAuthHandler(tickets, jwt, tracker, handshakeLimiter, limits, props.cell(), metrics);
+    return new HelloAuthHandler(tickets, jwt, tracker, handshakeLimiter, limits, props.cell(), metrics, seq);
   }
 
   SessionHandler sessionHandler() {

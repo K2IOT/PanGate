@@ -149,7 +149,8 @@ class GatewayLocalIT {
       Connected connected = c.hello(Hellos.jwt(token(principal(), "d1"), "d1"), T);
 
       assertThat(connected.getConnId()).hasSize(26);
-      assertThat(connected.getSeqUnknown()).isTrue();
+      assertThat(connected.getSeqUnknown()).isFalse();
+      assertThat(connected.getSeq()).isZero();
       assertThat(connected.getHeartbeatSec()).isEqualTo(30);
       assertThat(c.ping(T).getType()).isEqualTo(FrameType.FRAME_TYPE_PONG);
     }

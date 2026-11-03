@@ -186,7 +186,20 @@ class SessionHandlerTest {
     f.channel.runPendingTasks();
 
     assertThat(result.get()).isInstanceOf(JwtResult.Verified.class);
-    assertThat(autoReadDuringCallback.get()).isFalse();
+    // Reads resume before the callback, so a callback that must wait again (HELLO's seq read) can re-pause them.
+    assertThat(autoReadDuringCallback.get()).isTrue();
     assertThat(f.channel.config().isAutoRead()).isTrue();
+  }
+
+  @Test
+  void jwtAuthFlowCallbackMayPauseReadsAgain() throws Exception {
+    ECKey rotated = AuthFixture.newKey();
+    String jwt = auth.jwt(rotated, "t1:u1", "d1", f.now());
+    auth.published.add(rotated);
+
+    auth.flow.verify(f.channel, jwt, f.now(), r -> f.channel.config().setAutoRead(false));
+    f.channel.runPendingTasks();
+
+    assertThat(f.channel.config().isAutoRead()).isFalse();
   }
 }

@@ -14,6 +14,7 @@ import com.pangate.gateway.lifecycle.TopicNames;
 import com.pangate.gateway.metrics.GatewayMetrics;
 import com.pangate.gateway.mgmt.ReadinessCheck;
 import com.pangate.gateway.registry.NodeIdentity;
+import com.pangate.gateway.registry.RedisSeqReader;
 import com.pangate.gateway.registry.RegistryWriter;
 import com.pangate.gateway.registry.RetryQueue;
 import com.pangate.gateway.server.NodeState;
@@ -118,5 +119,15 @@ public class ClusterConfig {
   @Bean
   RegistryWriter registryWriter(RedisConnections redis, NodeState node, RetryQueue retry, GatewayMetrics metrics) {
     return new RegistryWriter(redis, node, retry, metrics);
+  }
+
+  @Bean
+  RedisSeqReader seqReader(RedisConnections redis, TickScheduler tick, InfraLifecycle infra) {
+    RedisSeqReader seq = new RedisSeqReader(redis, tick.executor(), Duration.ofMillis(200));
+    infra.onStarted(() -> {
+      seq.refreshEpochs();
+      seq.start();
+    }, () -> { });
+    return seq;
   }
 }

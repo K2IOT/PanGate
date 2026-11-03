@@ -18,6 +18,7 @@ import com.pangate.gateway.protocol.ChannelAttrs;
 import com.pangate.gateway.protocol.CloseCode;
 import com.pangate.gateway.protocol.Frames;
 import com.pangate.gateway.protocol.ProtocolException;
+import com.pangate.gateway.registry.SeqReader;
 import com.pangate.gateway.session.Session;
 import com.pangate.gateway.session.SessionState;
 import com.pangate.gateway.session.SessionTracker;
@@ -27,6 +28,8 @@ import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.ssl.SslHandshakeCompletionEvent;
 import java.util.ArrayDeque;
+import java.util.OptionalLong;
+import java.util.concurrent.CompletionStage;
 
 /**
  * Authenticates the first frame (spec §4.6): HELLO with a resume ticket (HMAC, offline) or a connect JWT (ES256,
@@ -44,13 +47,14 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
   private final LimitsHolder limits;
   private final String cell;
   private final GatewayMetrics metrics;
+  private final SeqReader seq;
   private final ArrayDeque<Object> held = new ArrayDeque<>();
   private boolean verifying;
   private boolean done;
   private boolean failed;
 
   public HelloAuthHandler(ResumeTicketService tickets, JwtAuthFlow jwt, SessionTracker tracker,
-      PrincipalHandshakeLimiter limiter, LimitsHolder limits, String cell, GatewayMetrics metrics) {
+      PrincipalHandshakeLimiter limiter, LimitsHolder limits, String cell, GatewayMetrics metrics, SeqReader seq) {
     this.tickets = tickets;
     this.jwt = jwt;
     this.tracker = tracker;
@@ -58,6 +62,7 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
     this.limits = limits;
     this.cell = cell;
     this.metrics = metrics;
+    this.seq = seq;
   }
 
   @Override
@@ -185,7 +190,25 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
         t.authAtSec(), t.expSec(),
         t.authJtiHash(), t.topicPatterns());
     ctx.channel().attr(ChannelAttrs.AUTHENTICATED).set(true);
-    tracker.onActivated(session);
+    tracker.onActivated(session);  // listeners: registry write and lifecycle CONNECTED, in parallel with the seq read
+    // CONNECTED waits for seq (≤ 200 ms); frames the client pipelines meanwhile stay held, reads pause.
+    ctx.channel().config().setAutoRead(false);
+    CompletionStage<OptionalLong> read;
+    try {
+      read = seq.read(t.principal());
+    } catch (RuntimeException e) {
+      read = java.util.concurrent.CompletableFuture.completedFuture(OptionalLong.empty());
+    }
+    read.whenComplete((v, e) -> session.loop().eventLoop().execute(() ->
+        connected(ctx, session, t, connId, ticket, e == null && v != null ? v : OptionalLong.empty())));
+  }
+
+  private void connected(ChannelHandlerContext ctx, Session session, ResumeTicket t, String connId, String ticket,
+      OptionalLong seqValue) {
+    if (session.state() != SessionState.ACTIVE) {
+      releaseHeld();
+      return;
+    }
     ctx.writeAndFlush(Frames.connected(Connected.newBuilder()
         .setConnId(connId)
         .setCell(cell)
@@ -193,22 +216,32 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
         .setResumeTicket(ticket)
         .setServerTimeMs(System.currentTimeMillis())
         .setSessionExpiresAtMs(t.expSec() * 1000)
-        .setSeq(0)
-        .setSeqEpoch(0)
-        .setSeqUnknown(true)
+        .setSeq(seqValue.orElse(0))
+        .setSeqEpoch(seq.seqEpoch(t.principal()))
+        .setSeqUnknown(seqValue.isEmpty())
         .build()));
     metrics.handshake("ok");
     while (!held.isEmpty()) {
       ctx.fireChannelRead(held.poll());
     }
+    ctx.channel().config().setAutoRead(true);
     ctx.pipeline().remove(this);
+  }
+
+  private void releaseHeld() {
+    held.forEach(io.netty.util.ReferenceCountUtil::release);
+    held.clear();
+  }
+
+  @Override
+  public void handlerRemoved(ChannelHandlerContext ctx) {
+    releaseHeld();
   }
 
   private void fail(Session session, CloseCode code, String result) {
     failed = true;
     metrics.handshake(result);
-    held.forEach(io.netty.util.ReferenceCountUtil::release);
-    held.clear();
+    releaseHeld();
     session.close(code, code.name());
   }
 }
