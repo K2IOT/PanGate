@@ -70,6 +70,27 @@ class ChannelCloserTest {
   }
 
   @Test
+  void stuckCloseFrameIsForcedClosedAfterGrace() {
+    // Simulates a client that stopped reading: the close frame write never completes.
+    EmbeddedChannel ch = new EmbeddedChannel(new io.netty.channel.ChannelOutboundHandlerAdapter() {
+      @Override
+      public void write(io.netty.channel.ChannelHandlerContext ctx, Object msg, io.netty.channel.ChannelPromise p) {
+        io.netty.util.ReferenceCountUtil.release(msg);
+      }
+    });
+    ch.attr(ChannelAttrs.TRANSPORT).set(ChannelAttrs.TransportKind.WS);
+    ch.attr(ChannelAttrs.PROTOCOL_READY).set(true);
+
+    ChannelCloser.close(ch, CloseCode.GOING_AWAY, "HEARTBEAT_TIMEOUT", 0);
+    assertThat(ch.isOpen()).isTrue();
+
+    ch.advanceTimeBy(ChannelCloser.FORCE_CLOSE_AFTER.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+    ch.runScheduledPendingTasks();
+
+    assertThat(ch.isOpen()).isFalse();
+  }
+
+  @Test
   void closeCodesMatchSpec() {
     assertThat(CloseCode.BAD_FRAME.code()).isEqualTo(4000);
     assertThat(CloseCode.HELLO_TIMEOUT.code()).isEqualTo(4004);
