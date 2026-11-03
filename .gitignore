@@ -1,0 +1,7 @@
+target/
+.idea/
+*.iml
+.vscode/
+.pangate-dev/
+.gitnexus/
+.superpowers/
