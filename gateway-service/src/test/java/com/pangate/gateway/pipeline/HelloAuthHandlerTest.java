@@ -240,6 +240,47 @@ class HelloAuthHandlerTest {
   }
 
   @Test
+  void handshakeCompleteDropsNettyProtocolHandlerAndHandshaker() {
+    f.channel.attr(ChannelAttrs.TRANSPORT).set(ChannelAttrs.TransportKind.WS);
+    f.channel.pipeline().addFirst("ws",
+        new io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler("/v1/ws", "pangate.v1"));
+    io.netty.util.AttributeKey<Object> handshakerKey = io.netty.util.AttributeKey.valueOf(
+        io.netty.handler.codec.http.websocketx.WebSocketServerHandshaker.class, "HANDSHAKER");
+    f.channel.attr(handshakerKey).set(new Object());
+
+    f.channel.pipeline().fireUserEventTriggered(
+        new io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.HandshakeComplete(
+            "/v1/ws", new io.netty.handler.codec.http.DefaultHttpHeaders(), "pangate.v1"));
+
+    assertThat(f.channel.pipeline().get(io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler.class))
+        .isNull();
+    assertThat(f.channel.hasAttr(handshakerKey)).isFalse();
+  }
+
+  @Test
+  void identityStringsAreCanonicalizedAcrossSessions() throws Exception {
+    Connected c = send(Hello.newBuilder().setJwt(auth.jwt("t1:u1", "d1", f.now())).setDeviceId("d1")
+        .setSdkVersion(new String("js-1.2.3")).setPlatform(new String("web")).build());
+    LoopFixture g = new LoopFixture();
+    AuthFixture a2 = new AuthFixture(g::now);
+    g.channel.attr(ChannelAttrs.TRANSPORT).set(ChannelAttrs.TransportKind.TCP);
+    g.channel.attr(ChannelAttrs.PROTOCOL_READY).set(true);
+    Session other = g.tracker.admit(g.channel, g.loop, InetAddress.getLoopbackAddress());
+    g.channel.pipeline().addLast(new FrameCodec(g.limits),
+        new HelloAuthHandler(a2.tickets, a2.flow, g.tracker, new PrincipalHandshakeLimiter(20, () -> g.now() * 1000),
+            g.limits, "cell-1", g.metrics), new ErrorTerminator());
+    g.channel.writeInbound(bytes(hello(Hello.newBuilder().setJwt(a2.jwt("t1:u2", "d2", g.now())).setDeviceId("d2")
+        .setSdkVersion(new String("js-1.2.3")).setPlatform(new String("web")).build())));
+    g.channel.runPendingTasks();
+
+    assertThat(c.getConnId()).isNotEmpty();
+    assertThat(other.identity().sdkVersion()).isSameAs(session.identity().sdkVersion());
+    assertThat(other.identity().platform()).isSameAs(session.identity().platform());
+    assertThat(other.identity().tenantId()).isSameAs(session.identity().tenantId());
+    assertThat(session.identity().capabilities()).isEmpty();
+  }
+
+  @Test
   void upgradeEventMarksProtocolReadyAndStartsHelloDeadline() {
     f.channel.attr(ChannelAttrs.PROTOCOL_READY).set(false);
     f.channel.attr(ChannelAttrs.TRANSPORT).set(ChannelAttrs.TransportKind.WS);

@@ -26,7 +26,16 @@ public final class Session extends WheelNode implements Deadlined {
 
   /** Who the session belongs to, fixed at HELLO. */
   public record Identity(String tenantId, String principalId, String deviceId, String platform, String sdkVersion,
-      Set<String> capabilities) {}
+      Set<String> capabilities) {
+
+    /** Low-cardinality fields are canonicalized and capabilities copied immutably to keep idle sessions small. */
+    public Identity {
+      tenantId = Canon.of(tenantId);
+      platform = Canon.of(platform);
+      sdkVersion = Canon.of(sdkVersion);
+      capabilities = Set.copyOf(capabilities);
+    }
+  }
 
   private final LoopContext loop;
   private final Channel channel;

@@ -13,12 +13,21 @@ import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.util.ReferenceCountUtil;
 
 /** WebSocket binary frames ↔ ByteBuf. Text and fragmented frames break the protocol; client close frames close. */
+@io.netty.channel.ChannelHandler.Sharable
 public final class WsBinaryAdapter extends ChannelDuplexHandler {
 
   @Override
   public void channelRead(ChannelHandlerContext ctx, Object msg) {
     if (msg instanceof BinaryWebSocketFrame f && f.isFinalFragment()) {
       ctx.fireChannelRead(f.content());
+      return;
+    }
+    if (msg instanceof io.netty.handler.codec.http.websocketx.PingWebSocketFrame ping) {
+      ctx.writeAndFlush(new io.netty.handler.codec.http.websocketx.PongWebSocketFrame(ping.content()));
+      return;
+    }
+    if (msg instanceof io.netty.handler.codec.http.websocketx.PongWebSocketFrame pong) {
+      pong.release();
       return;
     }
     if (msg instanceof CloseWebSocketFrame close) {

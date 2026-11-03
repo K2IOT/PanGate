@@ -19,6 +19,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 
 /** Frames of an authenticated session (spec §5): PING, REAUTH; M2 features answer UNSUPPORTED for now. */
+@io.netty.channel.ChannelHandler.Sharable
 public final class SessionHandler extends ChannelInboundHandlerAdapter {
 
   private final ResumeTicketService tickets;

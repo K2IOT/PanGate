@@ -18,6 +18,7 @@ import java.util.Set;
  * Protobuf envelope codec (spec §4.4). Size is checked before parsing: helloMax until authenticated, frameMax after.
  * Only client-to-gateway frame types are accepted inbound.
  */
+@io.netty.channel.ChannelHandler.Sharable
 public final class FrameCodec extends MessageToMessageCodec<ByteBuf, Frame> {
 
   private static final Set<FrameType> CLIENT_TYPES = EnumSet.of(FrameType.FRAME_TYPE_HELLO, FrameType.FRAME_TYPE_PING,

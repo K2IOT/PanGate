@@ -18,9 +18,15 @@ public final class WsChannelInitializer extends ChannelInitializer<SocketChannel
 
   private final PipelineDeps deps;
   private final WebSocketServerProtocolConfig wsConfig;
+  // Stateless handlers shared by every connection (fewer objects per idle session).
+  private final WsBinaryAdapter wsBinary = new WsBinaryAdapter();
+  private final FrameCodec frameCodec;
+  private final SessionHandler sessionHandler;
 
   public WsChannelInitializer(PipelineDeps deps) {
     this.deps = deps;
+    this.frameCodec = new FrameCodec(deps.limits());
+    this.sessionHandler = deps.sessionHandler();
     this.wsConfig = WebSocketServerProtocolConfig.newBuilder()
         .websocketPath(deps.props().listeners().ws().path())
         .subprotocols(UpgradeGuard.SUBPROTOCOL)
@@ -46,10 +52,10 @@ public final class WsChannelInitializer extends ChannelInitializer<SocketChannel
     p.addLast("aggregator", new HttpObjectAggregator(8192));
     p.addLast("upgradeGuard", new UpgradeGuard(deps.props(), deps.limits(), deps.loops(), deps.node(), ThreadLocalRandom.current()));
     p.addLast("ws", new WebSocketServerProtocolHandler(wsConfig));
-    p.addLast("wsBinary", new WsBinaryAdapter());
-    p.addLast("frameCodec", new FrameCodec(deps.limits()));
+    p.addLast("wsBinary", wsBinary);
+    p.addLast("frameCodec", frameCodec);
     p.addLast("hello", deps.helloAuth());
-    p.addLast("session", deps.sessionHandler());
+    p.addLast("session", sessionHandler);
     p.addLast("errors", PipelineDeps.ERROR_TERMINATOR);
   }
 }

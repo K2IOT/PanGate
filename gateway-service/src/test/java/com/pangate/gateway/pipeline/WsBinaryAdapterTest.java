@@ -57,6 +57,23 @@ class WsBinaryAdapterTest {
   }
 
   @Test
+  void webSocketPingIsAnsweredWithPong() {
+    EmbeddedChannel ch = channel();
+
+    ch.writeInbound(new io.netty.handler.codec.http.websocketx.PingWebSocketFrame(Unpooled.wrappedBuffer(new byte[] {9})));
+
+    io.netty.handler.codec.http.websocketx.PongWebSocketFrame pong = ch.readOutbound();
+    assertThat(pong.content().getByte(0)).isEqualTo((byte) 9);
+    pong.release();
+    assertThat(ch.isOpen()).isTrue();
+  }
+
+  @Test
+  void adapterIsSharable() {
+    assertThat(new WsBinaryAdapter().isSharable()).isTrue();
+  }
+
+  @Test
   void outboundByteBufIsWrapped() {
     EmbeddedChannel ch = channel();
 

@@ -13,9 +13,13 @@ import io.netty.handler.flush.FlushConsolidationHandler;
 public final class TcpChannelInitializer extends ChannelInitializer<SocketChannel> {
 
   private final PipelineDeps deps;
+  private final FrameCodec frameCodec;
+  private final SessionHandler sessionHandler;
 
   public TcpChannelInitializer(PipelineDeps deps) {
     this.deps = deps;
+    this.frameCodec = new FrameCodec(deps.limits());
+    this.sessionHandler = deps.sessionHandler();
   }
 
   @Override
@@ -27,9 +31,9 @@ public final class TcpChannelInitializer extends ChannelInitializer<SocketChanne
     p.addLast("flush", new FlushConsolidationHandler(256, true));
     p.addLast("lengthDecoder", new LengthFieldBasedFrameDecoder(deps.limits().current().frameMax() + 1024, 0, 4, 0, 4));
     p.addLast("lengthPrepender", new LengthFieldPrepender(4));
-    p.addLast("frameCodec", new FrameCodec(deps.limits()));
+    p.addLast("frameCodec", frameCodec);
     p.addLast("hello", deps.helloAuth());
-    p.addLast("session", deps.sessionHandler());
+    p.addLast("session", sessionHandler);
     p.addLast("errors", PipelineDeps.ERROR_TERMINATOR);
   }
 }

@@ -27,7 +27,6 @@ import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.ssl.SslHandshakeCompletionEvent;
 import java.util.ArrayDeque;
-import java.util.HashSet;
 
 /**
  * Authenticates the first frame (spec §4.6): HELLO with a resume ticket (HMAC, offline) or a connect JWT (ES256,
@@ -64,6 +63,7 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
   @Override
   public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
     if (evt instanceof WebSocketServerProtocolHandler.HandshakeComplete) {
+      dropWebSocketHandshakeState(ctx);
       protocolReady(ctx);
     } else if (evt instanceof SslHandshakeCompletionEvent tls
         && ctx.channel().attr(ChannelAttrs.TRANSPORT).get() == ChannelAttrs.TransportKind.TCP) {
@@ -76,6 +76,22 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
     }
     super.userEventTriggered(ctx, evt);
   }
+
+  /**
+   * After the upgrade Netty's protocol handler only answers pings and keeps the handshaker (URL, subprotocol array)
+   * per connection; WsBinaryAdapter answers pings and handles close frames itself, so both are dropped to keep idle
+   * sessions small.
+   */
+  @SuppressWarnings("deprecation")
+  private static void dropWebSocketHandshakeState(ChannelHandlerContext ctx) {
+    if (ctx.pipeline().get(WebSocketServerProtocolHandler.class) != null) {
+      ctx.pipeline().remove(WebSocketServerProtocolHandler.class);
+    }
+    ctx.channel().attr(HANDSHAKER_KEY).getAndRemove();
+  }
+
+  private static final io.netty.util.AttributeKey<Object> HANDSHAKER_KEY = io.netty.util.AttributeKey.valueOf(
+      io.netty.handler.codec.http.websocketx.WebSocketServerHandshaker.class, "HANDSHAKER");
 
   private void protocolReady(ChannelHandlerContext ctx) {
     ctx.channel().attr(ChannelAttrs.PROTOCOL_READY).set(true);
@@ -165,7 +181,7 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
     done = true;
     String connId = tracker.newConnId(session);
     session.activate(new Session.Identity(t.tenant(), t.principal(), t.device(), hello.getPlatform(),
-        hello.getSdkVersion(), new HashSet<>(hello.getCapabilitiesList())), connId, t.authAtSec(), t.expSec(),
+        hello.getSdkVersion(), java.util.Set.copyOf(hello.getCapabilitiesList())), connId, t.authAtSec(), t.expSec(),
         t.authJtiHash(), t.topicPatterns());
     ctx.channel().attr(ChannelAttrs.AUTHENTICATED).set(true);
     tracker.onActivated(session);
