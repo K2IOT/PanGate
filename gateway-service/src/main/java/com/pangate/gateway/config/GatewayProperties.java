@@ -3,6 +3,8 @@ package com.pangate.gateway.config;
 import com.pangate.gateway.server.Transport;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
+import org.springframework.util.unit.DataSize;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /** Typed {@code gateway.*} configuration (spec §9). Defaults live in application.yml. */
@@ -17,7 +19,9 @@ public record GatewayProperties(
     Admission admission,
     Auth auth,
     Dev dev,
-    Startup startup) {
+    Startup startup,
+    Redis redis,
+    Kafka kafka) {
 
   public record Listeners(Ws ws, Tcp tcp) {}
 
@@ -39,7 +43,10 @@ public record GatewayProperties(
       Duration handshakeTimeout,
       int handshakesPerPrincipalPerMin,
       Duration heartbeatInterval,
-      Duration sessionTtl) {}
+      Duration sessionTtl,
+      int inboundRate,
+      int inboundBurst,
+      int topicsPerConn) {}
 
   public record Admission(int rate, int burst, int rampFrom, Duration rampDuration) {}
 
@@ -49,4 +56,15 @@ public record GatewayProperties(
   public record Dev(boolean bootstrapSecrets, Path dir) {}
 
   public record Startup(Duration dependencyTimeout) {}
+
+  /** Redis for the registry (lease, reg:{p}) and state (seq, seqepochs); one server may serve both (spec §9.1). */
+  public record Redis(RedisTopology topology, String registryUri, String stateUri, Duration commandTimeout) {}
+
+  public record Kafka(
+      String bootstrap,
+      boolean createTopics,
+      List<String> upstreamTypes,
+      String topicPrefix,
+      DataSize reliableBuffer,
+      DataSize telemetryBuffer) {}
 }

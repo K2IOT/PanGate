@@ -30,6 +30,9 @@ gateway:
     handshakes-per-principal-per-min: 20
     heartbeat-interval: 30s
     session-ttl: 24h
+    inbound-rate: 50
+    inbound-burst: 100
+    topics-per-conn: 100
   admission: { rate: 5000, burst: 10000, ramp-from: 500, ramp-duration: 2m }
   auth:
     jwks-uri: https://auth/.well-known/jwks.json
@@ -39,6 +42,18 @@ gateway:
     clock-skew: 30s
   dev: { bootstrap-secrets: false, dir: /etc/pangate/dev }
   startup: { dependency-timeout: 120s }
+  redis:
+    topology: cluster                 # cluster | standalone
+    registry-uri: redis://redis-registry:6379
+    state-uri: redis://redis-state:6379
+    command-timeout: 2s
+  kafka:
+    bootstrap: kafka:9092
+    create-topics: false
+    upstream-types: [telemetry, cmd, cmd_result, read, sdk.metrics]
+    topic-prefix: c1
+    reliable-buffer: 128MB
+    telemetry-buffer: 128MB
 
 # Management port only: Tomcat serves actuator, /ready, /live and /admin/drain.
 server:

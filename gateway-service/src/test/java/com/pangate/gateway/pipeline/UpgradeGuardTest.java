@@ -3,6 +3,7 @@ package com.pangate.gateway.pipeline;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.pangate.gateway.config.GatewayProperties;
+import com.pangate.gateway.config.RedisTopology;
 import com.pangate.gateway.server.NodeState;
 import com.pangate.gateway.server.Transport;
 import com.pangate.gateway.session.Session;
@@ -31,10 +32,14 @@ class UpgradeGuardTest {
         new GatewayProperties.Listeners(new GatewayProperties.Ws(8443, "/v1/ws", 4), new GatewayProperties.Tcp(8883, true)),
         new GatewayProperties.Io(0, Transport.AUTO), new GatewayProperties.Tls(Path.of("c"), Path.of("k")),
         new GatewayProperties.Limits(700_000, softCap, 200, 65_536, 8_192, Duration.ofSeconds(5),
-            Duration.ofSeconds(10), 20, Duration.ofSeconds(30), Duration.ofHours(24)),
+            Duration.ofSeconds(10), 20, Duration.ofSeconds(30), Duration.ofHours(24), 50, 100, 100),
         new GatewayProperties.Admission(5000, 10000, 500, Duration.ofMinutes(2)),
         new GatewayProperties.Auth("", Path.of("j"), Duration.ofMinutes(5), "pangate-gw", "", Duration.ofSeconds(30)),
-        new GatewayProperties.Dev(false, Path.of("d")), new GatewayProperties.Startup(Duration.ofSeconds(30)));
+        new GatewayProperties.Dev(false, Path.of("d")), new GatewayProperties.Startup(Duration.ofSeconds(30)),
+        new GatewayProperties.Redis(RedisTopology.STANDALONE, "redis://localhost:6379", "redis://localhost:6379",
+            Duration.ofSeconds(2)),
+        new GatewayProperties.Kafka("localhost:9092", true, java.util.List.of("cmd"), "c1",
+            org.springframework.util.unit.DataSize.ofMegabytes(128), org.springframework.util.unit.DataSize.ofMegabytes(128)));
   }
 
   @BeforeEach
@@ -44,7 +49,7 @@ class UpgradeGuardTest {
 
   private void guard(int softCap) {
     f.limits.set(new com.pangate.gateway.config.GatewayLimits(700_000, softCap, 200, 65_536, 8_192,
-        Duration.ofSeconds(5), Duration.ofSeconds(10), 20, Duration.ofSeconds(30), Duration.ofHours(24)));
+        Duration.ofSeconds(5), Duration.ofSeconds(10), 20, Duration.ofSeconds(30), Duration.ofHours(24), 50, 100, 100));
     f.channel.pipeline().addLast(new UpgradeGuard(props(softCap), f.limits, f.loops, node, new SplittableRandom(1)));
   }
 
@@ -100,7 +105,7 @@ class UpgradeGuardTest {
   void softCapFollowsHotReloadedLimits() {
     guard(550_000);
     f.limits.set(new com.pangate.gateway.config.GatewayLimits(700_000, 1, 200, 65_536, 8_192, Duration.ofSeconds(5),
-        Duration.ofSeconds(10), 20, Duration.ofSeconds(30), Duration.ofHours(24)));
+        Duration.ofSeconds(10), 20, Duration.ofSeconds(30), Duration.ofHours(24), 50, 100, 100));
 
     f.channel.writeInbound(upgrade("/v1/ws", "pangate.v1"));
 

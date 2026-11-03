@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import org.springframework.util.unit.DataSize;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
@@ -83,6 +85,46 @@ class GatewayPropertiesTest {
       assertThat(p.limits().hardCap()).isEqualTo(200_000);
       assertThat(p.nodeId()).isEqualTo("gateway-dev-1");
       assertThat(p.dev().dir()).isEqualTo(Path.of("/dev-secrets"));
+    });
+  }
+  @Test
+  void localProfileBindsStandaloneRedisAndLocalKafka() {
+    runner.withPropertyValues("spring.profiles.active=local").run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      assertThat(p.redis().topology()).isEqualTo(RedisTopology.STANDALONE);
+      assertThat(p.redis().registryUri()).isEqualTo("redis://localhost:6379");
+      assertThat(p.redis().stateUri()).isEqualTo("redis://localhost:6379");
+      assertThat(p.kafka().bootstrap()).isEqualTo("localhost:9092");
+      assertThat(p.kafka().createTopics()).isTrue();
+      assertThat(p.kafka().upstreamTypes()).containsExactly("telemetry", "cmd", "cmd_result", "read", "sdk.metrics");
+      assertThat(p.limits().inboundRate()).isEqualTo(50);
+    });
+  }
+
+  @Test
+  void devProfileUsesComposeHosts() {
+    runner.withPropertyValues("spring.profiles.active=dev").run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      assertThat(p.redis().registryUri()).isEqualTo("redis://redis:6379");
+      assertThat(p.kafka().bootstrap()).isEqualTo("kafka:29092");
+      assertThat(p.kafka().createTopics()).isTrue();
+    });
+  }
+
+  @Test
+  void prodDefaultsDoNotCreateTopics() {
+    runner.run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      assertThat(p.kafka().createTopics()).isFalse();
+      assertThat(p.kafka().topicPrefix()).isEqualTo("c1");
+      assertThat(p.kafka().reliableBuffer()).isEqualTo(DataSize.ofMegabytes(128));
+      assertThat(p.kafka().telemetryBuffer()).isEqualTo(DataSize.ofMegabytes(128));
+      assertThat(p.redis().topology()).isEqualTo(RedisTopology.CLUSTER);
+      assertThat(p.redis().commandTimeout()).isEqualTo(Duration.ofSeconds(2));
+      GatewayLimits l = GatewayLimits.from(p);
+      assertThat(l.inboundRate()).isEqualTo(50);
+      assertThat(l.inboundBurst()).isEqualTo(100);
+      assertThat(l.topicsPerConn()).isEqualTo(100);
     });
   }
 }

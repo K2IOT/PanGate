@@ -17,3 +17,10 @@ gateway:
   limits:
     hard-cap: 200000
   startup: { dependency-timeout: 60s }
+  redis:
+    topology: standalone
+    registry-uri: redis://redis:6379
+    state-uri: redis://redis:6379
+  kafka:
+    bootstrap: kafka:29092
+    create-topics: true

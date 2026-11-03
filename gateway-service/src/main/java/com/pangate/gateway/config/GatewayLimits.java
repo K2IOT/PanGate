@@ -13,12 +13,15 @@ public record GatewayLimits(
     Duration handshakeTimeout,
     int handshakesPerPrincipalPerMin,
     Duration heartbeatInterval,
-    Duration sessionTtl) {
+    Duration sessionTtl,
+    int inboundRate,
+    int inboundBurst,
+    int topicsPerConn) {
 
   public static GatewayLimits from(GatewayProperties p) {
     GatewayProperties.Limits l = p.limits();
     return new GatewayLimits(l.hardCap(), l.softCap(), l.perIp(), l.frameMax(), l.helloMax(), l.helloTimeout(),
-        l.handshakeTimeout(), l.handshakesPerPrincipalPerMin(), l.heartbeatInterval(), l.sessionTtl());
+        l.handshakeTimeout(), l.handshakesPerPrincipalPerMin(), l.heartbeatInterval(), l.sessionTtl(), l.inboundRate(), l.inboundBurst(), l.topicsPerConn());
   }
 
   /** Idle timeout = three missed heartbeats. */

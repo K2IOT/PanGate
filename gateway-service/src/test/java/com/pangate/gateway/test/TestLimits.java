@@ -11,7 +11,7 @@ public final class TestLimits {
 
   public static GatewayLimits defaults() {
     return new GatewayLimits(700_000, 550_000, 200, 65_536, 8_192, Duration.ofSeconds(5), Duration.ofSeconds(10),
-        20, Duration.ofSeconds(30), Duration.ofHours(24));
+        20, Duration.ofSeconds(30), Duration.ofHours(24), 50, 100, 100);
   }
 
   public static LimitsHolder holder() {

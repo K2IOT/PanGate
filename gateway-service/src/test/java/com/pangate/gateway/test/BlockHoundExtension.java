@@ -21,6 +21,9 @@ public final class BlockHoundExtension implements BeforeAllCallback {
       BlockHound.Builder builder = BlockHound.builder();
       // Library integrations (e.g. Netty's) whitelist their known-safe internal blocking points.
       ServiceLoader.load(BlockHoundIntegration.class).forEach(builder::with);
+      // max.block.ms=0: send() never waits for metadata or buffer space; it may only take the accumulator's
+      // short-held locks, which BlockHound would report as parking under contention.
+      builder.allowBlockingCallsInside("org.apache.kafka.clients.producer.KafkaProducer", "send");
       builder.nonBlockingThreadPredicate(p -> p.or(t -> t.getName().startsWith("gw-io-"))).install();
       installed = true;
     }

@@ -1,4 +1,4 @@
-# Local: gateway runs from the IDE; infra (from M2) on localhost. Dev secrets are generated on first start.
+# Local: gateway runs from the IDE; infra (Kafka, Redis) on localhost (`make infra-up`). Dev secrets are generated on first start.
 pangate:
   az: local
   secrets:
@@ -21,3 +21,10 @@ gateway:
     soft-cap: 80000
     per-ip: 100000
   startup: { dependency-timeout: 30s }
+  redis:
+    topology: standalone
+    registry-uri: redis://localhost:6379
+    state-uri: redis://localhost:6379
+  kafka:
+    bootstrap: localhost:9092
+    create-topics: true
