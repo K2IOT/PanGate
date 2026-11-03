@@ -22,6 +22,7 @@ public final class InfraLifecycle implements SmartLifecycle {
   private final KafkaClients kafka;
   private final TopicNames topics;
   private final boolean createTopics;
+  private final java.util.List<Runnable[]> hooks = new java.util.concurrent.CopyOnWriteArrayList<>();
   private volatile boolean running;
 
   public InfraLifecycle(Duration timeout, RedisConnections redis, KafkaClients kafka, TopicNames topics,
@@ -31,6 +32,14 @@ public final class InfraLifecycle implements SmartLifecycle {
     this.kafka = kafka;
     this.topics = topics;
     this.createTopics = createTopics;
+  }
+
+  /**
+   * Work that needs the connected clients (gw.control consumer, seq epochs): {@code start} runs at the end of
+   * {@link #start()} in registration order, {@code stop} at the beginning of {@link #stop()} in reverse order.
+   */
+  public void onStarted(Runnable start, Runnable stop) {
+    hooks.add(new Runnable[] {start, stop});
   }
 
   @Override
@@ -51,6 +60,7 @@ public final class InfraLifecycle implements SmartLifecycle {
       warm(TopicNames.isReliable(type) ? kafka.reliable() : kafka.telemetry(), topics.upstream(type));
     }
     warm(kafka.reliable(), topics.lifecycle());
+    hooks.forEach(h -> h[0].run());
     running = true;
     log.info("infrastructure ready: redis {}, kafka {}", redis.registryUri(), kafka.bootstrap());
   }
@@ -65,6 +75,13 @@ public final class InfraLifecycle implements SmartLifecycle {
   @Override
   public void stop() {
     running = false;
+    for (int i = hooks.size() - 1; i >= 0; i--) {
+      try {
+        hooks.get(i)[1].run();
+      } catch (RuntimeException e) {
+        log.warn("infrastructure stop hook failed", e);
+      }
+    }
     kafka.close(Duration.ofSeconds(10));
     redis.close();
   }
