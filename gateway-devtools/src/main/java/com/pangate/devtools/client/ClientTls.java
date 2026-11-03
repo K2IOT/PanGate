@@ -16,6 +16,8 @@ public final class ClientTls {
   public static final String ALPN_PANGATE = "pangate.v1";
 
   private final Path caCert;
+  private volatile SslContext ws;
+  private volatile SslContext tcp;
 
   private ClientTls(Path caCert) {
     this.caCert = caCert;
@@ -33,7 +35,26 @@ public final class ClientTls {
     return caCert != null;
   }
 
+  /** Built once per mode and cached: reads the CA file, so never call it on an event loop. */
   SslContext context(boolean tcp) {
+    SslContext cached = tcp ? this.tcp : this.ws;
+    if (cached == null) {
+      synchronized (this) {
+        cached = tcp ? this.tcp : this.ws;
+        if (cached == null) {
+          cached = build(tcp);
+          if (tcp) {
+            this.tcp = cached;
+          } else {
+            this.ws = cached;
+          }
+        }
+      }
+    }
+    return cached;
+  }
+
+  private SslContext build(boolean tcp) {
     try {
       SslContextBuilder b = SslContextBuilder.forClient().protocols("TLSv1.3");
       if (caCert == null) {

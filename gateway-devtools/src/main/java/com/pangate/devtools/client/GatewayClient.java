@@ -41,7 +41,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.LinkedTransferQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -56,7 +56,7 @@ public final class GatewayClient implements AutoCloseable {
 
   private final Channel channel;
   private final boolean websocket;
-  private final LinkedBlockingQueue<Frame> inbound;
+  private final LinkedTransferQueue<Frame> inbound;
   private final Inbound handler;
 
   private GatewayClient(Channel channel, boolean websocket, Inbound handler) {
@@ -79,13 +79,14 @@ public final class GatewayClient implements AutoCloseable {
     String host = url.getHost();
     int port = url.getPort();
     Inbound handler = new Inbound(ws);
+    io.netty.handler.ssl.SslContext sslContext = tls.context(!ws);
     Bootstrap b = new Bootstrap().group(GROUP).channel(NioSocketChannel.class)
         .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, (int) timeout.toMillis())
         .option(ChannelOption.TCP_NODELAY, true)
         .handler(new ChannelInitializer<SocketChannel>() {
           @Override
           protected void initChannel(SocketChannel ch) {
-            SslHandler ssl = tls.context(!ws).newHandler(ch.alloc(), host, port);
+            SslHandler ssl = sslContext.newHandler(ch.alloc(), host, port);
             ch.pipeline().addLast(ssl);
             if (ws) {
               ch.pipeline().addLast(new HttpClientCodec(), new HttpObjectAggregator(8192),
@@ -209,7 +210,7 @@ public final class GatewayClient implements AutoCloseable {
   }
 
   private static final class Inbound extends SimpleChannelInboundHandler<Object> {
-    final LinkedBlockingQueue<Frame> queue = new LinkedBlockingQueue<>();
+    final LinkedTransferQueue<Frame> queue = new LinkedTransferQueue<>();
     final CompletableFuture<Void> ready = new CompletableFuture<>();
     private final boolean websocket;
     private volatile CloseInfo closeInfo;
