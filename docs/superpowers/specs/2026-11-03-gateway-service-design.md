@@ -47,7 +47,7 @@ Mục tiêu sizing: ~278k kết nối/node ở trạng thái thường, trần 5
 | Netty | 4.2.x, `MultiThreadIoEventLoopGroup` + `EpollIoHandler`; NIO fallback khi không có epoll (dev trên macOS) | API 4.2 thay `EpollEventLoopGroup` đã deprecated |
 | TLS | `netty-tcnative-boringssl-static`, TLS 1.3, cert ECDSA P-256 | Không dùng JDK `SSLEngine` (§2) |
 | gRPC | `grpc-netty-shaded`, event loop group riêng, port 9090 | Tách hẳn khỏi data plane |
-| Redis | Lettuce 6.x cluster client, một kết nối multiplexed cho mỗi master | §3.1 |
+| Redis | Lettuce 6.x: `RedisClusterClient` (staging, prod), `RedisClient` standalone (local không dùng Redis; dev dùng standalone), chọn bằng `gateway.redis.topology`; một kết nối multiplexed cho mỗi master | §3.1, §9.1 |
 | Kafka | `kafka-clients` thuần, không dùng spring-kafka trên hot path | Kiểm soát `buffer.memory`, `acks`, `max.block.ms` |
 | Collections | fastutil (`Long2ObjectOpenHashMap`, `Object2ObjectOpenHashMap`, `ObjectArrayList`) | §4 |
 | Management | Spring WebFlux (Reactor Netty), port 8081, event loop riêng 1–2 thread | Không dùng Tomcat (§4) |
@@ -55,7 +55,8 @@ Mục tiêu sizing: ~278k kết nối/node ở trạng thái thường, trần 5
 | Proto | `protobuf-maven-plugin`; `buf lint` + `buf breaking` trong CI | §3.4 |
 | CLI devtools | picocli | |
 | Build | Maven, mỗi thư mục một `pom.xml`, `Makefile` ở gốc repo | §13 |
-| Image | Jib, base distroless Java 21 (M3) | §7.1 |
+| Image | Jib, base distroless Java 21; có từ M1 vì compose dev cần | §7.1 |
+| Build wrapper | Maven Wrapper (`mvnw`) ở gốc repo, dùng `./mvnw -f <module>` | Không bắt buộc cài Maven |
 
 ---
 
@@ -69,7 +70,8 @@ PanGate/
 ├── platform-spring-starter/  # cross-cutting tối thiểu cho gateway
 ├── gateway-service/          # data plane
 ├── gateway-devtools/         # CLI picocli: issuer, fake-router, fake-pushapi, client
-├── platform-devenv/          # docker-compose + script sinh secret cho dev
+├── platform-devenv/          # docker-compose cho môi trường dev (§2.4, §9.1)
+├── mvnw, .mvn/               # Maven Wrapper dùng chung
 └── docs/
     ├── superpowers/specs/    # spec này và sơ đồ
     └── adr/                  # ADR (xem §13 của spec)
@@ -109,18 +111,26 @@ Chỉ những gì gateway cần (YAGNI):
 | Subcommand | Chức năng |
 |---|---|
 | `issuer` | Sinh hoặc nạp cặp key ES256; HTTP `GET /.well-known/jwks.json`; `POST /tokens {tenant, principal, device, topics[], ttlSec}` → connect JWT |
+| `token` | Ký connect JWT offline từ file private key ES256 (không cần chạy issuer), in ra stdout |
 | `client` | Client WS hoặc TCP: HELLO bằng JWT hoặc ticket, PING định kỳ, in ra PUSH, tự ACK, gửi UPSTREAM, lưu và dùng lại resume ticket. Tùy chọn `--load N --ramp R` mở N kết nối idle |
 | `fake-router` | gRPC client tới `:9090`: gửi `PushBatch` unicast (theo `connId`), broadcast hoặc control; in ra `DeliveryAck`; có chế độ tải `--rate` |
 | `fake-pushapi` | gRPC server `PushService.SendStream`: nhận KICK của gateway, chuyển thành `PushItem CONTROL` rồi gửi qua `fake-router` |
 
 ### 2.4 platform-devenv
 
-- `docker-compose.yml`:
-  - `kafka` (KRaft, 1 broker) cùng job `kafka-init` tạo các topic `c1.gw.lifecycle` (32 partition), `c1.gw.upstream.{telemetry,cmd,cmd_result,read,sdk.metrics}` (64), `gw.control` (8, `cleanup.policy=compact`).
-  - `redis-registry` và `redis-state`: mỗi cái 1 node chạy cluster mode với 1 shard, để giống prod.
-  - `issuer` và một node `gateway`.
-- `scripts/gen-secrets.sh` sinh vào `platform-devenv/secrets/`: CA và cert ECDSA của gateway, 3 key HMAC cho resume ticket (`ticket-keys/{prev,current,next}`), 3 key TLS session ticket, key hash principal.
-- `make up`, `make down`, `make smoke` (connect → push → ack → disconnect).
+Môi trường **dev** (chi tiết chạy ở §9.1). Mọi image đều pin version, không dùng `latest`.
+
+| Service | Image | Cấu hình chính | Healthcheck |
+|---|---|---|---|
+| `kafka` | `apache/kafka:3.9.1` | KRaft, 1 broker; hai listener `INTERNAL://kafka:29092` (container) và `EXTERNAL://localhost:9092` (JVM chạy trên host) | `kafka-topics.sh --bootstrap-server kafka:29092 --list` |
+| `kafka-init` | cùng image | Tạo topic với `--if-not-exists` (chạy lại không lỗi): `c1.gw.lifecycle` (32 partition), `c1.gw.upstream.{telemetry,cmd,cmd_result,read,sdk.metrics}` (64), `gw.control` (8, compact) | Exit 0 |
+| `redis-registry` | `redis:7.4.2` | **Standalone**, port 6379 | `redis-cli ping` |
+| `redis-state` | `redis:7.4.2` | **Standalone**, port 6380 | `redis-cli -p 6380 ping` |
+| `issuer` | `pangate/gateway-devtools:dev` (Jib) | `issuer --port 8090 --key /dev-secrets/es256.pem` | `GET /.well-known/jwks.json` |
+| `gateway` | `pangate/gateway-service:dev` (Jib) | Profile `dev`; `depends_on: condition: service_healthy` (và `service_completed_successfully` cho `kafka-init`); ports 8443, 8883, 9090, 8081 | `GET :8081/ready` |
+
+- Volume `dev-secrets` dùng chung giữa `issuer` và `gateway`. Secret do `DevBootstrap` sinh ra lần đầu (§9.1), không cần chạy script thủ công.
+- Redis chạy **standalone** ở local và dev, cluster chỉ ở staging và prod. Mọi Lua script trong spec chỉ đụng một key, nên chạy giống hệt nhau trên hai mode. Cluster trong Docker gây lỗi khi JVM chạy trên host, vì node announce IP của container.
 
 ---
 
@@ -150,7 +160,7 @@ Chỉ những gì gateway cần (YAGNI):
 
 | Thread | Số lượng | Việc | Được phép block? |
 |---|---|---|---|
-| `gw-io-*` | `gateway.io.threads`, 0 = số vCPU (16) | Một `MultiThreadIoEventLoopGroup`. Không có boss group riêng: `gateway.listeners.ws.acceptors` (4) listener `SO_REUSEPORT` bind trên chính group này | **Không** (BlockHound) |
+| `gw-io-*` | `gateway.io.threads`, 0 = số vCPU (16) | Một `MultiThreadIoEventLoopGroup`. Không có boss group riêng: `gateway.listeners.ws.acceptors` (4) listener `SO_REUSEPORT` bind trên chính group này. **Khi transport không phải epoll (NIO trên macOS hoặc Windows), số acceptor bị ép về 1 và ghi INFO**, vì bind nhiều lần cùng port sẽ lỗi | **Không** (BlockHound) |
 | `gw-grpc-*` | 2 event loop + executor 2 thread | Nhận và decode `PushBatch`, chia theo loop; flush `AckBatcher` | Không |
 | `gw-mgmt-*` | 1–2 | WebFlux :8081 | Không |
 | `gw-ctl` | 1 platform thread | `KafkaConsumer.poll` trên `gw.control` | Có (poll) |
@@ -219,7 +229,12 @@ API: `execute(Runnable)` (= `eventLoop.execute`), `index()`, `inLoop()`.
 | 2000 | `GrpcServerLifecycle` | Bind :9090 | Ngừng nhận stream mới, chờ tối đa 5 s rồi `shutdownNow` |
 | `Integer.MAX_VALUE − 100` | `NettyGatewayServer` | Bind listener → `WarmUpRunner` → `ReadinessState.markStarted()` → bắt đầu admission ramp | `DrainCoordinator.drain()` → `shutdownGracefully(0, 5 s)` |
 
-Start lỗi ở bất kỳ phase nào thì process exit (fail fast). Pod sẽ được restart.
+Start lỗi ở bất kỳ phase nào thì process exit (fail fast) và pod sẽ được restart. Tuy vậy, phase 0 **chờ dependency có giới hạn** trước khi coi là lỗi:
+- Redis và Kafka: retry với backoff 1 → 5 s trong tổng `gateway.startup.dependency-timeout` (dev 60 s, prod 120 s). Hết hạn → `StartupDiagnostics` in ra host:port không kết nối được kèm gợi ý cách sửa (ví dụ `make up`), rồi exit.
+- JWKS **không chặn** việc start: lỗi thì ghi WARN và retry nền mỗi 10 s. HELLO bằng ticket vẫn chạy; HELLO bằng JWT trả 4001 cho tới khi có JWKS.
+- Topic Kafka thiếu: nếu `gateway.kafka.create-topics=true` (dev), dùng AdminClient tạo; nếu `false` (prod), exit kèm danh sách topic thiếu.
+- Port đang bị chiếm: thông báo rõ port nào và biến môi trường để đổi (ví dụ `GATEWAY_LISTENERS_WS_PORT`).
+- Ở mode `standalone` (§9.1), phase 0 và 1000 dùng adapter in-memory và luôn thành công.
 
 ---
 
@@ -451,13 +466,13 @@ Mọi đường đóng đều đi qua `Session.close(code, reason)`, idempotent,
 ### 6.1 Node lease và epoch (Redis registry)
 
 - `nodeId` = `gateway.node-id`, mặc định `$HOSTNAME`.
-- Lấy epoch: `INCR node:epoch:{nodeId}`.
-- Lua lease, chạy mỗi 5 s từ `gw-tick` (async):
+- Lấy epoch: `INCR node:epoch:{nodeId}`. Epoch mới luôn lớn hơn mọi incarnation trước của node.
+- Lua lease, chạy ngay khi start rồi mỗi 5 s từ `gw-tick` (async). Quy tắc **epoch lớn hơn thắng**: process vừa khởi động lại chiếm lease ngay cả khi lease cũ (chưa hết 15 s) vẫn còn, nên restart nhanh không bị fence. Nếu có hai process chạy cùng `nodeId` (cấu hình sai), process cũ hơn sẽ thấy epoch lớn hơn của mình và tự fence.
 
 ```lua
 -- KEYS[1]=node:{nodeId}   ARGV: epoch, ttlSec
-local cur = redis.call('GET', KEYS[1])
-if cur and cur ~= ARGV[1] then return -1 end   -- có process khác đang dùng nodeId này
+local cur = tonumber(redis.call('GET', KEYS[1]) or '0')
+if cur > tonumber(ARGV[1]) then return -1 end   -- incarnation mới hơn đang giữ nodeId này
 redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
 return 1
 ```
@@ -603,7 +618,7 @@ Khi Lua registry trả về entry cũ và tenant đặt `singleSession=true`:
 
 ### 7.2 Outbound budget
 
-- `gateway.outbound-budget` (4 GB), chia đều mỗi loop `budgetShare`.
+- `gateway.outbound-budget`: prod đặt 4 GB, chia đều mỗi loop `budgetShare`. Khi khởi động, giá trị hiệu lực = `min(cấu hình, 35% × PlatformDependent.maxDirectMemory())` và ghi INFO nếu bị hạ. Nhờ vậy máy dev có direct memory nhỏ không rơi ngay vào shed level 5.
 - Mỗi 100 ms, `gw-tick` gửi `SampleTask` tới từng loop. Task duyệt `dirtySessions` cùng các session có `pending > 0` từ lần trước, cộng `channel.unsafe().outboundBuffer().totalPendingWriteBytes()` thành `outboundBytes` của loop, rồi xóa những session đã về 0.
 - `gw-tick` cộng các loop lại → `budgetRatio`.
 
@@ -689,7 +704,7 @@ Kích hoạt bởi `NettyGatewayServer.stop()` hoặc `POST /admin/drain` (chỉ
 | Bảo vệ | `gw_shed_level`, `gw_eventloop_lag_seconds{loop}`, `gw_outbound_budget_ratio`, `gw_pending_outbound_bytes`, `gw_unwritable_channels`, `gw_slow_consumer_closes_total`, `gw_direct_memory_bytes` |
 | Push | `gw_push_handoff_seconds`, `gw_delivery_acks_total{status}`, `gw_pending_ack_inflight`, `gw_push_dropped_total{reason}`, `gw_broadcast_recipients_total{priority}`, `gw_pushstream_active` |
 | Upstream / cluster | `gw_upstream_total{type,result}`, `gw_registry_write_errors_total{reason}`, `gw_lease_renew_failures_total`, `gw_kick_failures_total`, `gw_control_consumer_errors_total` |
-| Kernel | `ListenOverflows`, `ListenDrops`, `TCPBacklogDrop` (từ `/proc/net/netstat`); socket memory (từ `/proc/net/sockstat`) |
+| Kernel | `ListenOverflows`, `ListenDrops`, `TCPBacklogDrop` (từ `/proc/net/netstat`); socket memory (từ `/proc/net/sockstat`). `KernelStatsReader` chỉ được đăng ký khi chạy trên Linux và `/proc/net/netstat` đọc được; ngược lại bỏ qua kèm INFO |
 
 **Log.**
 - JSON có cấu trúc (logstash encoder).
@@ -709,8 +724,11 @@ pangate:
   secrets: { source: file, dir: /etc/pangate/secrets }
   # prod: secrets: { source: vault, vault: { address: https://vault:8200, role: gateway, kv-path: pangate/cell-1 } }
 gateway:
-  node-id: ${HOSTNAME}
+  mode: cluster                                           # cluster | standalone (§9.1)
+  node-id: ${HOSTNAME:gateway-local}
   cell: ${pangate.cell}
+  startup: { dependency-timeout: 120s }
+  dev: { bootstrap-secrets: false, dir: ./.pangate-dev }  # chỉ bật ở profile local, dev
   listeners:
     ws:  { port: 8443, path: /v1/ws, acceptors: 4 }
     tcp: { port: 8883, enabled: true }
@@ -743,11 +761,14 @@ gateway:
     allowed-spiffe: spiffe://pangate/cell-1/push-router
     tls: { cert-file: /etc/pangate/grpc/gateway.crt, key-file: /etc/pangate/grpc/gateway.key, trust-file: /etc/pangate/grpc/spiffe-bundle.pem }
   push-api: { target: dns:///push-api:9443 }
+  auth: { jwks-uri: https://auth/.well-known/jwks.json, jwks-file: "" }   # local: jwks-file
   redis:
+    topology: cluster                                     # cluster | standalone
     registry-uri: redis://redis-registry:6379
     state-uri: redis://redis-state:6379
   kafka:
     bootstrap: kafka:9092
+    create-topics: false
     upstream-types: [telemetry, cmd, cmd_result, read, sdk.metrics]
     topic-prefix: c1
     reliable-buffer: 128MB
@@ -758,6 +779,92 @@ management:
 ```
 
 Mọi giá trị dưới `gateway.limits`, `gateway.admission` và `gateway.broadcast` được gộp vào `GatewayLimits`. Kill switch và `TenantCfg` ghi đè lên đó khi chạy (§7.8).
+
+## 9.1 Chạy ở local và dev (yêu cầu bắt buộc)
+
+**Định nghĩa**
+- **local**: máy của lập trình viên (Linux; macOS Intel hoặc Apple Silicon; Windows). Chạy `GatewayApplication` từ IDE hoặc bằng `make run-local`. **Không cần Docker.**
+- **dev**: môi trường `platform-devenv` (docker compose, §2.4) với Kafka, Redis, issuer và gateway. Gateway chạy trong container (`make up`) hoặc trên host trỏ vào compose (`make run-dev-host`).
+
+**Yêu cầu nghiệm thu** (CI kiểm tra, xem cuối mục)
+
+| # | Yêu cầu |
+|---|---|
+| R1 | Sau `make bootstrap`, `make run-local` đưa `/ready` về 200 trong ≤ 30 s trên Linux, macOS (x86_64, arm64) và Windows, không cần Docker hay bất kỳ service ngoài nào |
+| R2 | `make up`: mọi container healthy và `/ready` của gateway trả 200 trong ≤ 90 s; `make smoke` xanh |
+| R3 | `make run-dev-host` (gateway trên host, dependency trong compose) đạt ready trong ≤ 30 s |
+| R4 | Dừng (SIGTERM hoặc Ctrl-C) rồi chạy lại ngay: process thoát trong ≤ 15 s; lần chạy sau không lỗi port, không tự fence (§6.1) |
+| R5 | Chạy từ IDE chỉ cần chọn profile `local`; không bắt buộc biến môi trường nào |
+| R6 | Thiếu dependency, secret hoặc port → thông báo một dòng nói rõ nguyên nhân và cách sửa (`StartupDiagnostics`), không ném stack trace khó hiểu |
+
+**Profile**
+
+| Thiết lập | `local` | `dev` | `prod` |
+|---|---|---|---|
+| `gateway.mode` | `standalone` | `cluster` | `cluster` |
+| Transport | `auto` (NIO trên macOS, Windows) | epoll (container Linux) | epoll |
+| Acceptors | 1 nếu không phải epoll, ngược lại 4 | 4 | 4 |
+| TLS cert, ticket key, TLS ticket key, principal-hash key | `DevBootstrap` tự sinh vào `./.pangate-dev/` | `DevBootstrap` tự sinh vào volume `dev-secrets` | cert-manager + Vault |
+| JWKS | File `.pangate-dev/jwks.json` (sinh cùng private key ES256) | `http://issuer:8090/.well-known/jwks.json` | Auth service |
+| Redis | Không dùng (adapter in-memory) | Standalone `redis-registry:6379`, `redis-state:6380` | Cluster |
+| Kafka | Không dùng (`LoggingUpstreamSink`) | Compose; `create-topics=true` | Cluster; `create-topics=false` |
+| `gw.control` | Tắt (`controlCaughtUp` bật ngay) + `POST /admin/control` | Bật | Bật |
+| gRPC | Plaintext :9090 | Plaintext | mTLS |
+| KICK | Gọi thẳng `ControlPushHandler` local | `fake-pushapi` | Push API |
+| Giới hạn | hard-cap 50k, soft-cap 40k, budget 256 MB, warm-up 50 vòng | hard-cap 200k, budget 1 GB, warm-up 200 vòng | Như §9 |
+| Leak detection | `simple` | `simple` | `disabled` |
+| JVM | Mặc định của JDK | `-Xmx1g -XX:MaxDirectMemorySize=1g` | Flags ở §4.1 tài liệu gốc (chỉ đặt trong Helm và image prod) |
+| `KernelStatsReader` | Chỉ trên Linux | Bật | Bật |
+
+**Mode standalone** (`gateway.mode=standalone`)
+
+Code đường chính dùng chung hoàn toàn. Chỉ adapter phía sau các port interface được thay, chọn bằng `@ConditionalOnProperty("gateway.mode")`:
+
+| Port | `cluster` | `standalone` |
+|---|---|---|
+| `RegistryPort` | `RedisRegistryWriter` | `InMemoryRegistry`: map `principal → entries`, có cùng ngữ nghĩa "trả entry cũ" như Lua |
+| `NodeLeasePort` | Redis lease (§6.1) | `LocalNodeLease`: epoch = thời điểm khởi động tính bằng giây, luôn live |
+| `SeqPort` | `GET seq:{p}` | Trả `seq_unknown=true` |
+| `TenantQuotaPort` | Redis `INCR` | Chỉ dùng quota local |
+| `UpstreamSink` | Kafka, 2 producer | `LoggingUpstreamSink`: log JSON + bộ đệm vòng 1k record, xem qua `GET /admin/upstream/recent` |
+| `ControlSource` | Kafka `gw.control` | `NoopControlSource` + `POST /admin/control` (body là `ControlEvent` dạng JSON) để bơm revoke, cellmap, cfg khi test tay |
+| `KickPort` | gRPC tới Push API | Gọi thẳng `ControlPushHandler` trên node |
+
+- PushStream gRPC vẫn bật ở standalone, nên `gateway-devtools fake-router` gửi push được. `connId` lấy từ output của `gateway-devtools client`.
+- Quy tắc: adapter standalone **không** chứa logic nghiệp vụ riêng. HELLO, push, ack, broadcast, drain và shed đều chạy chung code. IT chạy cả hai mode (§11).
+- Endpoint `/admin/upstream/recent` và `/admin/control` chỉ tồn tại khi `gateway.mode=standalone`, và chỉ nhận request từ loopback.
+
+**DevBootstrap**
+- Chỉ kích hoạt khi profile là `local` hoặc `dev` **và** `gateway.dev.bootstrap-secrets=true`. Nếu bean này xuất hiện khi chạy profile `prod`, ứng dụng exit ngay.
+- Khi thiếu file trong `gateway.dev.dir`, nó sinh ra:
+  - CA dev và cert ECDSA P-256 cho `localhost`, `127.0.0.1`, `::1`, `gateway`.
+  - Cặp key ES256 cùng `jwks.json`.
+  - 3 ticket key, 3 TLS ticket key, principal-hash key.
+- Dùng BouncyCastle (`bcpkix-jdk18on`). File đã tồn tại thì giữ nguyên, nên resume ticket vẫn hợp lệ qua các lần restart.
+- `.pangate-dev/` được thêm vào `.gitignore`.
+- `gateway-devtools token --key .pangate-dev/es256.pem --tenant t1 --principal t1:u1 --device d1` ký JWT offline, không cần chạy issuer.
+- `gateway-devtools client --ca .pangate-dev/ca.crt` (hoặc `--insecure`) để tin cert dev.
+
+**Make target** (Windows: mỗi target có lệnh `mvnw` tương đương ghi trong README của `platform-devenv`)
+
+| Target | Việc |
+|---|---|
+| `make doctor` | Kiểm Java 21, Docker (chỉ cần cho dev) và các port 8443, 8883, 9090, 8081 còn trống |
+| `make bootstrap` | `./mvnw install -DskipITs` theo thứ tự parent → contracts → starter → gateway → devtools |
+| `make run-local` | `./mvnw -f gateway-service spring-boot:run -Dspring-boot.run.profiles=local` |
+| `make images` | Jib `dockerBuild` cho gateway và devtools |
+| `make up` / `make down` / `make logs` | Bật, tắt và xem log compose dev |
+| `make run-dev-host` | Gateway chạy trên host với profile `dev`, trỏ tới `localhost:9092`, `localhost:6379`, `localhost:6380`, `localhost:8090` |
+| `make smoke` | Mint token → connect → `CONNECTED` → upstream `cmd` → push qua fake-router → ACK → `DeliveryAck` → disconnect |
+
+**CI bảo đảm local/dev chạy được** (GitHub Actions, là required check từ M1)
+- `local-start`, chạy trên ma trận `ubuntu-latest`, `macos-latest`, `windows-latest`:
+  1. `bootstrap`.
+  2. Chạy gateway với profile `local` ở chế độ nền, poll `/ready` ≤ 30 s.
+  3. `gateway-devtools client --once` (HELLO → PING → close).
+  4. Gửi SIGTERM, kiểm process thoát trong ≤ 15 s.
+  5. Khởi động lại ngay và ready lần nữa (R1, R4, R6).
+- `dev-start` trên `ubuntu-latest`: `make images up smoke down` (R2). Ở M1, compose chỉ có issuer và gateway; từ M2 có thêm Kafka và Redis.
 
 ---
 
@@ -791,6 +898,7 @@ Mọi giá trị dưới `gateway.limits`, `gateway.admission` và `gateway.broa
 | Fuzz (M3) | `FrameCodec.decode` và `HelloAuthHandler` với input ngẫu nhiên; chạy 10 phút không crash và không leak `ByteBuf` (leak detection `paranoid`) | Jazzer |
 | Benchmark (M3) | `FrameCodec` encode/decode, `PrincipalIndex`, `DeadlineWheel.tick` | JMH (profile `-Pjmh`) |
 | Smoke tải local | `make up` rồi `gateway-devtools client --load 50000 --ramp 2000`; kiểm lag p99 < 20 ms trên `/actuator/prometheus` | devenv |
+| Khởi động local/dev | Job CI `local-start` (Linux, macOS, Windows) và `dev-start` ở §9.1; IT chạy cả `gateway.mode=standalone` và `cluster` | GitHub Actions |
 
 Leak detection: `paranoid` trong unit test và IT, `disabled` trong cấu hình prod (§4.1).
 
@@ -800,9 +908,9 @@ Leak detection: `paranoid` trong unit test và IT, `disabled` trong cấu hình 
 
 | | Nội dung | Tiêu chí hoàn thành (exit) |
 |---|---|---|
-| **M1 Single-node** | `platform-parent`, `platform-contracts` (frame.proto), `platform-spring-starter` (observability, secrets, logging); `NettyGatewayServer`, `IoGroups`, `LoopContext`, `DeadlineWheel`; pipeline WS + TCP; `SslContextProvider` (chưa hot-reload); `FrameCodec`; `HelloAuthHandler` với JWT + resume ticket (file secret); `SessionHandler` (PING/PONG, REAUTH, close); `PrincipalIndex`; `AcceptGate` + `UpgradeGuard` (bucket, cap, per-IP, ramp cơ bản); management (`/ready`, `/live`, prometheus); metrics cốt lõi; devtools `issuer` + `client`; devenv (secret, issuer, gateway) | Unit test và IT M1 xanh; 50k session idle trên local với lag p99 < 20 ms; reconnect bằng ticket không gọi issuer; heap/session < 3 KB |
-| **M2 Cluster** | contracts `router`, `lifecycle`, `control`, `upstream`, `push`; `NodeIdentity`, lease, `RegistryWriter`, `RegistryResync`, `SeqReader`; `UpstreamPublisher` (2 producer) + lifecycle; `PushStreamService`, `AckBatcher`, `PendingAckWindow`; `TopicIndex`, `BroadcastPacer`; control push; `ControlEventConsumer` (revoke, cellmap, tenantcfg); `KickClient`; devtools `fake-router` + `fake-pushapi`; devenv có Kafka và Redis | E2E connect → push → ack → disconnect trên devenv (`make smoke`); diễn tập kill node: lease hết hạn sau ≤ 15 s, khởi động lại nhận epoch mới; Revoke đóng session trong < 10 s; IT M2 xanh |
-| **M3 Hardening** | `OutboundBudget`, `LoadShedLadder`, `SlowConsumerPolicy`; `DrainCoordinator`, recycling, `WarmUpRunner` + ramp đầy đủ; TLS hot-reload + session ticket key; toàn bộ kill switch; SSE fallback + `/v1/upstream`; PROXY protocol; mượn tenant cap; `EventLoopLagProbe` + `KernelStatsReader`; `trace.principal`; Jazzer, JMH; image Jib distroless; tài liệu ADR | IT drain, shed và slow consumer xanh; fuzz 10 phút sạch; image build và chạy trong devenv; release `0.1.0` |
+| **M1 Single-node** | `platform-parent`, `platform-contracts` (frame.proto), `platform-spring-starter` (observability, secrets, logging); `NettyGatewayServer`, `IoGroups`, `LoopContext`, `DeadlineWheel`; pipeline WS + TCP; `SslContextProvider` (chưa hot-reload); `FrameCodec`; `HelloAuthHandler` với JWT + resume ticket (file secret); `SessionHandler` (PING/PONG, REAUTH, close); `PrincipalIndex`; `AcceptGate` + `UpgradeGuard` (bucket, cap, per-IP, ramp cơ bản); management (`/ready`, `/live`, prometheus); metrics cốt lõi; **mode standalone + các port interface, `DevBootstrap`, `StartupDiagnostics`, Maven Wrapper, Makefile, image Jib**; devtools `issuer` + `token` + `client`; devenv (issuer, gateway) | Unit test và IT M1 xanh; **R1, R4, R5, R6 đạt và CI `local-start` xanh trên cả 3 OS; `dev-start` xanh**; 50k session idle trên local với lag p99 < 20 ms; reconnect bằng ticket không gọi issuer; heap/session < 3 KB |
+| **M2 Cluster** | contracts `router`, `lifecycle`, `control`, `upstream`, `push`; `NodeIdentity`, lease, `RegistryWriter`, `RegistryResync`, `SeqReader`; `UpstreamPublisher` (2 producer) + lifecycle; `PushStreamService`, `AckBatcher`, `PendingAckWindow`; `TopicIndex`, `BroadcastPacer`; control push; `ControlEventConsumer` (revoke, cellmap, tenantcfg); `KickClient`; devtools `fake-router` + `fake-pushapi`; devenv có Kafka (listener INTERNAL/EXTERNAL) và Redis standalone; retry dependency ở phase 0; `create-topics` | **R2, R3 đạt**; E2E connect → push → ack → disconnect trên devenv (`make smoke`); diễn tập kill node: lease hết hạn sau ≤ 15 s, khởi động lại nhận epoch mới; Revoke đóng session trong < 10 s; IT M2 xanh |
+| **M3 Hardening** | `OutboundBudget`, `LoadShedLadder`, `SlowConsumerPolicy`; `DrainCoordinator`, recycling, `WarmUpRunner` + ramp đầy đủ; TLS hot-reload + session ticket key; toàn bộ kill switch; SSE fallback + `/v1/upstream`; PROXY protocol; mượn tenant cap; `EventLoopLagProbe` + `KernelStatsReader`; `trace.principal`; Jazzer, JMH; image prod (flags JVM §4.1 tài liệu gốc); tài liệu ADR | IT drain, shed và slow consumer xanh; fuzz 10 phút sạch; image build và chạy trong devenv; release `0.1.0` |
 
 Mỗi milestone là một implementation plan riêng (writing-plans).
 
@@ -820,6 +928,8 @@ Mỗi milestone là một implementation plan riêng (writing-plans).
 | 0006 | `gw.control` đọc bằng `assign` + `seekToBeginning`, không commit | Spec §6.8 |
 | 0007 | Router gửi `MESSAGE` theo từng kết nối (`conn_id` bắt buộc) | Spec §6.3 |
 | 0008 | Monorepo tạm thời, giữ build độc lập cho từng thư mục (polyrepo-ready) | Spec §2 |
+| 0009 | Mode standalone qua port interface; Redis standalone ở local/dev | Spec §9.1 |
+| 0010 | Lease "epoch lớn hơn thắng" để restart nhanh không bị fence | Spec §6.1 |
 
 ---
 
@@ -832,6 +942,8 @@ Mỗi milestone là một implementation plan riêng (writing-plans).
 4. `tenant.blocked` đóng cả session đang mở (4013, retryAfter 300 s). Tài liệu gốc chỉ ghi "reject handshakes and pushes".
 5. Lua lease tách thành hai lệnh do ràng buộc slot của Redis Cluster (§6.1).
 6. Gateway đọc `seq:{p}` khi HELLO để điền `CONNECTED.seq` (§4.6) và đọc `seqepochs` (§6.7).
+7. Mode standalone và Redis standalone ở local/dev (§9.1): tài liệu gốc chỉ mô tả prod; các mode này phục vụ yêu cầu "code phải start được ở local và dev".
+8. Lease theo quy tắc "epoch lớn hơn thắng" (§6.1), thay cho "lease còn sống thì chặn", để restart nhanh không bị fence.
 
 **Câu hỏi còn mở** (không chặn M1):
 1. **Contract `seqepochs` với Push API** (§6.7): key, định dạng và người ghi cần Push API xác nhận trước M2. Nếu bị từ chối, phương án dự phòng là gửi `seq_epoch=0` và để SDK dựa vào `seq_epoch` trên từng PUSH.
