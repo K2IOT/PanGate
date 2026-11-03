@@ -43,14 +43,14 @@ Mục tiêu sizing: ~278k kết nối/node ở trạng thái thường, trần 5
 
 | Hạng mục | Chọn | Ghi chú |
 |---|---|---|
-| Ngôn ngữ / framework | Java 21, Spring Boot 3.5.x | Tài liệu gốc yêu cầu 3.x. Chưa lên Boot 4 |
-| Netty | 4.2.x, `MultiThreadIoEventLoopGroup` + `EpollIoHandler`; NIO fallback chỉ để phòng khi không có epoll; local (Ubuntu), dev và prod đều chạy epoll | API 4.2 thay `EpollEventLoopGroup` đã deprecated |
+| Ngôn ngữ / framework | Java 21, Spring Boot 3.5.16 (`platform-parent` kế thừa `spring-boot-starter-parent`, ghi đè `netty.version=4.2.20.Final`) | Tài liệu gốc yêu cầu 3.x. Chưa lên Boot 4 |
+| Netty | 4.2.20.Final (tcnative 2.0.85.Final theo netty-bom), `MultiThreadIoEventLoopGroup` + `EpollIoHandler`; NIO fallback chỉ để phòng khi không có epoll; local (Ubuntu), dev và prod đều chạy epoll | API 4.2 thay `EpollEventLoopGroup` đã deprecated |
 | TLS | `netty-tcnative-boringssl-static`, TLS 1.3, cert ECDSA P-256 | Không dùng JDK `SSLEngine` (§2) |
 | gRPC | `grpc-netty-shaded`, event loop group riêng, port 9090 | Tách hẳn khỏi data plane |
 | Redis | Lettuce 6.x: `RedisClusterClient` ở staging và prod, `RedisClient` standalone ở local và dev; chọn bằng `gateway.redis.topology`; một kết nối multiplexed cho mỗi master | §3.1, §9.1 |
 | Kafka | `kafka-clients` thuần, không dùng spring-kafka trên hot path | Kiểm soát `buffer.memory`, `acks`, `max.block.ms` |
 | Collections | fastutil (`Long2ObjectOpenHashMap`, `Object2ObjectOpenHashMap`, `ObjectArrayList`) | §4 |
-| Management | Spring WebFlux (Reactor Netty), port 8081, event loop riêng 1–2 thread | Không dùng Tomcat (§4) |
+| Management | JDK `com.sun.net.httpserver.HttpServer`, port 8081, executor 2 thread; Micrometer `PrometheusMeterRegistry.scrape()` | Không dùng Tomcat (§4). Không dùng WebFlux: Spring Boot 3.5 pin Reactor Netty 1.2 cho Netty 4.1, xung đột với Netty 4.2 trên data plane |
 | Metrics / trace | Micrometer → Prometheus; OpenTelemetry | §9 |
 | Proto | `protobuf-maven-plugin`; `buf lint` + `buf breaking` trong CI | §3.4 |
 | CLI devtools | picocli | |
@@ -64,7 +64,7 @@ Mục tiêu sizing: ~278k kết nối/node ở trạng thái thường, trần 5
 
 ```
 PanGate/
-├── Makefile                  # make bootstrap: build/install theo thứ tự parent → contracts → starter → gateway → devtools
+├── Makefile                  # make bootstrap: build/install theo thứ tự parent → contracts → starter → devtools → gateway
 ├── platform-parent/          # packaging=pom: dependencyManagement (BOM) + pluginManagement
 ├── platform-contracts/       # proto/pangate/v1/*.proto → contracts-java.jar
 ├── platform-spring-starter/  # cross-cutting tối thiểu cho gateway
@@ -89,7 +89,7 @@ PanGate/
 
 | File | Nội dung |
 |---|---|
-| `frame.proto` | `Frame` envelope (§3.3), `FrameType`, `DeliveryClass`, các payload `Hello`, `Connected`, `Ack`, `Reauth`, `Reconnect`, `Error`, `Subscribe` |
+| `frame.proto` | `Frame` envelope (§3.3), `FrameType`, `DeliveryClass`, các payload `Hello`, `Connected`, `Ack`, `Reauth`, `Reconnect`, `ErrorInfo`, `Subscribe` (payload lỗi đặt tên `ErrorInfo` để không trùng `java.lang.Error` trong code Java) |
 | `router.proto` | `service PushStream { rpc Stream(stream PushBatch) returns (stream DeliveryAck); }`, `PushItem`, `ControlOp`, `AckItem` |
 | `lifecycle.proto` | `ConnectionEvent` (§3.2) |
 | `control.proto` | `ControlEvent { Revoke, CellMap, TenantCfg }` (§3.2) |
@@ -132,7 +132,8 @@ Một file `docker-compose.yml` dùng chung cho cả hai môi trường (§9.1),
 
 - `make infra-up` chỉ bật nhóm mặc định (Kafka, Redis) và expose ra `localhost` để chạy gateway từ IDE (môi trường local).
 - `make up` bật thêm profile `app` (môi trường dev, toàn bộ trong Docker).
-- Volume `dev-secrets` dùng chung giữa `issuer` và `gateway`. Secret do `DevBootstrap` sinh ra lần đầu (§9.1).
+- Volume `dev-secrets` dùng chung giữa `issuer` và `gateway`. Secret do `DevBootstrap` sinh ra lần đầu (§9.1); `issuer` sinh `es256.pem` nếu chưa có. Ở dev, hai container này chạy `user: "0"` để ghi được vào named volume (image distroless mặc định chạy nonroot).
+- Image distroless không có shell hay curl. Healthcheck gọi class Java nhỏ có sẵn trong image: `java -cp @/app/jib-classpath-file com.pangate.gateway.tools.HealthCheck http://127.0.0.1:8081/ready` (devtools có lệnh `health` tương đương).
 - Redis chạy **standalone** ở local và dev, cluster chỉ ở staging và prod. Mọi Lua script trong spec chỉ đụng một key nên chạy giống hệt nhau trên hai mode. Lý do không dùng cluster ở đây: Redis Cluster trong Docker announce IP container, JVM trên máy không kết nối được.
 - PostgreSQL và ScyllaDB **không** có trong devenv của gateway vì gateway không dùng database. Chúng sẽ được thêm khi xây các platform service (§3.2 tài liệu gốc).
 
@@ -166,7 +167,7 @@ Một file `docker-compose.yml` dùng chung cho cả hai môi trường (§9.1),
 |---|---|---|---|
 | `gw-io-*` | `gateway.io.threads`, 0 = số vCPU (16) | Một `MultiThreadIoEventLoopGroup`. Không có boss group riêng: `gateway.listeners.ws.acceptors` (4) listener `SO_REUSEPORT` bind trên chính group này. Nếu không có epoll (fallback NIO), số acceptor bị ép về 1 và ghi INFO, vì bind nhiều lần cùng port sẽ lỗi | **Không** (BlockHound) |
 | `gw-grpc-*` | 2 event loop + executor 2 thread | Nhận và decode `PushBatch`, chia theo loop; flush `AckBatcher` | Không |
-| `gw-mgmt-*` | 1–2 | WebFlux :8081 | Không |
+| `gw-mgmt-*` | 2 | JDK `HttpServer` :8081 | Không |
 | `gw-ctl` | 1 platform thread | `KafkaConsumer.poll` trên `gw.control` | Có (poll) |
 | `gw-tick` | 1 `ScheduledExecutorService` | Sampler 100 ms (budget, shed ladder, lag probe), lease renew 5 s, refresh `seqepochs` 5 s | Không; mọi I/O đều async |
 | offload | virtual thread executor | Việc hiếm có thể block: fetch JWKS khi cache nguội, đọc secret | Có |
@@ -312,7 +313,7 @@ message Connected {
 message Ack       { repeated string msg_ids = 1; }                    // ≤ 32
 message Reauth    { string jwt = 1; string resume_ticket = 2; int64 session_expires_at_ms = 3; }
 message Reconnect { uint32 delay_ms = 1; bool re_bootstrap = 2; }
-message Error     { uint32 code = 1; string message = 2; bool retryable = 3;
+message ErrorInfo { uint32 code = 1; string message = 2; bool retryable = 3;
                     uint32 retry_after_ms = 4; bool fatal = 5; }
 message Subscribe { repeated string topics = 1; }                     // SUBSCRIBE / UNSUBSCRIBE
 ```
@@ -327,7 +328,8 @@ Các bổ sung so với tài liệu gốc, đều additive:
 1. Trước khi auth, frame nào khác `HELLO` cũng → 4000. Gateway đặt deadline HELLO 5 s ngay sau khi upgrade (§3.5).
 2. Xác thực credential:
    - `resume_ticket` → `ResumeTicketService.verify` (§4.7).
-   - `jwt` → `JwtVerifier`: ES256, `kid` tra trong `JwksCache`. Nếu không có `kid`, gửi một lần refresh lên offload executor (tối đa 1 lần/10 s cho cả node), kết quả quay về loop qua `execute`; vẫn thiếu thì 4001. Claims bắt buộc: `iss`, `aud = pangate-gw`, `exp`, `nbf`, `tenant`, `sub` (= principalId dạng `tenantId:userId`), `device`, `jti`, `topics` (danh sách glob, có thể rỗng).
+   - `jwt` → `JwtVerifier`: ES256, `kid` tra trong `JwksCache` (§4.9). Nếu không có `kid`, yêu cầu `JwksCache` refresh khẩn (singleflight, tối đa 1 lần/10 s cho cả node), kết quả quay về loop qua `execute`; chờ quá 2 s hoặc vẫn thiếu thì 4001. Claims bắt buộc: `iss`, `aud = pangate-gw`, `exp`, `nbf`, `tenant`, `sub` (= principalId dạng `tenantId:userId`), `device`, `jti`, `topics` (danh sách glob, có thể rỗng). `iss` chỉ được so khớp khi `gateway.auth.issuer` khác rỗng. `exp` và `nbf` được kiểm với độ lệch đồng hồ cho phép 30 s.
+   - Trong lúc chờ xác thực bất đồng bộ (refresh JWKS), gateway đặt `autoRead=false` trên channel; các frame client gửi nối tiếp sau HELLO được giữ trong socket và xử lý sau khi session đã ACTIVE, không bị coi là vi phạm.
 3. Các kiểm tra theo thứ tự; điều kiện đầu tiên sai sẽ đóng với mã tương ứng:
 
 | # | Kiểm tra | Mã |
@@ -364,6 +366,17 @@ Các bổ sung so với tài liệu gốc, đều additive:
 
 Enum `CloseCode` ánh xạ đầy đủ bảng §3.3 của tài liệu gốc: 1000, 1001, 4000, 4001, 4002, 4003, 4004, 4008, 4009, 4010, 4011, 4012, 4013, 4500. Mỗi giá trị mang `retryable` và `defaultRetryAfterMs`. Với WS, reason của close frame chứa `retryAfter=<ms>` khi có (4009, 4013).
 
+
+### 4.9 JwksCache
+
+- Nguồn: `gateway.auth.jwks-uri` (dev, prod) hoặc `gateway.auth.jwks-file` (local). Đặt cả hai, hoặc không đặt cái nào, là lỗi cấu hình và exit khi start.
+- **Refresh định kỳ** mỗi `gateway.auth.jwks-refresh` (mặc định 5 phút). Nếu response có `Cache-Control: max-age` thì dùng giá trị đó, kẹp trong [1 phút, 1 giờ]. Gửi `If-None-Match` với ETag lần trước; nhận `304` thì giữ nguyên. Nguồn file: kiểm `lastModified` mỗi 30 s.
+- Lịch chạy trên `gw-tick`. HTTP GET dùng JDK `HttpClient` (timeout 5 s) chạy trên virtual thread, không bao giờ chạy trên event loop.
+- Cập nhật bằng cách **thay toàn bộ tập key** qua `AtomicReference<Map<String kid, ECPublicKey>>`. Key không còn trong JWKS mới bị gỡ, nên key đã rotate hoặc bị thu hồi hết hiệu lực trong ≤ 1 chu kỳ. Chỉ nhận key `kty=EC`, `crv=P-256`, `use=sig` (nếu có), `alg=ES256` (nếu có); key khác bị bỏ qua kèm WARN.
+- **Refresh khẩn** khi gặp `kid` lạ: tối đa 1 lần/10 s cho cả node. Các yêu cầu đồng thời dùng chung một `CompletableFuture` (singleflight).
+- **Khi lỗi** (mạng, HTTP ≠ 200/304, JSON sai): giữ nguyên tập key cuối cùng hợp lệ, **không bao giờ xóa cache vì lỗi**; retry ở chu kỳ sau. Khi chưa từng tải thành công thì retry mỗi 10 s.
+- Metric: `gw_jwks_refresh_total{result=updated|not_modified|error}`, `gw_jwks_age_seconds` (thời gian kể từ lần tải thành công gần nhất), `gw_jwks_keys`. Cảnh báo khi `gw_jwks_age_seconds > 3600`.
+- Parse JWKS và verify chữ ký dùng `nimbus-jose-jwt`.
 ---
 
 ## 5. Session runtime
@@ -763,7 +776,7 @@ gateway:
     allowed-spiffe: spiffe://pangate/cell-1/push-router
     tls: { cert-file: /etc/pangate/grpc/gateway.crt, key-file: /etc/pangate/grpc/gateway.key, trust-file: /etc/pangate/grpc/spiffe-bundle.pem }
   push-api: { enabled: true, target: dns:///push-api:9443 }
-  auth: { jwks-uri: https://auth/.well-known/jwks.json, jwks-file: "" }   # local: jwks-file
+  auth: { jwks-uri: https://auth/.well-known/jwks.json, jwks-file: "", jwks-refresh: 5m }   # local: jwks-file
   redis:
     topology: cluster                                     # cluster | standalone
     registry-uri: redis://redis-registry:6379
@@ -823,7 +836,7 @@ Topic Kafka: profile `local` và `dev` đặt `gateway.kafka.create-topics=true`
 | `startup.dependency-timeout` | 30 s | 60 s | 120 s |
 | gRPC | Plaintext :9090 | Plaintext | mTLS |
 | Push API | Tắt | `fake-pushapi` | Push API |
-| Giới hạn | hard-cap 50k, soft-cap 40k, budget 256 MB, warm-up 50 vòng | hard-cap 200k, budget 1 GB, warm-up 200 vòng | Như §9 |
+| Giới hạn | hard-cap 100k, soft-cap 80k, per-IP 100k (để load test từ loopback), budget 256 MB, warm-up 50 vòng | hard-cap 200k, budget 1 GB, warm-up 200 vòng | Như §9 |
 | Leak detection | `simple` | `simple` | `disabled` |
 | JVM | Mặc định của IDE | `-Xmx1g -XX:MaxDirectMemorySize=1g` | Flags §4.1 tài liệu gốc (chỉ đặt trong image và Helm prod) |
 
@@ -844,7 +857,7 @@ Topic Kafka: profile `local` và `dev` đặt `gateway.kafka.create-topics=true`
 | Target | Việc |
 |---|---|
 | `make doctor` | Kiểm Java 21, Docker, các port 8443, 8883, 9090, 8081 còn trống và (từ M2) Kafka, Redis trên `localhost` có kết nối được không |
-| `make bootstrap` | `./mvnw install -DskipITs` theo thứ tự parent → contracts → starter → gateway → devtools |
+| `make bootstrap` | `./mvnw install -DskipITs` theo thứ tự parent → contracts → starter → devtools → gateway (IT của gateway dùng client trong devtools) |
 | `make infra-up` / `make infra-down` | Bật hoặc tắt Kafka + Redis (compose, nhóm mặc định) trên `localhost` cho local |
 | `make run-local` | `./mvnw -f gateway-service spring-boot:run -Dspring-boot.run.profiles=local` (tương đương chạy từ IDE) |
 | `make images` | Jib `dockerBuild` cho gateway và devtools |
@@ -905,9 +918,9 @@ Leak detection: `paranoid` trong unit test và IT, `disabled` trong cấu hình 
 
 | | Nội dung | Tiêu chí hoàn thành (exit) |
 |---|---|---|
-| **M1 Single-node** | `platform-parent`, `platform-contracts` (frame.proto), `platform-spring-starter` (observability, secrets, logging); `NettyGatewayServer`, `IoGroups`, `LoopContext`, `DeadlineWheel`; pipeline WS + TCP; `SslContextProvider` (chưa hot-reload); `FrameCodec`; `HelloAuthHandler` với JWT + resume ticket (file secret); `SessionHandler` (PING/PONG, REAUTH, close); `PrincipalIndex`; `AcceptGate` + `UpgradeGuard` (bucket, cap, per-IP, ramp cơ bản); management (`/ready`, `/live`, prometheus); metrics cốt lõi; **`DevBootstrap`, `StartupDiagnostics`, Maven Wrapper, Makefile, image Jib**; devtools `issuer` + `token` + `client`; devenv (profile `app`: issuer, gateway) | Unit test và IT M1 xanh; **R1–R4 đạt (local chưa cần infra), CI `local-start` và `dev-start` xanh**; 50k session idle trên local với lag p99 < 20 ms; reconnect bằng ticket không gọi issuer; heap/session < 3 KB |
+| **M1 Single-node** | `platform-parent`, `platform-contracts` (frame.proto), `platform-spring-starter` (observability, secrets, logging); `NettyGatewayServer`, `IoGroups`, `LoopContext`, `DeadlineWheel`; pipeline WS + TCP; `SslContextProvider` (chưa hot-reload); `FrameCodec`; `HelloAuthHandler` với JWT + resume ticket (file secret); `SessionHandler` (PING/PONG, REAUTH, close); `PrincipalIndex`; `AcceptGate` + `UpgradeGuard` (bucket, cap, per-IP, ramp cơ bản); `JwksCache` (§4.9); management JDK HttpServer (`/ready`, `/live`, prometheus); metrics cốt lõi + `EventLoopLagProbe` (chỉ đo, chưa nối shed ladder); **`DevBootstrap`, `StartupDiagnostics`, Maven Wrapper, Makefile, image Jib**; devtools `issuer` + `token` + `client`; devenv (profile `app`: issuer, gateway). Frame `UPSTREAM`, `SUBSCRIBE`, `UNSUBSCRIBE` nhận `ERROR{4500, "UNSUPPORTED", retryable=false, fatal=false}` cho tới M2; `ACK` bị bỏ qua | Unit test và IT M1 xanh; **R1–R4 đạt (local chưa cần infra), CI `local-start` và `dev-start` xanh**; 50k session idle trên local với lag p99 < 20 ms; reconnect bằng ticket không gọi issuer; heap/session < 3 KB |
 | **M2 Cluster** | contracts `router`, `lifecycle`, `control`, `upstream`, `push`; `NodeIdentity`, lease, `RegistryWriter`, `RegistryResync`, `SeqReader`; `UpstreamPublisher` (2 producer) + lifecycle; `PushStreamService`, `AckBatcher`, `PendingAckWindow`; `TopicIndex`, `BroadcastPacer`; control push; `ControlEventConsumer` (revoke, cellmap, tenantcfg); `KickClient`; devtools `fake-router` + `fake-pushapi`; devenv có Kafka (listener INTERNAL/EXTERNAL), Redis standalone, `fake-pushapi`, `make infra-up`; retry dependency ở phase 0; `create-topics` | **R1 với Kafka + Redis trên `localhost` và R2 đầy đủ đạt**; E2E connect → push → ack → disconnect trên devenv (`make smoke`); diễn tập kill node: lease hết hạn sau ≤ 15 s, khởi động lại nhận epoch mới; Revoke đóng session trong < 10 s; IT M2 xanh |
-| **M3 Hardening** | `OutboundBudget`, `LoadShedLadder`, `SlowConsumerPolicy`; `DrainCoordinator`, recycling, `WarmUpRunner` + ramp đầy đủ; TLS hot-reload + session ticket key; toàn bộ kill switch; SSE fallback + `/v1/upstream`; PROXY protocol; mượn tenant cap; `EventLoopLagProbe` + `KernelStatsReader`; `trace.principal`; Jazzer, JMH; image prod (flags JVM §4.1 tài liệu gốc); tài liệu ADR | IT drain, shed và slow consumer xanh; fuzz 10 phút sạch; image build và chạy trong devenv; release `0.1.0` |
+| **M3 Hardening** | `OutboundBudget`, `LoadShedLadder`, `SlowConsumerPolicy`; `DrainCoordinator`, recycling, `WarmUpRunner` + ramp đầy đủ; TLS hot-reload + session ticket key; toàn bộ kill switch; SSE fallback + `/v1/upstream`; PROXY protocol; mượn tenant cap; `KernelStatsReader`; `trace.principal`; Jazzer, JMH; image prod (flags JVM §4.1 tài liệu gốc); tài liệu ADR | IT drain, shed và slow consumer xanh; fuzz 10 phút sạch; image build và chạy trong devenv; release `0.1.0` |
 
 Mỗi milestone là một implementation plan riêng (writing-plans).
 
@@ -941,6 +954,7 @@ Mỗi milestone là một implementation plan riêng (writing-plans).
 6. Gateway đọc `seq:{p}` khi HELLO để điền `CONNECTED.seq` (§4.6) và đọc `seqepochs` (§6.7).
 7. Môi trường local và dev (§9.1) cùng Redis standalone: tài liệu gốc chỉ mô tả prod; phần này phục vụ yêu cầu "code phải start được ở local và dev".
 8. Lease theo quy tắc "epoch lớn hơn thắng" (§6.1), thay cho "lease còn sống thì chặn", để restart nhanh không bị fence.
+9. Cổng quản trị dùng JDK `HttpServer` thay WebFlux (§1). Tài liệu gốc §4 cho phép cả hai; WebFlux xung đột version Netty.
 
 **Câu hỏi còn mở** (không chặn M1):
 1. **Contract `seqepochs` với Push API** (§6.7): key, định dạng và người ghi cần Push API xác nhận trước M2. Nếu bị từ chối, phương án dự phòng là gửi `seq_epoch=0` và để SDK dựa vào `seq_epoch` trên từng PUSH.
