@@ -6,6 +6,7 @@ import com.pangate.contracts.v1.Reauth;
 import com.pangate.gateway.auth.ConnectClaims;
 import com.pangate.gateway.auth.JwtAuthFlow;
 import com.pangate.gateway.auth.JwtResult;
+import com.pangate.gateway.auth.PrincipalHandshakeLimiter;
 import com.pangate.gateway.auth.ResumeTicket;
 import com.pangate.gateway.auth.ResumeTicketService;
 import com.pangate.gateway.config.LimitsHolder;
@@ -22,12 +23,15 @@ public final class SessionHandler extends ChannelInboundHandlerAdapter {
 
   private final ResumeTicketService tickets;
   private final JwtAuthFlow jwt;
+  private final PrincipalHandshakeLimiter limiter;
   private final LimitsHolder limits;
   private final String cell;
 
-  public SessionHandler(ResumeTicketService tickets, JwtAuthFlow jwt, LimitsHolder limits, String cell) {
+  public SessionHandler(ResumeTicketService tickets, JwtAuthFlow jwt, PrincipalHandshakeLimiter limiter,
+      LimitsHolder limits, String cell) {
     this.tickets = tickets;
     this.jwt = jwt;
+    this.limiter = limiter;
     this.limits = limits;
     this.cell = cell;
   }
@@ -56,6 +60,11 @@ public final class SessionHandler extends ChannelInboundHandlerAdapter {
       req = Reauth.parseFrom(frame.getPayload());
     } catch (InvalidProtocolBufferException e) {
       throw new ProtocolException(CloseCode.BAD_FRAME, "malformed REAUTH");
+    }
+    // Same per-principal budget as HELLO (spec §5.6 → §4.6 h), checked before the ES256 verify it protects.
+    if (!limiter.tryAcquire(session.identity().principalId())) {
+      session.close(CloseCode.RATE_LIMITED, CloseCode.RATE_LIMITED.name());
+      return;
     }
     jwt.verify(ctx.channel(), req.getJwt(), now, result -> {
       if (session.state() != SessionState.ACTIVE) {

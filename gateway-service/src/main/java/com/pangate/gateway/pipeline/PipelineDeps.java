@@ -31,6 +31,6 @@ public record PipelineDeps(
   }
 
   SessionHandler sessionHandler() {
-    return new SessionHandler(tickets, jwt, limits, props.cell());
+    return new SessionHandler(tickets, jwt, handshakeLimiter, limits, props.cell());
   }
 }

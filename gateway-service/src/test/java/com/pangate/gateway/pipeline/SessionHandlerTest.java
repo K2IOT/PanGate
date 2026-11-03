@@ -25,6 +25,8 @@ class SessionHandlerTest {
 
   private final LoopFixture f = new LoopFixture();
   private final AuthFixture auth = new AuthFixture(f::now);
+  private final com.pangate.gateway.auth.PrincipalHandshakeLimiter limiter =
+      new com.pangate.gateway.auth.PrincipalHandshakeLimiter(20, () -> f.now() * 1000);
   private Session session;
 
   @BeforeEach
@@ -35,7 +37,7 @@ class SessionHandlerTest {
     session = f.tracker.admit(f.channel, f.loop, InetAddress.getLoopbackAddress());
     session.activate(new Session.Identity("t1", "t1:u1", "d1", "ios", "1.0", Set.of()), "CONN",
         f.now() - 100, f.now() + 3_600, 7, List.of("t1:news.*"));
-    f.channel.pipeline().addLast(new SessionHandler(auth.tickets, auth.flow, f.limits, "cell-1"), new ErrorTerminator());
+    f.channel.pipeline().addLast(new SessionHandler(auth.tickets, auth.flow, limiter, f.limits, "cell-1"), new ErrorTerminator());
   }
 
   private Frame in(Frame frame) {
@@ -95,6 +97,22 @@ class SessionHandlerTest {
 
     assertThat(ErrorInfo.parseFrom(out.getPayload()).getCode()).isEqualTo(4001);
     assertThat(session.closeCode()).isEqualTo(CloseCode.AUTH_FAILED);
+  }
+
+  @Test
+  void reauthBeyondTwentyPerMinuteIsRateLimited() throws Exception {
+    for (int i = 0; i < 20; i++) {
+      limiter.tryAcquire("t1:u1");
+    }
+    Frame req = Frame.newBuilder().setType(FrameType.FRAME_TYPE_REAUTH)
+        .setPayload(Reauth.newBuilder().setJwt(auth.jwt("t1:u1", "d1", f.now())).build().toByteString()).build();
+
+    Frame out = in(req);
+
+    ErrorInfo e = ErrorInfo.parseFrom(out.getPayload());
+    assertThat(e.getCode()).isEqualTo(4009);
+    assertThat(e.getRetryAfterMs()).isEqualTo(30_000);
+    assertThat(session.closeCode()).isEqualTo(CloseCode.RATE_LIMITED);
   }
 
   @Test
