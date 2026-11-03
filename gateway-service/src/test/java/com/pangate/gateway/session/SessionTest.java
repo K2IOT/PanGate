@@ -113,6 +113,25 @@ class SessionTest {
   }
 
   @Test
+  void touchingASessionOffItsEventLoopFailsFastWhenAssertionsAreOn() throws Exception {
+    assertThat(Boolean.getBoolean("pangate.assertLoop")).as("tests run with -Dpangate.assertLoop=true").isTrue();
+    io.netty.channel.EventLoopGroup group = new io.netty.channel.MultiThreadIoEventLoopGroup(1,
+        (java.util.concurrent.ThreadFactory) r -> new Thread(r, "test-io"), io.netty.channel.nio.NioIoHandler.newFactory());
+    try {
+      com.pangate.gateway.loop.LoopContext real =
+          new com.pangate.gateway.loop.LoopContext(0, group.next(), 128, f.clockSec::get);
+      Session s = new Session(real, new io.netty.channel.embedded.EmbeddedChannel(), 1, f.now(), f.limits,
+          InetAddress.getLoopbackAddress());
+
+      org.assertj.core.api.Assertions.assertThatThrownBy(() -> s.touch(f.now()))
+          .isInstanceOf(IllegalStateException.class).hasMessageContaining("event loop");
+      group.next().submit(() -> s.touch(f.now())).get();
+    } finally {
+      group.shutdownGracefully(0, 1, java.util.concurrent.TimeUnit.SECONDS);
+    }
+  }
+
+  @Test
   void closeIsIdempotent() {
     Session s = admit();
 

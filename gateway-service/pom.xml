@@ -161,6 +161,9 @@
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
           <argLine>${blockhound.argLine}</argLine>
+          <systemPropertyVariables>
+            <pangate.assertLoop>true</pangate.assertLoop>
+          </systemPropertyVariables>
           <excludes>
             <exclude>**/*IT.java</exclude>
           </excludes>
@@ -171,6 +174,9 @@
         <artifactId>maven-failsafe-plugin</artifactId>
         <configuration>
           <argLine>${blockhound.argLine}</argLine>
+          <systemPropertyVariables>
+            <pangate.assertLoop>true</pangate.assertLoop>
+          </systemPropertyVariables>
           <includes>
             <include>**/*IT.java</include>
           </includes>

@@ -214,6 +214,13 @@ class GatewayLocalIT {
         s.getOutputStream().write("GET / HTTP/1.1\r\n".getBytes(StandardCharsets.US_ASCII));
       }
     }
+    for (int i = 0; i < 5; i++) {
+      // Mid-upgrade: TLS completes, then a partial HTTP upgrade request, then the client vanishes.
+      try (SSLSocket tlsSocket = (SSLSocket) trustingContext().getSocketFactory().createSocket("localhost", ports.ws())) {
+        tlsSocket.getOutputStream().write("GET /v1/ws HTTP/1.1\r\nHost: local".getBytes(StandardCharsets.US_ASCII));
+        tlsSocket.getOutputStream().flush();
+      }
+    }
     for (int i = 0; i < 10; i++) {
       GatewayClient c = GatewayClient.connect(wss(ports), tls(), T);
       c.hello(Hellos.jwt(token(principal(), "d" + i), "d" + i), T);
@@ -292,6 +299,37 @@ class GatewayLocalIT {
     own.close();
 
     assertThat(c.awaitClose(T).code()).isEqualTo(1001);
+  }
+
+  @Test
+  void ticketSignedWithRotatedOutKeyStillResumesAfterRestart() throws Exception {
+    Ports p = Ports.free();
+    ConfigurableApplicationContext first = start(p);
+    Connected connected;
+    try (GatewayClient c = GatewayClient.connect(wss(p), tls(), T)) {
+      connected = c.hello(Hellos.jwt(token(principal(), "d1"), "d1"), T);
+    } finally {
+      first.close();
+    }
+    Path keys = devDir.resolve("ticket-keys");
+    String current = Files.readString(keys.resolve("current"));
+    String next = Files.readString(keys.resolve("next"));
+    byte[] fresh = new byte[32];
+    new java.security.SecureRandom().nextBytes(fresh);
+    try {
+      Files.writeString(keys.resolve("prev"), current);
+      Files.writeString(keys.resolve("current"), next);
+      Files.writeString(keys.resolve("next"), "99 " + java.util.Base64.getEncoder().encodeToString(fresh) + "\n");
+      ConfigurableApplicationContext second = start(p);
+      try (GatewayClient c = GatewayClient.connect(wss(p), tls(), T)) {
+        assertThat(c.hello(Hellos.ticket(connected.getResumeTicket(), "d1"), T).getConnId()).hasSize(26);
+      } finally {
+        second.close();
+      }
+    } finally {
+      Files.writeString(keys.resolve("next"), next);
+      Files.writeString(keys.resolve("current"), current);
+    }
   }
 
   @Test

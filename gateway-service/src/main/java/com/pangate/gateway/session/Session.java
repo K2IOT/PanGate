@@ -21,6 +21,9 @@ public final class Session extends WheelNode implements Deadlined {
 
   public static final AttributeKey<Session> KEY = AttributeKey.valueOf("pangate.session");
 
+  /** -Dpangate.assertLoop=true (on in tests): fail fast when a session is mutated off its owning event loop. */
+  private static final boolean ASSERT_LOOP = Boolean.getBoolean("pangate.assertLoop");
+
   /** Who the session belongs to, fixed at HELLO. */
   public record Identity(String tenantId, String principalId, String deviceId, String platform, String sdkVersion,
       Set<String> capabilities) {}
@@ -58,6 +61,7 @@ public final class Session extends WheelNode implements Deadlined {
 
   /** WS upgrade (or TLS + ALPN on TCP) completed: HELLO must arrive within helloTimeout. */
   public void markUpgraded(long nowSec) {
+    checkLoop();
     helloDeadlineSec = nowSec + limits.current().helloTimeout().toSeconds();
     reschedule();
   }
@@ -65,6 +69,7 @@ public final class Session extends WheelNode implements Deadlined {
   /** {@code authAtSec}/{@code expAtSec} are epoch seconds; expiry is tracked on the monotonic clock. */
   public void activate(Identity id, String connId, long authAtSec, long expAtSec, long authJtiHash,
       List<String> topics) {
+    checkLoop();
     this.identity = id;
     this.connId = connId;
     this.authAtSec = authAtSec;
@@ -77,6 +82,7 @@ public final class Session extends WheelNode implements Deadlined {
   }
 
   public void reauth(long authAtSec, long expAtSec, long jtiHash, List<String> topics) {
+    checkLoop();
     this.authAtSec = authAtSec;
     setExpiry(expAtSec);
     this.authJtiHash = jtiHash;
@@ -91,6 +97,7 @@ public final class Session extends WheelNode implements Deadlined {
 
   /** Any inbound frame: a plain field write, the wheel catches up lazily. */
   public void touch(long nowSec) {
+    checkLoop();
     lastSeenSec = nowSec;
   }
 
@@ -105,6 +112,7 @@ public final class Session extends WheelNode implements Deadlined {
 
   @Override
   public void onDeadline(long nowSec) {
+    checkLoop();
     if (state == SessionState.CLOSED) {
       return;
     }
@@ -123,6 +131,7 @@ public final class Session extends WheelNode implements Deadlined {
 
   /** Idempotent; cleanup of indexes happens when the channel's close future completes (SessionTracker). */
   public void close(CloseCode code, String reason) {
+    checkLoop();
     if (state == SessionState.CLOSED) {
       return;
     }
@@ -138,6 +147,13 @@ public final class Session extends WheelNode implements Deadlined {
     state = SessionState.CLOSED;
     if (closeCode == null) {
       closeCode = code;
+    }
+  }
+
+  private void checkLoop() {
+    if (ASSERT_LOOP && !loop.inLoop()) {
+      throw new IllegalStateException("Session " + sessionKey + " mutated off its event loop on "
+          + Thread.currentThread().getName());
     }
   }
 
