@@ -8,11 +8,12 @@ import com.pangate.contracts.v1.Hello;
 import com.pangate.gateway.auth.ConnectClaims;
 import com.pangate.gateway.auth.JwtAuthFlow;
 import com.pangate.gateway.auth.JwtResult;
-import com.pangate.gateway.auth.PrincipalHandshakeLimiter;
+import com.pangate.gateway.auth.HelloPolicy;
 import com.pangate.gateway.auth.ResumeTicket;
 import com.pangate.gateway.auth.ResumeTicketService;
 import com.pangate.gateway.auth.TicketVerifyResult;
 import com.pangate.gateway.config.LimitsHolder;
+import com.pangate.gateway.control.TenantLimitsStore;
 import com.pangate.gateway.metrics.GatewayMetrics;
 import com.pangate.gateway.protocol.ChannelAttrs;
 import com.pangate.gateway.protocol.CloseCode;
@@ -43,7 +44,8 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
   private final ResumeTicketService tickets;
   private final JwtAuthFlow jwt;
   private final SessionTracker tracker;
-  private final PrincipalHandshakeLimiter limiter;
+  private final HelloPolicy policy;
+  private final TenantLimitsStore tenants;
   private final LimitsHolder limits;
   private final String cell;
   private final GatewayMetrics metrics;
@@ -54,11 +56,13 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
   private boolean failed;
 
   public HelloAuthHandler(ResumeTicketService tickets, JwtAuthFlow jwt, SessionTracker tracker,
-      PrincipalHandshakeLimiter limiter, LimitsHolder limits, String cell, GatewayMetrics metrics, SeqReader seq) {
+      HelloPolicy policy, TenantLimitsStore tenants, LimitsHolder limits, String cell, GatewayMetrics metrics,
+      SeqReader seq) {
     this.tickets = tickets;
     this.jwt = jwt;
     this.tracker = tracker;
-    this.limiter = limiter;
+    this.policy = policy;
+    this.tenants = tenants;
     this.limits = limits;
     this.cell = cell;
     this.metrics = metrics;
@@ -155,15 +159,9 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
       return;
     }
     ResumeTicket t = valid.ticket();
-    if (!cell.equals(t.cell())) {
-      fail(session, CloseCode.WRONG_CELL, "wrong_cell");
-      return;
+    if (admitted(session, hello, t.cell(), t)) {
+      activate(ctx, session, hello, t);
     }
-    if (!limiter.tryAcquire(t.principal())) {
-      fail(session, CloseCode.RATE_LIMITED, "rate_limited");
-      return;
-    }
-    activate(ctx, session, hello, t);
   }
 
   private void withJwt(ChannelHandlerContext ctx, Session session, Hello hello, JwtResult result, long now) {
@@ -172,13 +170,25 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
       return;
     }
     ConnectClaims c = v.claims();
-    if (!limiter.tryAcquire(c.principal())) {
-      fail(session, CloseCode.RATE_LIMITED, "rate_limited");
-      return;
-    }
     long exp = now + limits.current().sessionTtl().toSeconds();
-    activate(ctx, session, hello, new ResumeTicket(cell, c.tenant(), c.principal(), c.device(), now, exp,
-        ResumeTicketService.jtiHash(c.jti()), c.topics()));
+    ResumeTicket t = new ResumeTicket(cell, c.tenant(), c.principal(), c.device(), now, exp,
+        ResumeTicketService.jtiHash(c.jti()), c.topics());
+    if (admitted(session, hello, cell, t)) {
+      activate(ctx, session, hello, t);
+    }
+  }
+
+  /** Spec §4.6 step 3 c–h; on rejection the session is closed with the check's code. */
+  private boolean admitted(Session session, Hello hello, String ticketCell, ResumeTicket t) {
+    var rejection = policy.check(new HelloPolicy.Candidate(ticketCell, t.tenant(), t.principal(), t.device(),
+        t.authJtiHash(), hello.getSdkVersion(), session.origin()));
+    rejection.ifPresent(r -> {
+      failed = true;
+      metrics.handshake(r.metricResult());
+      releaseHeld();
+      session.close(r.code(), r.code().name(), r.retryAfterMs());
+    });
+    return rejection.isEmpty();
   }
 
   private void activate(ChannelHandlerContext ctx, Session session, Hello hello, ResumeTicket t) {
@@ -212,7 +222,7 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
     ctx.writeAndFlush(Frames.connected(Connected.newBuilder()
         .setConnId(connId)
         .setCell(cell)
-        .setHeartbeatSec((int) limits.current().heartbeatInterval().toSeconds())
+        .setHeartbeatSec(tenants.policy(t.tenant()).heartbeatSec())
         .setResumeTicket(ticket)
         .setServerTimeMs(System.currentTimeMillis())
         .setSessionExpiresAtMs(t.expSec() * 1000)

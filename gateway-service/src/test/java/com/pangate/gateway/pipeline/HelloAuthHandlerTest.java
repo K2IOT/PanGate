@@ -60,8 +60,9 @@ class HelloAuthHandlerTest {
     f.channel.attr(ChannelAttrs.PROTOCOL_READY).set(true);
     session = f.tracker.admit(f.channel, f.loop, InetAddress.getLoopbackAddress());
     f.channel.pipeline().addLast(new FrameCodec(f.limits),
-        new HelloAuthHandler(auth.tickets, auth.flow, f.tracker, limiter, f.limits, "cell-1", f.metrics, seq),
-        new SessionHandler(auth.tickets, auth.flow, limiter, f.limits, "cell-1", f.upstream), new ErrorTerminator());
+        new HelloAuthHandler(auth.tickets, auth.flow, f.tracker, f.policy(limiter), f.tenants, f.limits, "cell-1",
+            f.metrics, seq),
+        new SessionHandler(auth.tickets, auth.flow, limiter, f.policy(limiter), f.limits, "cell-1", f.upstream), new ErrorTerminator());
   }
 
   private static ByteBuf bytes(Frame frame) {
@@ -286,8 +287,8 @@ class HelloAuthHandlerTest {
     g.channel.attr(ChannelAttrs.PROTOCOL_READY).set(true);
     Session other = g.tracker.admit(g.channel, g.loop, InetAddress.getLoopbackAddress());
     g.channel.pipeline().addLast(new FrameCodec(g.limits),
-        new HelloAuthHandler(a2.tickets, a2.flow, g.tracker, new PrincipalHandshakeLimiter(20, () -> g.now() * 1000),
-            g.limits, "cell-1", g.metrics, seq), new ErrorTerminator());
+        new HelloAuthHandler(a2.tickets, a2.flow, g.tracker, g.policy(new PrincipalHandshakeLimiter(20,
+            () -> g.now() * 1000)), g.tenants, g.limits, "cell-1", g.metrics, seq), new ErrorTerminator());
     g.channel.writeInbound(bytes(hello(Hello.newBuilder().setJwt(a2.jwt("t1:u2", "d2", g.now())).setDeviceId("d2")
         .setSdkVersion(new String("js-1.2.3")).setPlatform(new String("web")).build())));
     g.channel.runPendingTasks();
@@ -383,5 +384,40 @@ class HelloAuthHandlerTest {
     seqResult.complete(OptionalLong.of(1));
     f.channel.runPendingTasks();
     assertThat(f.channel.config().isAutoRead()).isTrue();
+  }
+  @Test
+  void revokedPrincipalGets4003() throws Exception {
+    f.revocations.add(com.pangate.gateway.control.RevocationList.principalKey("t1:u1"), Long.MAX_VALUE);
+
+    assertThat(closeCodeAfter(jwtHello(auth.jwt("t1:u1", "d1", f.now()), "d1"))).isEqualTo(4003);
+  }
+
+  @Test
+  void foreignCellTenantGets4011() throws Exception {
+    f.cells.put("t1", "cell-2");
+
+    assertThat(closeCodeAfter(jwtHello(auth.jwt("t1:u1", "d1", f.now()), "d1"))).isEqualTo(4011);
+  }
+
+  @Test
+  void blockedTenantGets4009WithRetryAfter() throws Exception {
+    f.tenants.apply(com.pangate.contracts.v1.TenantCfg.newBuilder()
+        .setScope(com.pangate.contracts.v1.Scope.SCOPE_TENANT).setScopeId("t1")
+        .setSwitches(com.pangate.contracts.v1.KillSwitches.newBuilder().setTenantBlocked(true)).build());
+    f.channel.writeInbound(bytes(hello(jwtHello(auth.jwt("t1:u1", "d1", f.now()), "d1"))));
+    List<Frame> out = outbound();
+
+    ErrorInfo e = ErrorInfo.parseFrom(out.get(out.size() - 1).getPayload());
+    assertThat(e.getCode()).isEqualTo(4009);
+    assertThat(e.getRetryAfterMs()).isEqualTo(300_000);
+  }
+
+  @Test
+  void connectedUsesTenantHeartbeat() throws Exception {
+    f.tenants.apply(com.pangate.contracts.v1.TenantCfg.newBuilder()
+        .setScope(com.pangate.contracts.v1.Scope.SCOPE_TENANT).setScopeId("t1")
+        .setSwitches(com.pangate.contracts.v1.KillSwitches.newBuilder().setHeartbeatIntervalSec(45)).build());
+
+    assertThat(send(jwtHello(auth.jwt("t1:u1", "d1", f.now()), "d1")).getHeartbeatSec()).isEqualTo(45);
   }
 }

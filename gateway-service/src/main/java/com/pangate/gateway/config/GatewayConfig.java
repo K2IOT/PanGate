@@ -102,8 +102,9 @@ public class GatewayConfig {
 
   @Bean
   SessionTracker sessionTracker(LoopRegistry loops, PrincipalIndex principals, IpConnectionCounter ips,
-      LimitsHolder limits, GatewayMetrics metrics, List<SessionListener> listeners) {
-    return new SessionTracker(loops, principals, ips, limits, metrics, System::currentTimeMillis, listeners);
+      LimitsHolder limits, GatewayMetrics metrics, List<SessionListener> listeners,
+      com.pangate.gateway.control.TenantLimitsStore tenants) {
+    return new SessionTracker(loops, principals, ips, limits, metrics, System::currentTimeMillis, listeners, tenants);
   }
 
   @Bean
@@ -143,10 +144,11 @@ public class GatewayConfig {
   PipelineDeps pipelineDeps(GatewayProperties p, LimitsHolder limits, LoopRegistry loops, NodeState node,
       IpConnectionCounter ips, AdmissionController admission, SessionTracker tracker, GatewayMetrics metrics,
       SslContextProvider tls, ResumeTicketService tickets, JwtAuthFlow jwt, PrincipalHandshakeLimiter limiter,
-      SeqReader seq, UpstreamPublisher upstream) {
+      SeqReader seq, UpstreamPublisher upstream, com.pangate.gateway.auth.HelloPolicy policy,
+      com.pangate.gateway.control.TenantLimitsStore tenants) {
     AcceptGate gate = new AcceptGate(node, loops, limits, ips, admission, tracker, metrics);
-    return new PipelineDeps(p, limits, loops, node, gate, tls, tickets, jwt, tracker, limiter, metrics, seq,
-        upstream);
+    return new PipelineDeps(p, limits, loops, node, gate, tls, tickets, jwt, tracker, limiter, policy, tenants,
+        metrics, seq, upstream);
   }
 
   @Bean

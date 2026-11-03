@@ -2,11 +2,13 @@ package com.pangate.gateway.session;
 
 import com.pangate.gateway.config.GatewayLimits;
 import com.pangate.gateway.config.LimitsHolder;
+import com.pangate.gateway.control.TenantLimitsStore;
 import com.pangate.gateway.loop.Deadlined;
 import com.pangate.gateway.loop.LoopContext;
 import com.pangate.gateway.loop.WheelNode;
 import com.pangate.gateway.protocol.ChannelCloser;
 import com.pangate.gateway.protocol.CloseCode;
+import com.pangate.gateway.protocol.Frames;
 import io.netty.channel.Channel;
 import io.netty.util.AttributeKey;
 import java.net.InetAddress;
@@ -41,6 +43,7 @@ public final class Session extends WheelNode implements Deadlined {
   private final Channel channel;
   private final long sessionKey;
   private final LimitsHolder limits;
+  private final TenantLimitsStore tenants;
   private final InetAddress remoteAddress;
   private final long acceptedAtSec;
   private SessionState state = SessionState.HANDSHAKING;
@@ -55,6 +58,7 @@ public final class Session extends WheelNode implements Deadlined {
   private long authJtiHash;
   private List<String> topicPatterns = List.of();
   private long lastSeenSec;
+  private long drainDeadlineSec = Long.MAX_VALUE;
   private CloseCode closeCode;
   // Inbound rate limit state (SessionRateLimiter); tokens < 0 = not initialised yet.
   float tokens = -1;
@@ -69,12 +73,13 @@ public final class Session extends WheelNode implements Deadlined {
   private String closeReason;
 
   public Session(LoopContext loop, Channel channel, long sessionKey, long acceptedAtSec, LimitsHolder limits,
-      InetAddress remoteAddress) {
+      InetAddress remoteAddress, TenantLimitsStore tenants) {
     this.loop = loop;
     this.channel = channel;
     this.sessionKey = sessionKey;
     this.acceptedAtSec = acceptedAtSec;
     this.limits = limits;
+    this.tenants = tenants;
     this.remoteAddress = remoteAddress;
     this.lastSeenSec = acceptedAtSec;
   }
@@ -126,7 +131,8 @@ public final class Session extends WheelNode implements Deadlined {
     GatewayLimits l = limits.current();
     return switch (state) {
       case HANDSHAKING -> Math.min(acceptedAtSec + l.handshakeTimeout().toSeconds(), helloDeadlineSec);
-      case ACTIVE -> Math.min(lastSeenSec + l.idleTimeoutSec(), expMonoSec);
+      case ACTIVE -> Math.min(lastSeenSec + idleTimeoutSec(), expMonoSec);
+      case DRAINING -> Math.min(Math.min(lastSeenSec + idleTimeoutSec(), expMonoSec), drainDeadlineSec);
       case CLOSED -> Long.MAX_VALUE;
     };
   }
@@ -140,6 +146,8 @@ public final class Session extends WheelNode implements Deadlined {
     if (nowSec >= nextDeadlineSec()) {
       if (state == SessionState.HANDSHAKING) {
         close(CloseCode.HELLO_TIMEOUT, "HELLO_TIMEOUT");
+      } else if (state == SessionState.DRAINING && nowSec >= drainDeadlineSec) {
+        close(CloseCode.GOING_AWAY, "DRAINED");
       } else if (nowSec >= expMonoSec) {
         close(CloseCode.SESSION_EXPIRED, "SESSION_EXPIRED");
       } else {
@@ -150,8 +158,39 @@ public final class Session extends WheelNode implements Deadlined {
     reschedule();
   }
 
+  /** Recomputes the wheel slot now (a kill switch shortened the heartbeat; lazy rebucketing would be too late). */
+  public void refreshDeadline() {
+    checkLoop();
+    reschedule();
+  }
+
+  /** Heartbeat timeout of the tenant's effective policy (kill switch heartbeat.intervalSec applies at once). */
+  private long idleTimeoutSec() {
+    return tenants.policy(identity == null ? null : identity.tenantId()).idleTimeoutSec();
+  }
+
+  /**
+   * Tells the client to reconnect after {@code delayMs} (spec §5.9, §6.8 cell migration) and closes it with 1001
+   * {@code delay + 30 s} later if it has not. Only from ACTIVE.
+   */
+  public void drain(long delayMs, boolean reBootstrap) {
+    checkLoop();
+    if (state != SessionState.ACTIVE) {
+      return;
+    }
+    channel.writeAndFlush(Frames.reconnect(com.pangate.contracts.v1.Reconnect.newBuilder()
+        .setDelayMs((int) delayMs).setReBootstrap(reBootstrap).build()));
+    state = SessionState.DRAINING;
+    drainDeadlineSec = loop.nowSec() + (delayMs + 999) / 1000 + 30;
+    reschedule();
+  }
+
   /** Idempotent; cleanup of indexes happens when the channel's close future completes (SessionTracker). */
   public void close(CloseCode code, String reason) {
+    close(code, reason, code.defaultRetryAfterMs());
+  }
+
+  public void close(CloseCode code, String reason, long retryAfterMs) {
     checkLoop();
     if (state == SessionState.CLOSED) {
       return;
@@ -160,7 +199,7 @@ public final class Session extends WheelNode implements Deadlined {
     closeCode = code;
     closeReason = reason;
     loop.wheel().remove(this);
-    ChannelCloser.close(channel, code, reason, code.defaultRetryAfterMs());
+    ChannelCloser.close(channel, code, reason, retryAfterMs);
   }
 
   /** Records how a session ended when the channel closed without {@link #close} (client close, reset). */

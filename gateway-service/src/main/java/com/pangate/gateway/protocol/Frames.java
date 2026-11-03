@@ -5,6 +5,7 @@ import com.pangate.contracts.v1.ErrorInfo;
 import com.pangate.contracts.v1.Frame;
 import com.pangate.contracts.v1.FrameType;
 import com.pangate.contracts.v1.Reauth;
+import com.pangate.contracts.v1.Reconnect;
 
 /** Gateway-to-client frame factories. */
 public final class Frames {
@@ -26,6 +27,10 @@ public final class Frames {
 
   public static Frame reauth(Reauth r) {
     return Frame.newBuilder().setType(FrameType.FRAME_TYPE_REAUTH).setPayload(r.toByteString()).build();
+  }
+
+  public static Frame reconnect(Reconnect r) {
+    return Frame.newBuilder().setType(FrameType.FRAME_TYPE_RECONNECT).setPayload(r.toByteString()).build();
   }
 
   public static Frame error(int code, String message, boolean retryable, boolean fatal) {

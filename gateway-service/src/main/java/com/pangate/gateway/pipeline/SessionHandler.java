@@ -26,15 +26,17 @@ public final class SessionHandler extends ChannelInboundHandlerAdapter {
   private final ResumeTicketService tickets;
   private final JwtAuthFlow jwt;
   private final PrincipalHandshakeLimiter limiter;
+  private final com.pangate.gateway.auth.HelloPolicy policy;
   private final LimitsHolder limits;
   private final String cell;
   private final UpstreamPublisher upstream;
 
   public SessionHandler(ResumeTicketService tickets, JwtAuthFlow jwt, PrincipalHandshakeLimiter limiter,
-      LimitsHolder limits, String cell, UpstreamPublisher upstream) {
+      com.pangate.gateway.auth.HelloPolicy policy, LimitsHolder limits, String cell, UpstreamPublisher upstream) {
     this.tickets = tickets;
     this.jwt = jwt;
     this.limiter = limiter;
+    this.policy = policy;
     this.limits = limits;
     this.cell = cell;
     this.upstream = upstream;
@@ -83,6 +85,12 @@ public final class SessionHandler extends ChannelInboundHandlerAdapter {
       ConnectClaims c = v.claims();
       long exp = now + limits.current().sessionTtl().toSeconds();
       long jtiHash = ResumeTicketService.jtiHash(c.jti());
+      var rejection = policy.checkPolicy(new com.pangate.gateway.auth.HelloPolicy.Candidate(cell, c.tenant(),
+          c.principal(), c.device(), jtiHash, session.identity().sdkVersion(), session.origin()));
+      if (rejection.isPresent()) {
+        session.close(rejection.get().code(), rejection.get().code().name(), rejection.get().retryAfterMs());
+        return;
+      }
       String ticket = tickets.issue(new ResumeTicket(cell, c.tenant(), c.principal(), c.device(), now, exp, jtiHash,
           c.topics()));
       session.reauth(now, exp, jtiHash, c.topics());

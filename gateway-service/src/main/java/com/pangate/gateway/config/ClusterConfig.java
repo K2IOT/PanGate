@@ -1,6 +1,11 @@
 package com.pangate.gateway.config;
 
+import com.pangate.gateway.auth.HelloPolicy;
+import com.pangate.gateway.auth.PrincipalHandshakeLimiter;
 import com.pangate.gateway.control.CellMapView;
+import com.pangate.gateway.control.ControlEnforcer;
+import com.pangate.gateway.control.TenantMigrator;
+import com.pangate.gateway.session.PrincipalIndex;
 import com.pangate.gateway.control.ControlEventConsumer;
 import com.pangate.gateway.control.ControlEventHandler;
 import com.pangate.gateway.control.ControlState;
@@ -166,5 +171,25 @@ public class ClusterConfig {
     metrics.gauge("gw.registry.resync.pending", resync, RegistryResync::pending);
     identity.onReEpoch(e -> resync.resync());
     return resync;
+  }
+
+  @Bean
+  HelloPolicy helloPolicy(GatewayProperties p, CellMapView cells, RevocationList revocations,
+      TenantLimitsStore tenants, PrincipalHandshakeLimiter limiter) {
+    return new HelloPolicy(p.cell(), cells, revocations, tenants, limiter, System::currentTimeMillis);
+  }
+
+  @Bean
+  TenantMigrator tenantMigrator(LoopRegistry loops, CellMapView cells, TickScheduler tick) {
+    TenantMigrator migrator = new TenantMigrator(loops, cells,
+        () -> java.util.concurrent.ThreadLocalRandom.current().nextLong(0, 5_001));
+    tick.scheduleAtFixedRate(migrator::tick, Duration.ofSeconds(5));
+    return migrator;
+  }
+
+  @Bean
+  ControlEnforcer controlEnforcer(PrincipalIndex principals, LoopRegistry loops, TenantLimitsStore tenants,
+      CellMapView cells, TenantMigrator migrator) {
+    return new ControlEnforcer(principals, loops, tenants, cells, migrator, System::currentTimeMillis);
   }
 }

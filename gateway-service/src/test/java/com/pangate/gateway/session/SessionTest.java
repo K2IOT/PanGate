@@ -121,7 +121,7 @@ class SessionTest {
       com.pangate.gateway.loop.LoopContext real =
           new com.pangate.gateway.loop.LoopContext(0, group.next(), 128, f.clockSec::get);
       Session s = new Session(real, new io.netty.channel.embedded.EmbeddedChannel(), 1, f.now(), f.limits,
-          InetAddress.getLoopbackAddress());
+          InetAddress.getLoopbackAddress(), f.tenants);
 
       org.assertj.core.api.Assertions.assertThatThrownBy(() -> s.touch(f.now()))
           .isInstanceOf(IllegalStateException.class).hasMessageContaining("event loop");
@@ -157,5 +157,50 @@ class SessionTest {
     assertThat(f.loop.sessionCount()).isZero();
     assertThat(f.ips.trackedKeys()).isZero();
     assertThat(s.closeCode()).isEqualTo(CloseCode.ABNORMAL);
+  }
+  @Test
+  void drainingClosesWith1001AfterDelayPlus30s() throws Exception {
+    Session s = f.tracker.admit(f.channel, f.loop, java.net.InetAddress.getLoopbackAddress());
+    s.activate(id(), "CONN", 0L, f.wallNow(), f.wallNow() + 86_400, 0, List.of());
+
+    s.drain(2_500, true);
+    f.channel.runPendingTasks();
+    com.pangate.contracts.v1.Frame reconnect = f.channel.readOutbound();
+
+    assertThat(reconnect.getType()).isEqualTo(com.pangate.contracts.v1.FrameType.FRAME_TYPE_RECONNECT);
+    assertThat(s.state()).isEqualTo(SessionState.DRAINING);
+    long start = f.now();
+    f.advanceTo(start + 32);
+    assertThat(f.channel.isOpen()).isTrue();
+    s.touch(f.now());
+    f.advanceTo(start + 33);
+    assertThat(s.closeCode()).isEqualTo(com.pangate.gateway.protocol.CloseCode.GOING_AWAY);
+    assertThat(s.closeReason()).isEqualTo("DRAINED");
+  }
+
+  @Test
+  void tenantHeartbeatSwitchChangesIdleTimeoutImmediately() {
+    Session s = f.tracker.admit(f.channel, f.loop, java.net.InetAddress.getLoopbackAddress());
+    s.activate(id(), "CONN", 0L, f.wallNow(), f.wallNow() + 86_400, 0, List.of());
+    long start = f.now();
+    f.tenants.apply(com.pangate.contracts.v1.TenantCfg.newBuilder()
+        .setScope(com.pangate.contracts.v1.Scope.SCOPE_TENANT).setScopeId(s.identity().tenantId())
+        .setSwitches(com.pangate.contracts.v1.KillSwitches.newBuilder().setHeartbeatIntervalSec(10)).build());
+    s.refreshDeadline();  // ControlEnforcer does this for every affected session
+
+    f.advanceTo(start + 29);
+    assertThat(f.channel.isOpen()).isTrue();
+    f.advanceTo(start + 30);
+    assertThat(s.closeReason()).isEqualTo("HEARTBEAT_TIMEOUT");
+  }
+
+  @Test
+  void closeWithExplicitRetryAfter() {
+    Session s = f.tracker.admit(f.channel, f.loop, java.net.InetAddress.getLoopbackAddress());
+    s.activate(id(), "CONN", 0L, f.wallNow(), f.wallNow() + 86_400, 0, List.of());
+
+    s.close(com.pangate.gateway.protocol.CloseCode.OVERLOADED, "TENANT_BLOCKED", 300_000);
+
+    assertThat(s.closeCode()).isEqualTo(com.pangate.gateway.protocol.CloseCode.OVERLOADED);
   }
 }

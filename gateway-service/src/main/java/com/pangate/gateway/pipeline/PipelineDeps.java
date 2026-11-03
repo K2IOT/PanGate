@@ -24,6 +24,8 @@ public record PipelineDeps(
     JwtAuthFlow jwt,
     SessionTracker tracker,
     PrincipalHandshakeLimiter handshakeLimiter,
+    com.pangate.gateway.auth.HelloPolicy policy,
+    com.pangate.gateway.control.TenantLimitsStore tenants,
     GatewayMetrics metrics,
     SeqReader seq,
     UpstreamPublisher upstream) {
@@ -31,10 +33,10 @@ public record PipelineDeps(
   static final ErrorTerminator ERROR_TERMINATOR = new ErrorTerminator();
 
   HelloAuthHandler helloAuth() {
-    return new HelloAuthHandler(tickets, jwt, tracker, handshakeLimiter, limits, props.cell(), metrics, seq);
+    return new HelloAuthHandler(tickets, jwt, tracker, policy, tenants, limits, props.cell(), metrics, seq);
   }
 
   SessionHandler sessionHandler() {
-    return new SessionHandler(tickets, jwt, handshakeLimiter, limits, props.cell(), upstream);
+    return new SessionHandler(tickets, jwt, handshakeLimiter, policy, limits, props.cell(), upstream);
   }
 }

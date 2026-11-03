@@ -1,6 +1,10 @@
 package com.pangate.gateway.test;
 
 import com.pangate.gateway.config.LimitsHolder;
+import com.pangate.gateway.auth.HelloPolicy;
+import com.pangate.gateway.auth.PrincipalHandshakeLimiter;
+import com.pangate.gateway.control.CellMapView;
+import com.pangate.gateway.control.RevocationList;
 import com.pangate.gateway.control.TenantLimitsStore;
 import com.pangate.gateway.lifecycle.TestKafka;
 import com.pangate.gateway.lifecycle.TopicNames;
@@ -42,6 +46,8 @@ public final class LoopFixture {
   public final SessionTracker tracker;
   public final NodeState node = new NodeState();
   public final TenantLimitsStore tenants = new TenantLimitsStore("cell-1", () -> limits.current());
+  public final RevocationList revocations = new RevocationList();
+  public final CellMapView cells = new CellMapView("cell-1");
   public final TopicNames topics = new TopicNames("c1", List.of("telemetry", "cmd", "cmd_result", "read"));
   /** Not auto-completing: tests call completeNext() / errorNext(). */
   public final MockProducer<String, byte[]> reliable =
@@ -55,11 +61,16 @@ public final class LoopFixture {
     loop = new LoopContext(0, channel.eventLoop(), 128, clockSec::get, () -> clockSec.get() + wallOffset.get());
     loops = LoopRegistry.fromContexts(List.of(loop));
     tracker = new SessionTracker(loops, principals, ips, limits, metrics, () -> clockSec.get() * 1000,
-        listeners);
+        listeners, tenants);
     node.nodeId("n1");
     node.epoch(7);
     upstream = new UpstreamPublisher(TestKafka.of(reliable, telemetry), topics, node, "cell-1", tenants, metrics,
         () -> clockSec.get() * 1000);
+  }
+
+  /** HELLO/REAUTH policy (spec §4.6 c–h) over this fixture's control stores and the given limiter. */
+  public HelloPolicy policy(PrincipalHandshakeLimiter limiter) {
+    return new HelloPolicy("cell-1", cells, revocations, tenants, limiter, () -> wallNow() * 1000);
   }
 
   /** Moves the clock and runs the wheel as the per-second ticker would. */

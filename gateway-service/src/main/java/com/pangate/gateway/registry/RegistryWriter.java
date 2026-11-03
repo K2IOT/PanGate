@@ -50,7 +50,7 @@ public final class RegistryWriter implements SessionListener {
     st.whenComplete((v, e) -> {
       if (e != null) {
         redisErrors.increment();
-        retry.retryLater("register", () -> registerOnce(s, single), () -> s.state() == SessionState.ACTIVE);
+        retry.retryLater("register", () -> registerOnce(s, single), () -> s.state() == SessionState.ACTIVE || s.state() == SessionState.DRAINING);
       }
     });
     return st;

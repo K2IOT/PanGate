@@ -37,7 +37,7 @@ class SessionHandlerTest {
     session = f.tracker.admit(f.channel, f.loop, InetAddress.getLoopbackAddress());
     session.activate(new Session.Identity("t1", "t1:u1", "d1", "ios", "1.0", Set.of()), "CONN", 0L,
         f.now() - 100, f.now() + 3_600, 7, List.of("t1:news.*"));
-    f.channel.pipeline().addLast(new SessionHandler(auth.tickets, auth.flow, limiter, f.limits, "cell-1", f.upstream), new ErrorTerminator());
+    f.channel.pipeline().addLast(new SessionHandler(auth.tickets, auth.flow, limiter, f.policy(limiter), f.limits, "cell-1", f.upstream), new ErrorTerminator());
   }
 
   private Frame in(Frame frame) {
@@ -126,8 +126,10 @@ class SessionHandlerTest {
     Session s = g.tracker.admit(g.channel, g.loop, InetAddress.getLoopbackAddress());
     s.activate(new Session.Identity("t0", "t1:u1", "d1", "ios", "1.0", Set.of()), "CONN", 0L, g.now(), g.now() + 3_600,
         0, List.of());
-    g.channel.pipeline().addLast(new SessionHandler(a.tickets, a.flow,
-        new com.pangate.gateway.auth.PrincipalHandshakeLimiter(20, () -> g.now() * 1000), g.limits, "cell-1", g.upstream),
+    com.pangate.gateway.auth.PrincipalHandshakeLimiter gl =
+        new com.pangate.gateway.auth.PrincipalHandshakeLimiter(20, () -> g.now() * 1000);
+    g.channel.pipeline().addLast(new SessionHandler(a.tickets, a.flow, gl, g.policy(gl), g.limits, "cell-1",
+        g.upstream),
         new ErrorTerminator());
 
     g.channel.writeInbound(Frame.newBuilder().setType(FrameType.FRAME_TYPE_REAUTH)

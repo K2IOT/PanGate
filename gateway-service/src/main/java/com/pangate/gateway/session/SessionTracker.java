@@ -27,9 +27,11 @@ public final class SessionTracker {
   private final GatewayMetrics metrics;
   private final LongSupplier epochMillis;
   private final java.util.List<SessionListener> listeners;
+  private final com.pangate.gateway.control.TenantLimitsStore tenants;
 
   public SessionTracker(LoopRegistry loops, PrincipalIndex principals, IpConnectionCounter ips, LimitsHolder limits,
-      GatewayMetrics metrics, LongSupplier epochMillis, java.util.List<SessionListener> listeners) {
+      GatewayMetrics metrics, LongSupplier epochMillis, java.util.List<SessionListener> listeners,
+      com.pangate.gateway.control.TenantLimitsStore tenants) {
     this.loops = loops;
     this.principals = principals;
     this.ips = ips;
@@ -37,11 +39,12 @@ public final class SessionTracker {
     this.metrics = metrics;
     this.epochMillis = epochMillis;
     this.listeners = listeners;
+    this.tenants = tenants;
   }
 
   /** Called on the channel's loop after admission (the IP counter is already incremented). */
   public Session admit(Channel ch, LoopContext loop, InetAddress remote) {
-    Session s = new Session(loop, ch, loop.nextSessionKey(), loop.nowSec(), limits, remote);
+    Session s = new Session(loop, ch, loop.nextSessionKey(), loop.nowSec(), limits, remote, tenants);
     ch.attr(Session.KEY).set(s);
     loop.register(s);
     loop.incrementActive();

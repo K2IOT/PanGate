@@ -39,6 +39,7 @@ class UpstreamPublisherTest {
   private final LoopFixture f = new LoopFixture();
   private final AuthFixture auth = new AuthFixture(f::now);
   private Session session;
+  private final PrincipalHandshakeLimiter limiter = new PrincipalHandshakeLimiter(20, () -> f.now() * 1000);
 
   @BeforeEach
   void activeSession() {
@@ -52,7 +53,7 @@ class UpstreamPublisherTest {
     session.activate(new Session.Identity("t1", "t1:u1", "d1", "ios", "1.0", Set.of()), "CONN", 0L,
         f.wallNow(), f.wallNow() + 3_600, 0, List.of());
     f.channel.pipeline().addLast(new SessionHandler(auth.tickets, auth.flow,
-        new PrincipalHandshakeLimiter(20, () -> f.now() * 1000), f.limits, "cell-1", publisher),
+        limiter, f.policy(limiter), f.limits, "cell-1", publisher),
         ErrorTerminatorAccess.create());
   }
 
@@ -143,7 +144,7 @@ class UpstreamPublisherTest {
     UpstreamPublisher p = new UpstreamPublisher(TestKafka.of(throwing, g.telemetry), g.topics, g.node, "cell-1",
         g.tenants, g.metrics, () -> 0L);
     f.channel.pipeline().addLast(new SessionHandler(auth.tickets, auth.flow,
-        new PrincipalHandshakeLimiter(20, () -> f.now() * 1000), f.limits, "cell-1", p),
+        limiter, f.policy(limiter), f.limits, "cell-1", p),
         ErrorTerminatorAccess.create());
 
     ErrorInfo e = error(send(upstream("cmd", "m1")).get(0));
