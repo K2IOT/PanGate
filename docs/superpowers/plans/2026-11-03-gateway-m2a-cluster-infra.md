@@ -990,3 +990,20 @@ git commit -m "chore: M2a smoke with upstream ack, compose infra wiring, CI infr
 - Revoke đóng session trong < 10 s (IT).
 - IT M2a xanh; heap/session < 5 KB; lag p99 < 20 ms với 18k session.
 - E2E connect → push → ack → disconnect thuộc tiêu chí của **M2b**.
+
+## Kết quả đo M2a
+
+Đo trong container phát triển (`ulimit -n` 20000), Docker 1 node Kafka 3.9.1 và Redis 7.4.2.
+
+| Chỉ số | Kết quả | Ngưỡng |
+|---|---|---|
+| Ready ở local (jar, profile `local`, infra trên `localhost`) | 5,8 s | ≤ 30 s (R1) |
+| Dừng bằng SIGTERM | 0,5 s; chạy lại ngay lấy epoch mới (3 → 4), không bị fence | ≤ 15 s (R3) |
+| Compose dev từ trạng thái lạnh tới healthy | 22 s; `SMOKE OK (connected, pong, upstream-ack, resume)` | ≤ 90 s (R2) |
+| Heap/session (10k idle, sau warm-up) | 4.889 B | < 5.120 B |
+| Lag p99 với 18k session idle | 1,6 ms | < 20 ms |
+| Revoke principal → đóng 4003 | Đạt trong `GatewayClusterIT` | < 10 s |
+| Drill lease | TTL ≤ 15 s; restart nhận epoch +1; pause Redis → `/ready` 503 "node lease lost", sau khi Redis hồi phục thì có epoch mới và registry được resync | ≤ 15 s |
+| Test | 261 unit + 52 IT (`GatewayLocalIT` 12, `GatewayClusterIT` 13, component IT 27) | xanh |
+
+Ghi chú về phép đo heap: `idle-memory.sh` giờ chụp baseline sau một vòng warm-up 1000 session. Nếu không, khoảng 5–6 MB pool cố định của Kafka producer và Lettuce bị chia cho N, và kết quả phụ thuộc vào N (đo được 5.231 B với N=10k và khoảng 6.000 B với N=5k). Phần tăng thật so với M1 (4.690 B) là khoảng 200 B, chủ yếu do `Session` thêm 64 B field (rate limit, áp lực upstream, drain).

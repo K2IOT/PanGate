@@ -79,4 +79,25 @@ class GatewayClientTest {
           .isInstanceOfSatisfying(GatewayClosedException.class, e -> assertThat(e.closeInfo().code()).isEqualTo(4012));
     }
   }
+  @Test
+  void upstreamReturnsAck() {
+    try (GatewayClient c = GatewayClient.connect(ws(), ClientTls.insecure(), T)) {
+      c.hello(Hellos.jwt("t", "d1"), T);
+
+      com.pangate.contracts.v1.Frame ack = c.upstream("cmd", "m-9", "x".getBytes(), T);
+
+      assertThat(ack.getType()).isEqualTo(com.pangate.contracts.v1.FrameType.FRAME_TYPE_UPSTREAM_ACK);
+      assertThat(ack.getMsgId()).isEqualTo("m-9");
+    }
+  }
+
+  @Test
+  void upstreamReturnsErrorFrame() {
+    try (GatewayClient c = GatewayClient.connect(ws(), ClientTls.insecure(), T)) {
+      c.hello(Hellos.jwt("t", "d1"), T);
+
+      assertThat(c.upstream("nope", "m-1", new byte[0], T).getType())
+          .isEqualTo(com.pangate.contracts.v1.FrameType.FRAME_TYPE_ERROR);
+    }
+  }
 }

@@ -107,7 +107,14 @@ final class FakeGatewayServer implements AutoCloseable {
           .setPayload(Connected.newBuilder().setConnId("01TEST").setHeartbeatSec(30).build().toByteString()).build(),
           websocket);
     } else if (in.getType() == FrameType.FRAME_TYPE_PING) {
-      write(ch, Frame.newBuilder().setType(FrameType.FRAME_TYPE_PONG).setMsgId(in.getMsgId()).build(), websocket);
+      write(ch, Frame.newBuilder().setType(FrameType.FRAME_TYPE_PONG).setMsgId(in.getMsgId()).build(), websocket);    } else if (in.getType() == FrameType.FRAME_TYPE_UPSTREAM) {
+      if ("cmd".equals(in.getHeadersOrDefault("type", ""))) {
+        write(ch, Frame.newBuilder().setType(FrameType.FRAME_TYPE_UPSTREAM_ACK).setMsgId(in.getMsgId()).build(),
+            websocket);
+      } else {
+        write(ch, Frame.newBuilder().setType(FrameType.FRAME_TYPE_ERROR).setPayload(ErrorInfo.newBuilder()
+            .setCode(4000).setMessage("unknown type").build().toByteString()).build(), websocket);
+      }
     }
   }
 

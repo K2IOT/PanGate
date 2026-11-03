@@ -16,7 +16,8 @@ import picocli.CommandLine.ArgGroup;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 
-@Command(name = "smoke", description = "End-to-end check: token -> HELLO -> PING -> close -> resume with ticket.")
+@Command(name = "smoke",
+    description = "End-to-end check: token -> HELLO -> PING -> UPSTREAM cmd -> close -> resume with ticket.")
 public final class SmokeCommand implements Callable<Integer> {
 
   private static final Duration T = Duration.ofSeconds(10);
@@ -44,6 +45,13 @@ public final class SmokeCommand implements Callable<Integer> {
         first = c.hello(Hellos.jwt(token, DEVICE), T);
         step = "PING";
         c.ping(T);
+        step = "UPSTREAM cmd -> UPSTREAM_ACK";
+        String msgId = java.util.UUID.randomUUID().toString();
+        com.pangate.contracts.v1.Frame answer = c.upstream("cmd", msgId, "smoke".getBytes(), T);
+        if (answer.getType() != com.pangate.contracts.v1.FrameType.FRAME_TYPE_UPSTREAM_ACK) {
+          throw new IllegalStateException("expected UPSTREAM_ACK, got " + answer.getType() + " "
+              + com.pangate.contracts.v1.ErrorInfo.parseFrom(answer.getPayload()));
+        }
       }
 
       step = "reconnect + HELLO (resume ticket)";
@@ -55,7 +63,7 @@ public final class SmokeCommand implements Callable<Integer> {
               + " -> " + second.getSessionExpiresAtMs());
         }
       }
-      System.out.println("SMOKE OK");
+      System.out.println("SMOKE OK (connected, pong, upstream-ack, resume)");
       return 0;
     } catch (Exception e) {
       System.out.println("SMOKE FAILED at step '" + step + "': " + e);

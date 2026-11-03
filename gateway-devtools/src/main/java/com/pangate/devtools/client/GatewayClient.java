@@ -137,18 +137,30 @@ public final class GatewayClient implements AutoCloseable {
     return await(FrameType.FRAME_TYPE_PONG, timeout);
   }
 
+  /** Sends UPSTREAM {@code type} and waits for the gateway's answer: UPSTREAM_ACK (msg_id) or ERROR. */
+  public Frame upstream(String type, String msgId, byte[] payload, Duration timeout) {
+    send(Frame.newBuilder().setType(FrameType.FRAME_TYPE_UPSTREAM).setMsgId(msgId).putHeaders("type", type)
+        .setPayload(com.google.protobuf.ByteString.copyFrom(payload)).build());
+    return awaitFirst(f -> (f.getType() == FrameType.FRAME_TYPE_UPSTREAM_ACK && msgId.equals(f.getMsgId()))
+        || f.getType() == FrameType.FRAME_TYPE_ERROR, "UPSTREAM_ACK or ERROR", timeout);
+  }
+
   /** Waits for the next frame of {@code type}, discarding other frames. */
   public Frame await(FrameType type, Duration timeout) {
+    return awaitFirst(f -> f.getType() == type, type.name(), timeout);
+  }
+
+  private Frame awaitFirst(java.util.function.Predicate<Frame> match, String what, Duration timeout) {
     long deadline = System.nanoTime() + timeout.toNanos();
     try {
       while (true) {
         long left = deadline - System.nanoTime();
         if (left <= 0) {
-          throw new IllegalStateException(new TimeoutException("no " + type + " within " + timeout));
+          throw new IllegalStateException(new TimeoutException("no " + what + " within " + timeout));
         }
         Frame f = inbound.poll(Math.min(left, TimeUnit.MILLISECONDS.toNanos(50)), TimeUnit.NANOSECONDS);
         if (f != null) {
-          if (f.getType() == type) {
+          if (match.test(f)) {
             return f;
           }
           continue;

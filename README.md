@@ -5,7 +5,8 @@ Connection gateway (Netty on Spring Boot) for 10M long-lived client connections.
 ## Requirements
 
 - JDK 21
-- Docker with Compose (only for the `dev` environment)
+- Docker with Compose: Kafka and Redis for `local` (`make infra-up`), everything for `dev`, Testcontainers for
+  `make verify`
 
 ## Build
 
@@ -20,6 +21,7 @@ Modules build in order: `platform-parent` → `platform-contracts` → `platform
 
 ## Run
 
-- **Local (IDE):** see [gateway-service/README.md](gateway-service/README.md) — profile `local`, secrets auto-generated in `~/.pangate-dev`.
+- **Local (IDE):** `make infra-up` (Kafka `localhost:9092`, Redis `localhost:6379`), then see
+  [gateway-service/README.md](gateway-service/README.md) — profile `local`, secrets auto-generated in `~/.pangate-dev`.
 - **Dev (Docker):** `make bootstrap images up smoke`, then `make down`.
 - Checks: `make doctor`, `make local-check`, `make memory-check` (< 5 KB/session), `make load-check N=18000` (TODO: `N=50000` on a machine with `ulimit -n` ≥ 120000).

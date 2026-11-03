@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Heap per idle session (spec §11, M1 exit: < 5 KB): baseline heap after GC, open N sessions from a separate
 # devtools process, GC again, divide. Usage: idle-memory.sh <gateway-jar> <devtools-exec-jar> [N=10000]
+# Before the baseline a warm-up round (WARMUP sessions, default 1000) connects and disconnects, so node-wide pools
+# that fill on first use (Kafka producer buffer pool, Lettuce/Netty caches: a few MB, bounded, independent of N)
+# are in the baseline instead of being divided by N.
 set -euo pipefail
 
 GATEWAY_JAR=${1:?gateway jar}
@@ -31,6 +34,24 @@ for _ in $(seq 1 30); do
   [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/ready)" = "200" ] && break
   sleep 1
 done
+WARMUP=${WARMUP:-1000}
+java -jar "$DEVTOOLS_JAR" client --url wss://localhost:8443/v1/ws --ca "$GATEWAY_DEV_DIR/ca.crt" \
+  --key "$GATEWAY_DEV_DIR/es256.pem" --load "$WARMUP" --ramp 2000 >"$CLOG" 2>&1 &
+CPID=$!
+for _ in $(seq 1 60); do
+  grep -q "^connected=$WARMUP " "$CLOG" && break
+  sleep 1
+done
+kill "$CPID" 2>/dev/null || true
+wait "$CPID" 2>/dev/null || true
+CPID=""
+for _ in $(seq 1 30); do
+  ACTIVE=$(curl -s http://127.0.0.1:8081/actuator/prometheus \
+    | awk '/^gw_connections_active/ {s += $NF} END {printf "%.0f", s}')
+  [ "$ACTIVE" = "0" ] && break
+  sleep 1
+done
+sleep 3
 BASE=$(heap)
 
 java -jar "$DEVTOOLS_JAR" client --url wss://localhost:8443/v1/ws --ca "$GATEWAY_DEV_DIR/ca.crt" \
