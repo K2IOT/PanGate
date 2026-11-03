@@ -1,0 +1,104 @@
+// Client <-> gateway protocol pangate.v1 (spec §4.5; source architecture §3.3).
+// Every WebSocket binary message (or length-prefixed TCP record) carries exactly one Frame.
+syntax = "proto3";
+
+package pangate.v1;
+
+option java_package = "com.pangate.contracts.v1";
+option java_multiple_files = true;
+
+enum FrameType {
+  FRAME_TYPE_UNSPECIFIED = 0;
+  FRAME_TYPE_HELLO = 1;         // client -> gateway
+  FRAME_TYPE_CONNECTED = 2;     // gateway -> client
+  FRAME_TYPE_PING = 3;          // client -> gateway
+  FRAME_TYPE_PONG = 4;          // gateway -> client
+  FRAME_TYPE_PUSH = 5;          // gateway -> client
+  FRAME_TYPE_ACK = 6;           // client -> gateway
+  FRAME_TYPE_UPSTREAM = 7;      // client -> gateway
+  FRAME_TYPE_UPSTREAM_ACK = 8;  // gateway -> client
+  FRAME_TYPE_SUBSCRIBE = 9;     // client -> gateway
+  FRAME_TYPE_UNSUBSCRIBE = 10;  // client -> gateway
+  FRAME_TYPE_RPC_REQ = 11;      // gateway -> client
+  FRAME_TYPE_RPC_RES = 12;      // client -> gateway
+  FRAME_TYPE_REAUTH = 13;       // both directions
+  FRAME_TYPE_RECONNECT = 14;    // gateway -> client
+  FRAME_TYPE_ERROR = 15;        // gateway -> client
+}
+
+enum DeliveryClass {
+  DELIVERY_CLASS_UNSPECIFIED = 0;
+  DELIVERY_CLASS_EPHEMERAL = 1;
+  DELIVERY_CLASS_RELIABLE = 2;
+  DELIVERY_CLASS_ORDERED = 3;
+}
+
+message Frame {
+  FrameType type = 1;
+  string msg_id = 2;              // ULID; PUSH, UPSTREAM, RPC
+  uint64 seq = 3;                 // per-principal; RELIABLE / ORDERED pushes
+  uint32 seq_epoch = 4;           // bumps if the seq counter is ever reset
+  string correlation_id = 5;      // RPC_REQ / RPC_RES
+  DeliveryClass class = 6;
+  bytes payload = 7;              // one of the payload messages below, or application bytes
+  map<string, string> headers = 8; // traceparent, content-type, type (UPSTREAM)
+  uint32 flags = 9;               // bit0 = zstd-compressed payload
+  string topic = 10;              // broadcasts only
+  uint64 topic_seq = 11;          // RELIABLE broadcasts to topics > 256 members
+}
+
+message Hello {
+  oneof credential {
+    string jwt = 1;
+    string resume_ticket = 2;
+  }
+  string device_id = 3;
+  string sdk_version = 4;
+  uint64 last_seq = 5;
+  uint32 seq_epoch = 6;
+  repeated string capabilities = 7;
+  string platform = 8;
+}
+
+message Connected {
+  string conn_id = 1;
+  string cell = 2;
+  uint32 heartbeat_sec = 3;
+  string resume_ticket = 4;
+  int64 server_time_ms = 5;
+  int64 session_expires_at_ms = 6;
+  uint64 seq = 7;
+  uint32 seq_epoch = 8;
+  bool seq_unknown = 9;
+}
+
+// Batched acknowledgements for RELIABLE / ORDERED pushes (at most 32 ids).
+message Ack {
+  repeated string msg_ids = 1;
+}
+
+// Client sends {jwt}; gateway answers {resume_ticket, session_expires_at_ms}.
+message Reauth {
+  string jwt = 1;
+  string resume_ticket = 2;
+  int64 session_expires_at_ms = 3;
+}
+
+message Reconnect {
+  uint32 delay_ms = 1;
+  bool re_bootstrap = 2;
+}
+
+// Named ErrorInfo (not Error) to avoid clashing with java.lang.Error.
+message ErrorInfo {
+  uint32 code = 1;
+  string message = 2;
+  bool retryable = 3;
+  uint32 retry_after_ms = 4;
+  bool fatal = 5;                 // TCP transport: the gateway closes right after this frame
+}
+
+// Payload of SUBSCRIBE / UNSUBSCRIBE.
+message Subscribe {
+  repeated string topics = 1;
+}
