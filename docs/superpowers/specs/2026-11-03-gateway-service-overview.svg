@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1075" width="1600" height="1075" font-family="Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif">
 <defs>
 <marker id="a-60a5fa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#60a5fa"/></marker>
-<marker id="a-a3b1c6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#a3b1c6"/></marker>
-<marker id="a-8b9bb4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#8b9bb4"/></marker>
-<marker id="a-a78bfa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#a78bfa"/></marker>
 <marker id="a-fb923c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#fb923c"/></marker>
+<marker id="a-a78bfa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#a78bfa"/></marker>
+<marker id="a-8b9bb4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#8b9bb4"/></marker>
+<marker id="a-a3b1c6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#a3b1c6"/></marker>
 <marker id="a-4ade80" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#4ade80"/></marker>
 </defs>
 <rect width="1600" height="1075" fill="#0b1220"/>
@@ -185,7 +185,7 @@
 <rect x="827" y="745" width="145" height="100" rx="6" fill="#1e293b" stroke="#475569" stroke-width="1.2"/>
 <rect x="827" y="745.0" width="5" height="100.0" fill="#2dd4bf"/>
 <text x="839" y="762" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">Management :8081</text>
-<text x="839" y="777" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">JDK HttpServer</text>
+<text x="839" y="777" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">Spring MVC + Actuator</text>
 <text x="839" y="790.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">/ready · /live</text>
 <text x="839" y="804.0" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">/actuator/prometheus</text>
 <text x="839" y="817.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">POST /admin/drain</text>
@@ -196,9 +196,9 @@
 <text x="998" y="790.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">log sample 1% · 1k/s</text>
 <text x="998" y="804.0" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">trace 0.1% push</text>
 <rect x="350" y="892" width="780" height="60" rx="6" fill="#111827" stroke="#475569" stroke-dasharray="4 3"/>
-<text x="362" y="912" font-size="10.5" font-weight="normal" fill="#e2e8f0" text-anchor="start">Spring SmartLifecycle — start: Infra(0: Redis, Kafka metadata, gw.control catch-up, JWKS) → NodeIdentity(1000)</text>
-<text x="362" y="927" font-size="10.5" font-weight="normal" fill="#e2e8f0" text-anchor="start">→ gRPC(2000) → Netty(MAX−100: bind → warm-up → /ready → admission ramp 500→5k/s trong 2 phút)</text>
-<text x="362" y="942" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">stop (ngược lại): drain Netty → dừng gRPC → DEL lease → flush producer → đóng Redis</text>
+<text x="362" y="912" font-size="10.5" font-weight="normal" fill="#e2e8f0" text-anchor="start">Spring SmartLifecycle — start: Tomcat :8081 (MAX−2048) → Infra(MAX−1900: Redis, Kafka, gw.control, JWKS) → NodeIdentity(MAX−1800)</text>
+<text x="362" y="927" font-size="10.5" font-weight="normal" fill="#e2e8f0" text-anchor="start">→ gRPC(MAX−1700) → Netty(MAX−100: bind → warm-up → /ready → admission ramp 500→5k/s trong 2 phút)</text>
+<text x="362" y="942" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">stop (ngược lại): drain Netty → dừng gRPC → DEL lease → flush producer → đóng Redis → đóng Tomcat :8081</text>
 <rect x="1190" y="80" width="390" height="56" rx="6" fill="#111827" stroke="#475569" stroke-width="1.2"/>
 <text x="1199" y="97" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Auth &amp; Token · JWKS (ES256)</text>
 <text x="1199" y="112" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">dev: gateway-devtools issuer</text>

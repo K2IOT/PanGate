@@ -50,7 +50,7 @@ Mục tiêu sizing: ~278k kết nối/node ở trạng thái thường, trần 5
 | Redis | Lettuce 6.x: `RedisClusterClient` ở staging và prod, `RedisClient` standalone ở local và dev; chọn bằng `gateway.redis.topology`; một kết nối multiplexed cho mỗi master | §3.1, §9.1 |
 | Kafka | `kafka-clients` thuần, không dùng spring-kafka trên hot path | Kiểm soát `buffer.memory`, `acks`, `max.block.ms` |
 | Collections | fastutil (`Long2ObjectOpenHashMap`, `Object2ObjectOpenHashMap`, `ObjectArrayList`) | §4 |
-| Management | JDK `com.sun.net.httpserver.HttpServer`, port 8081, executor 2 thread; Micrometer `PrometheusMeterRegistry.scrape()` | Không dùng Tomcat (§4). Không dùng WebFlux: Spring Boot 3.5 pin Reactor Netty 1.2 cho Netty 4.1, xung đột với Netty 4.2 trên data plane |
+| Management | Spring MVC + embedded Tomcat (`spring-boot-starter-web`) + Actuator, `server.port=8081`; Tomcat giới hạn `threads.max=8`, `min-spare=2`, `max-connections=200`, `accept-count=50` | Tomcat chỉ phục vụ cổng quản trị, không nằm trên data path (đúng §4 tài liệu gốc). Không dùng WebFlux: Spring Boot 3.5 pin Reactor Netty 1.2 cho Netty 4.1, xung đột với Netty 4.2 trên data plane |
 | Metrics / trace | Micrometer → Prometheus; OpenTelemetry | §9 |
 | Proto | `protobuf-maven-plugin`; `buf lint` + `buf breaking` trong CI | §3.4 |
 | CLI devtools | picocli | |
@@ -79,7 +79,7 @@ PanGate/
 
 **Quy tắc chung**
 - Không có pom aggregator. Các module chỉ phụ thuộc nhau qua artifact đã `mvn install` (local) hoặc publish lên GitHub Packages (CI, sau M3).
-- `platform-parent` pin chính xác version của mọi dependency bên ngoài. Enforcer bật: `requireJavaVersion 21`, `banDuplicateClasses`, `bannedDependencies` (gateway-service không được kéo `spring-boot-starter-web` hay Tomcat).
+- `platform-parent` pin chính xác version của mọi dependency bên ngoài. Enforcer bật: `requireJavaVersion 21`, `banDuplicateClasses`, `bannedDependencies` (gateway-service không được kéo `spring-boot-starter-webflux` hay `io.projectreactor.netty:*`).
 - Artifact nội bộ dùng `0.1.0-SNAPSHOT` cho tới bản release đầu tiên ở cuối M3; từ đó áp dụng quy tắc "không SNAPSHOT trên main" (§13.7).
 - `pluginManagement` gồm: compiler (release 21), surefire (unit), failsafe (`src/it/java`), jacoco, spotless (google-java-format), jib.
 
@@ -167,7 +167,7 @@ Một file `docker-compose.yml` dùng chung cho cả hai môi trường (§9.1),
 |---|---|---|---|
 | `gw-io-*` | `gateway.io.threads`, 0 = số vCPU (16) | Một `MultiThreadIoEventLoopGroup`. Không có boss group riêng: `gateway.listeners.ws.acceptors` (4) listener `SO_REUSEPORT` bind trên chính group này. Nếu không có epoll (fallback NIO), số acceptor bị ép về 1 và ghi INFO, vì bind nhiều lần cùng port sẽ lỗi | **Không** (BlockHound) |
 | `gw-grpc-*` | 2 event loop + executor 2 thread | Nhận và decode `PushBatch`, chia theo loop; flush `AckBatcher` | Không |
-| `gw-mgmt-*` | 2 | JDK `HttpServer` :8081 | Không |
+| `http-nio-8081-*` (Tomcat) | ≤ 8 | Spring MVC :8081, chỉ phục vụ quản trị | Có (không phải event loop data plane) |
 | `gw-ctl` | 1 platform thread | `KafkaConsumer.poll` trên `gw.control` | Có (poll) |
 | `gw-tick` | 1 `ScheduledExecutorService` | Sampler 100 ms (budget, shed ladder, lag probe), lease renew 5 s, refresh `seqepochs` 5 s | Không; mọi I/O đều async |
 | offload | virtual thread executor | Việc hiếm có thể block: fetch JWKS khi cache nguội, đọc secret | Có |
@@ -229,12 +229,15 @@ API: `execute(Runnable)` (= `eventLoop.execute`), `index()`, `inLoop()`.
 
 | Phase | Bean | start() | stop() (chạy theo thứ tự ngược) |
 |---|---|---|---|
-| 0 | `InfraLifecycle` | Ping 2 cluster Redis; `partitionsFor` mọi topic upstream và lifecycle; `ControlEventConsumer` đọc từ đầu tới `endOffsets` snapshot (→ `controlCaughtUp`); nạp JWKS; nạp ticket key | Flush và close 2 producer (timeout 10 s); close Redis |
-| 1000 | `NodeIdentity` | `INCR node:epoch:{nodeId}` → epoch; Lua lease; bắt đầu renew 5 s | `DEL node:{nodeId}`, `ZREM nodes:live`, `DEL node:draining:{nodeId}` |
-| 2000 | `GrpcServerLifecycle` | Bind :9090 | Ngừng nhận stream mới, chờ tối đa 5 s rồi `shutdownNow` |
+| `MAX − 2048` | Embedded Tomcat (`WebServerStartStopLifecycle` của Spring Boot) | Mở :8081 (`/live`, `/ready`, metrics) **trước** mọi phase của gateway | Đóng :8081 **sau** khi gateway đã drain xong |
+| `MAX − 1900` | `InfraLifecycle` | Ping 2 cluster Redis; `partitionsFor` mọi topic upstream và lifecycle; `ControlEventConsumer` đọc từ đầu tới `endOffsets` snapshot (→ `controlCaughtUp`); nạp JWKS; nạp ticket key | Flush và close 2 producer (timeout 10 s); close Redis |
+| `MAX − 1800` | `NodeIdentity` | `INCR node:epoch:{nodeId}` → epoch; Lua lease; bắt đầu renew 5 s | `DEL node:{nodeId}`, `ZREM nodes:live`, `DEL node:draining:{nodeId}` |
+| `MAX − 1700` | `GrpcServerLifecycle` | Bind :9090 | Ngừng nhận stream mới, chờ tối đa 5 s rồi `shutdownNow` |
 | `Integer.MAX_VALUE − 100` | `NettyGatewayServer` | Bind listener → `WarmUpRunner` → `ReadinessState.markStarted()` → bắt đầu admission ramp | `DrainCoordinator.drain()` → `shutdownGracefully(0, 5 s)` |
 
-Start lỗi ở bất kỳ phase nào thì process exit (fail fast) và pod sẽ được restart. Tuy vậy, phase 0 **chờ dependency có giới hạn** trước khi coi là lỗi:
+`MAX` = `Integer.MAX_VALUE`. Phase của Tomcat là hằng số của Spring Boot 3.5.16 (đã kiểm trong jar). Mọi phase của gateway nằm giữa phase start/stop của web server (`MAX − 2048`) và phase graceful shutdown của nó (`MAX − 1024`) hoặc cao hơn, nên cổng quản trị sống suốt quá trình khởi động (kể cả lúc chờ Redis/Kafka) và suốt quá trình drain.
+
+Start lỗi ở bất kỳ phase nào thì process exit (fail fast) và pod sẽ được restart. Tuy vậy, `InfraLifecycle` **chờ dependency có giới hạn** trước khi coi là lỗi:
 - Redis và Kafka: retry với backoff 1 → 5 s trong tổng `gateway.startup.dependency-timeout` (local 30 s, dev 60 s, prod 120 s). Hết hạn → `StartupDiagnostics` in ra host:port không kết nối được kèm gợi ý cách sửa (ví dụ `make infra-up`), rồi exit.
 - JWKS **không chặn** việc start: lỗi thì ghi WARN và retry nền mỗi 10 s. HELLO bằng ticket vẫn chạy; HELLO bằng JWT trả 4001 cho tới khi có JWKS.
 - Topic Kafka thiếu: nếu `gateway.kafka.create-topics=true` (local, dev), dùng AdminClient tạo; nếu `false` (prod), exit kèm danh sách topic thiếu.
@@ -703,10 +706,11 @@ Kích hoạt bởi `NettyGatewayServer.stop()` hoặc `POST /admin/drain` (chỉ
 
 | Endpoint | Hành vi |
 |---|---|
-| `GET /ready` | 200 khi đủ tất cả: `controlCaughtUp`, lease còn sống, listener đã bind, warm-up xong, không draining, tổng kết nối < soft cap. Ngược lại 503 |
-| `GET /live` | 200 khi lag p99 của mọi loop < 5 s |
-| `GET /actuator/prometheus` | Metrics |
-| `POST /admin/drain` | Chỉ nhận từ loopback; 202 |
+| `GET /ready` | Health group `readiness` của Actuator (`management.endpoint.health.group.readiness.additional-path=server:/ready`), chỉ gồm `GatewayReadinessHealthIndicator`. `UP` (200) khi đủ tất cả: `controlCaughtUp`, lease còn sống, listener đã bind, warm-up xong, không draining, tổng kết nối < soft cap; ngược lại `OUT_OF_SERVICE` (503) kèm danh sách lý do trong `details.reasons` |
+| `GET /live` | Health group `liveness` (`additional-path=server:/live`), chỉ gồm `EventLoopLagHealthIndicator`: `UP` khi lag p99 của mọi loop < 5 s, ngược lại `DOWN` (503) |
+| `GET /actuator/prometheus` | Actuator Prometheus endpoint |
+| `GET /actuator/health`, `/actuator/loggers` | Actuator chuẩn (`loggers` cho phép đổi log level khi đang chạy) |
+| `POST /admin/drain` | `AdminController`; chỉ nhận request có `remoteAddr` là loopback (khác → 403); 202 |
 
 ---
 
@@ -788,9 +792,16 @@ gateway:
     topic-prefix: c1
     reliable-buffer: 128MB
     telemetry-buffer: 128MB
+server:
+  port: 8081                       # chỉ cổng quản trị; data plane là Netty
+  shutdown: immediate
+  tomcat: { threads: { max: 8, min-spare: 2 }, max-connections: 200, accept-count: 50 }
 management:
-  server.port: 8081
-  endpoints.web.exposure.include: prometheus,health
+  endpoints.web.exposure.include: health,prometheus,loggers
+  endpoint.health.probes.enabled: true
+  endpoint.health.group:
+    readiness: { include: gatewayReadiness, additional-path: "server:/ready" }
+    liveness:  { include: eventLoopLag, additional-path: "server:/live" }
 ```
 
 Mọi giá trị dưới `gateway.limits`, `gateway.admission` và `gateway.broadcast` được gộp vào `GatewayLimits`. Kill switch và `TenantCfg` ghi đè lên đó khi chạy (§7.8).
@@ -918,8 +929,8 @@ Leak detection: `paranoid` trong unit test và IT, `disabled` trong cấu hình 
 
 | | Nội dung | Tiêu chí hoàn thành (exit) |
 |---|---|---|
-| **M1 Single-node** | `platform-parent`, `platform-contracts` (frame.proto), `platform-spring-starter` (observability, secrets, logging); `NettyGatewayServer`, `IoGroups`, `LoopContext`, `DeadlineWheel`; pipeline WS + TCP; `SslContextProvider` (chưa hot-reload); `FrameCodec`; `HelloAuthHandler` với JWT + resume ticket (file secret); `SessionHandler` (PING/PONG, REAUTH, close); `PrincipalIndex`; `AcceptGate` + `UpgradeGuard` (bucket, cap, per-IP, ramp cơ bản); `JwksCache` (§4.9); management JDK HttpServer (`/ready`, `/live`, prometheus); metrics cốt lõi + `EventLoopLagProbe` (chỉ đo, chưa nối shed ladder); **`DevBootstrap`, `StartupDiagnostics`, Maven Wrapper, Makefile, image Jib**; devtools `issuer` + `token` + `client`; devenv (profile `app`: issuer, gateway). Frame `UPSTREAM`, `SUBSCRIBE`, `UNSUBSCRIBE` nhận `ERROR{4500, "UNSUPPORTED", retryable=false, fatal=false}` cho tới M2; `ACK` bị bỏ qua | Unit test và IT M1 xanh; **R1–R4 đạt (local chưa cần infra), CI `local-start` và `dev-start` xanh**; 50k session idle trên local với lag p99 < 20 ms; reconnect bằng ticket không gọi issuer; heap/session < 3 KB |
-| **M2 Cluster** | contracts `router`, `lifecycle`, `control`, `upstream`, `push`; `NodeIdentity`, lease, `RegistryWriter`, `RegistryResync`, `SeqReader`; `UpstreamPublisher` (2 producer) + lifecycle; `PushStreamService`, `AckBatcher`, `PendingAckWindow`; `TopicIndex`, `BroadcastPacer`; control push; `ControlEventConsumer` (revoke, cellmap, tenantcfg); `KickClient`; devtools `fake-router` + `fake-pushapi`; devenv có Kafka (listener INTERNAL/EXTERNAL), Redis standalone, `fake-pushapi`, `make infra-up`; retry dependency ở phase 0; `create-topics` | **R1 với Kafka + Redis trên `localhost` và R2 đầy đủ đạt**; E2E connect → push → ack → disconnect trên devenv (`make smoke`); diễn tập kill node: lease hết hạn sau ≤ 15 s, khởi động lại nhận epoch mới; Revoke đóng session trong < 10 s; IT M2 xanh |
+| **M1 Single-node** | `platform-parent`, `platform-contracts` (frame.proto), `platform-spring-starter` (observability, secrets, logging); `NettyGatewayServer`, `IoGroups`, `LoopContext`, `DeadlineWheel`; pipeline WS + TCP; `SslContextProvider` (chưa hot-reload); `FrameCodec`; `HelloAuthHandler` với JWT + resume ticket (file secret); `SessionHandler` (PING/PONG, REAUTH, close); `PrincipalIndex`; `AcceptGate` + `UpgradeGuard` (bucket, cap, per-IP, ramp cơ bản); `JwksCache` (§4.9); management Spring MVC + Actuator (`/ready`, `/live`, prometheus, `/admin/drain` loopback); metrics cốt lõi + `EventLoopLagProbe` (chỉ đo, chưa nối shed ladder); **`DevBootstrap`, `StartupDiagnostics`, Maven Wrapper, Makefile, image Jib**; devtools `issuer` + `token` + `client`; devenv (profile `app`: issuer, gateway). Frame `UPSTREAM`, `SUBSCRIBE`, `UNSUBSCRIBE` nhận `ERROR{4500, "UNSUPPORTED", retryable=false, fatal=false}` cho tới M2; `ACK` bị bỏ qua | Unit test và IT M1 xanh; **R1–R4 đạt (local chưa cần infra), CI `local-start` và `dev-start` xanh**; 50k session idle trên local với lag p99 < 20 ms; reconnect bằng ticket không gọi issuer; heap/session < 3 KB |
+| **M2 Cluster** | contracts `router`, `lifecycle`, `control`, `upstream`, `push`; `NodeIdentity`, lease, `RegistryWriter`, `RegistryResync`, `SeqReader`; `UpstreamPublisher` (2 producer) + lifecycle; `PushStreamService`, `AckBatcher`, `PendingAckWindow`; `TopicIndex`, `BroadcastPacer`; control push; `ControlEventConsumer` (revoke, cellmap, tenantcfg); `KickClient`; devtools `fake-router` + `fake-pushapi`; devenv có Kafka (listener INTERNAL/EXTERNAL), Redis standalone, `fake-pushapi`, `make infra-up`; retry dependency trong `InfraLifecycle`; `create-topics` | **R1 với Kafka + Redis trên `localhost` và R2 đầy đủ đạt**; E2E connect → push → ack → disconnect trên devenv (`make smoke`); diễn tập kill node: lease hết hạn sau ≤ 15 s, khởi động lại nhận epoch mới; Revoke đóng session trong < 10 s; IT M2 xanh |
 | **M3 Hardening** | `OutboundBudget`, `LoadShedLadder`, `SlowConsumerPolicy`; `DrainCoordinator`, recycling, `WarmUpRunner` + ramp đầy đủ; TLS hot-reload + session ticket key; toàn bộ kill switch; SSE fallback + `/v1/upstream`; PROXY protocol; mượn tenant cap; `KernelStatsReader`; `trace.principal`; Jazzer, JMH; image prod (flags JVM §4.1 tài liệu gốc); tài liệu ADR | IT drain, shed và slow consumer xanh; fuzz 10 phút sạch; image build và chạy trong devenv; release `0.1.0` |
 
 Mỗi milestone là một implementation plan riêng (writing-plans).
@@ -954,7 +965,7 @@ Mỗi milestone là một implementation plan riêng (writing-plans).
 6. Gateway đọc `seq:{p}` khi HELLO để điền `CONNECTED.seq` (§4.6) và đọc `seqepochs` (§6.7).
 7. Môi trường local và dev (§9.1) cùng Redis standalone: tài liệu gốc chỉ mô tả prod; phần này phục vụ yêu cầu "code phải start được ở local và dev".
 8. Lease theo quy tắc "epoch lớn hơn thắng" (§6.1), thay cho "lease còn sống thì chặn", để restart nhanh không bị fence.
-9. Cổng quản trị dùng JDK `HttpServer` thay WebFlux (§1). Tài liệu gốc §4 cho phép cả hai; WebFlux xung đột version Netty.
+9. Cổng quản trị dùng Spring MVC + Tomcat + Actuator thay vì WebFlux hoặc JDK HttpServer (§1). Tài liệu gốc §4 chỉ cấm Tomcat trên data path; WebFlux xung đột version Netty. Các phase lifecycle của gateway được dời lên `MAX − 1900…MAX − 100` để nằm trong vòng đời của web server (§3.7).
 
 **Câu hỏi còn mở** (không chặn M1):
 1. **Contract `seqepochs` với Push API** (§6.7): key, định dạng và người ghi cần Push API xác nhận trước M2. Nếu bị từ chối, phương án dự phòng là gửi `seq_epoch=0` và để SDK dựa vào `seq_epoch` trên từng PUSH.

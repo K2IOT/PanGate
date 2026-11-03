@@ -17,8 +17,9 @@
 - Version pin trong `platform-parent`: `protobuf-java 4.36.2`, `io.github.ascopes:protobuf-maven-plugin 5.1.12` (`<protoc>4.36.2</protoc>`), `nimbus-jose-jwt 10.10`, `bcpkix-jdk18on 1.86`, `fastutil 8.5.19`, `picocli 4.7.7`, `blockhound 1.0.18.RELEASE`, `jib-maven-plugin 3.5.2`. Không dùng SNAPSHOT của bên thứ ba và không dùng `latest`.
 - `groupId=com.pangate`, `version=0.1.0-SNAPSHOT`. Package gốc: `com.pangate.contracts.v1`, `com.pangate.starter`, `com.pangate.devtools`, `com.pangate.gateway`.
 - Thứ tự build: parent → contracts → starter → devtools → gateway. gateway-service chỉ phụ thuộc devtools ở scope `test`.
-- gateway-service **không** được kéo `spring-boot-starter-web`, `spring-boot-starter-webflux`, `spring-boot-starter-tomcat` hay `io.projectreactor.netty:*` (enforcer `bannedDependencies`). Đặt `spring.main.web-application-type=none`.
-- Port: WSS `8443` path `/v1/ws` subprotocol `pangate.v1`; TCP+TLS `8883` với ALPN `pangate.v1`; management `8081` (`gateway.management.port`).
+- gateway-service dùng `spring-boot-starter-web` (Spring MVC + Tomcat) **chỉ** cho cổng quản trị. **Không** được kéo `spring-boot-starter-webflux` hay `io.projectreactor.netty:*` (enforcer `bannedDependencies`), vì Reactor Netty của Boot 3.5 cần Netty 4.1.
+- Phase lifecycle (spec §3.7): Tomcat của Spring Boot là `MAX − 2048`; `NettyGatewayServer` là `Integer.MAX_VALUE − 100`. Mọi `SmartLifecycle` của gateway phải có phase > `MAX − 2048`, để cổng quản trị sống suốt quá trình khởi động và drain.
+- Port: WSS `8443` path `/v1/ws` subprotocol `pangate.v1`; TCP+TLS `8883` với ALPN `pangate.v1`; management `8081` (`server.port`, Tomcat).
 - Giới hạn prod (spec §9): hard-cap 700000, soft-cap 550000, per-IP 200, frame 65536 B, HELLO 8192 B, HELLO timeout 5 s, handshake timeout 10 s, heartbeat 30 s (idle timeout = 3 × heartbeat = 90 s), session TTL 24 h, 20 handshake/phút/principal, admission 5000/s burst 10000, ramp từ 500/s trong 2 phút.
 - Giới hạn profile `local`: hard-cap 100000, soft-cap 80000, per-IP 100000. Profile `dev`: hard-cap 200000.
 - Close code đúng bảng spec §4.8 (1000, 1001, 4000, 4001, 4002, 4003, 4004, 4008, 4009, 4010, 4011, 4012, 4013, 4500).
@@ -82,7 +83,7 @@ PanGate/
 │       ├── pipeline/   AcceptGate, UpgradeGuard, WsBinaryAdapter, HelloAuthHandler, SessionHandler,
 │       │               ErrorTerminator, WsChannelInitializer, TcpChannelInitializer, SslContextProvider
 │       ├── metrics/    GatewayMetrics, EventLoopLagProbe
-│       ├── mgmt/       ManagementServer, ReadinessState, ReadinessCheck
+│       ├── mgmt/       ReadinessCheck, GatewayReadinessHealthIndicator, EventLoopLagHealthIndicator, AdminController
 │       └── tools/      HealthCheck
 │   ├── src/test/java/...   (unit, EmbeddedChannel)
 │   └── src/it/java/com/pangate/gateway/it/  GatewayLocalIT
@@ -372,20 +373,20 @@ git commit -m "feat(devtools): gateway client (WSS/TCP) with client and smoke co
 
 **Interfaces:**
 - Produces:
-  - `@ConfigurationProperties("gateway") record GatewayProperties(String nodeId, String cell, Listeners listeners, Io io, Tls tls, Limits limits, Admission admission, Auth auth, Dev dev, Startup startup, Management management)` với các record lồng nhau:
+  - `@ConfigurationProperties("gateway") record GatewayProperties(String nodeId, String cell, Listeners listeners, Io io, Tls tls, Limits limits, Admission admission, Auth auth, Dev dev, Startup startup)` với các record lồng nhau:
     - `Listeners(Ws ws, Tcp tcp)`, `Ws(int port, String path, int acceptors)`, `Tcp(int port, boolean enabled)`
     - `Io(int threads, Transport transport)`, với `enum Transport { AUTO, EPOLL, NIO }` tạo ở file `server/Transport.java`
     - `Tls(Path certFile, Path keyFile)`
     - `Limits(int hardCap, int softCap, int perIp, int frameMax, int helloMax, Duration helloTimeout, Duration handshakeTimeout, int handshakesPerPrincipalPerMin, Duration heartbeatInterval, Duration sessionTtl)`
     - `Admission(int rate, int burst, int rampFrom, Duration rampDuration)`
     - `Auth(String jwksUri, Path jwksFile, Duration jwksRefresh, String audience, String issuer, Duration clockSkew)`
-    - `Dev(boolean bootstrapSecrets, Path dir)`, `Startup(Duration dependencyTimeout)`, `Management(int port)`
+    - `Dev(boolean bootstrapSecrets, Path dir)`, `Startup(Duration dependencyTimeout)`
   - `record GatewayLimits(...)` gồm đúng các field của `Limits`, cộng `static GatewayLimits from(GatewayProperties p)` và `long idleTimeoutSec()` (= 3 × heartbeat).
   - `final class LimitsHolder { GatewayLimits current(); void set(GatewayLimits l); }` (dùng `AtomicReference`).
   - `final class NodeState { volatile boolean draining; volatile boolean listenersBound; }` với getter và setter.
   - `TickScheduler`: bean bọc `ScheduledExecutorService` một thread tên `gw-tick`, có `ScheduledExecutorService executor()`, `scheduleAtFixedRate(Runnable, Duration period)` và `shutdown()`.
   - `GatewayApplication`: `@SpringBootApplication @ConfigurationPropertiesScan`.
-- Giá trị trong `application.yml` (prod mặc định) lấy đúng từ Global Constraints. Thêm `spring.main.web-application-type: none`, `gateway.auth.audience: pangate-gw`, `gateway.auth.clock-skew: 30s`, `gateway.auth.jwks-refresh: 5m`, `gateway.management.port: 8081`, `gateway.io.threads: 0`, `gateway.io.transport: auto`, `gateway.listeners.ws.acceptors: 4`.
+- Giá trị trong `application.yml` (prod mặc định) lấy đúng từ Global Constraints. Thêm `gateway.auth.audience: pangate-gw`, `gateway.auth.clock-skew: 30s`, `gateway.auth.jwks-refresh: 5m`, `gateway.io.threads: 0`, `gateway.io.transport: auto`, `gateway.listeners.ws.acceptors: 4`, cùng khối `server:` và `management:` copy nguyên từ spec §9 (port 8081, giới hạn thread Tomcat, health group `readiness`/`liveness` với `additional-path` `server:/ready` và `server:/live`, expose `health,prometheus,loggers`).
 - `application-local.yml`:
   - `gateway.node-id=gateway-local`, `gateway.cell=cell-1`
   - `gateway.dev.bootstrap-secrets=true`, `gateway.dev.dir=${user.home}/.pangate-dev`
@@ -395,7 +396,7 @@ git commit -m "feat(devtools): gateway client (WSS/TCP) with client and smoke co
   - Giới hạn local theo Global Constraints.
 - `application-dev.yml`: `gateway.dev.dir=/dev-secrets`, `gateway.auth.jwks-uri=http://issuer:8090/.well-known/jwks.json`, `gateway.auth.jwks-file=""`, hard-cap 200000, `gateway.node-id=gateway-dev-1`.
 - `pom.xml`:
-  - Dependency: `platform-contracts`, `platform-spring-starter`, `spring-boot-starter`, `spring-boot-starter-actuator`, `micrometer-registry-prometheus`, `netty-codec-http`, `netty-handler`, `netty-transport-classes-epoll`, `netty-transport-native-epoll` (classifier `linux-x86_64` và `linux-aarch_64`), `netty-tcnative-boringssl-static` (kèm classifier tương ứng), `fastutil`, `nimbus-jose-jwt`, `bcpkix-jdk18on`.
+  - Dependency: `platform-contracts`, `platform-spring-starter`, `spring-boot-starter-web`, `spring-boot-starter-actuator`, `micrometer-registry-prometheus`, `netty-codec-http`, `netty-handler`, `netty-transport-classes-epoll`, `netty-transport-native-epoll` (classifier `linux-x86_64` và `linux-aarch_64`), `netty-tcnative-boringssl-static` (kèm classifier tương ứng), `fastutil`, `nimbus-jose-jwt`, `bcpkix-jdk18on`.
   - Test: `spring-boot-starter-test`, `awaitility`, `blockhound`, `gateway-devtools` (scope `test`), `netty-pkitesting`.
   - Enforcer `bannedDependencies` theo Global Constraints.
   - `build-helper-maven-plugin` thêm `src/it/java` làm test source; surefire và failsafe (include `**/*IT.java`) với `argLine=-XX:+AllowRedefinitionToAddDeleteMethods`; `spring-boot-maven-plugin` `repackage`.
@@ -405,6 +406,7 @@ git commit -m "feat(devtools): gateway client (WSS/TCP) with client and smoke co
 
 ```java
 @Test void prodDefaultsMatchSpec() {
+  // server.port == 8081; management.endpoint.health.group.readiness.additional-path == "server:/ready"
   // ApplicationContextRunner + ConfigDataApplicationContextInitializer, không có profile
   // limits: hardCap 700000, softCap 550000, perIp 200, frameMax 65536, helloMax 8192,
   // helloTimeout 5s, handshakeTimeout 10s, heartbeat 30s, sessionTtl 24h, handshakesPerPrincipalPerMin 20;
@@ -1140,8 +1142,8 @@ git commit -m "feat(gateway): TLS 1.3 contexts, upgrade guard and WS/TCP pipelin
 ### Task 18: `NettyGatewayServer`, cổng quản trị, metrics, IT end-to-end
 
 **Files:**
-- Create: `server/NettyGatewayServer.java`, `mgmt/{ManagementServer,ReadinessState,ReadinessCheck}.java`, `metrics/EventLoopLagProbe.java`, `tools/HealthCheck.java`, `config/GatewayConfig.java` (wiring toàn bộ bean)
-- Test: `src/test/java/com/pangate/gateway/metrics/EventLoopLagProbeTest.java`, `mgmt/ManagementServerTest.java`; `src/it/java/com/pangate/gateway/it/GatewayLocalIT.java`
+- Create: `server/NettyGatewayServer.java`, `mgmt/{ReadinessCheck,GatewayReadinessHealthIndicator,EventLoopLagHealthIndicator,AdminController}.java`, `metrics/EventLoopLagProbe.java`, `tools/HealthCheck.java`, `config/GatewayConfig.java` (wiring toàn bộ bean)
+- Test: `src/test/java/com/pangate/gateway/metrics/EventLoopLagProbeTest.java`, `mgmt/HealthIndicatorsTest.java`, `mgmt/AdminControllerTest.java`; `src/it/java/com/pangate/gateway/it/GatewayLocalIT.java`
 
 **Interfaces:**
 - Consumes: mọi task trước; `GatewayClient`, `Hellos`, `JwtMinter`, `DevKeys` từ devtools (scope test).
@@ -1155,11 +1157,10 @@ git commit -m "feat(gateway): TLS 1.3 contexts, upgrade guard and WS/TCP pipelin
       1. `node.draining = true`, close các listener.
       2. Trên mỗi loop: `execute(forEachSession(s -> s.close(GOING_AWAY, "SHUTDOWN")))`, chờ tối đa 5 s.
       3. `io.shutdown(0, 5 s)` rồi gọi `cb`.
-  - `interface ReadinessCheck { Optional<String> notReadyReason(); }`. M1 có các check: listener đã bind, không draining, `totalActive < softCap`. `ReadinessState(List<ReadinessCheck>)`: `boolean ready()`, `List<String> reasons()`.
-  - `ManagementServer implements SmartLifecycle` (phase `Integer.MIN_VALUE + 1000`), JDK `HttpServer` trên `gateway.management.port`, executor 2 thread `gw-mgmt-*`:
-    - `GET /ready` → 200 `{"ready":true}` hoặc 503 `{"ready":false,"reasons":[…]}`.
-    - `GET /live` → 200 nếu `lagProbe.maxP99Seconds() < 5`, ngược lại 503.
-    - `GET /actuator/prometheus` → `PrometheusMeterRegistry.scrape()`, `Content-Type: text/plain; version=0.0.4`.
+  - `interface ReadinessCheck { Optional<String> notReadyReason(); }`. M1 có 3 bean check: listener đã bind, không draining, `totalActive < softCap`. M2 và M3 thêm check bằng cách khai báo thêm bean.
+  - `@Component("gatewayReadiness") GatewayReadinessHealthIndicator implements HealthIndicator`: `UP` khi mọi `ReadinessCheck` trả rỗng; ngược lại `OUT_OF_SERVICE` với `details.reasons` là danh sách lý do. Tên bean phải là `gatewayReadiness` để khớp `include` của group `readiness`.
+  - `@Component("eventLoopLag") EventLoopLagHealthIndicator`: `UP` khi `lagProbe.maxP99Seconds() < 5`, ngược lại `DOWN` với detail `maxP99Seconds`.
+  - `AdminController` (`@RestController`): `POST /admin/drain` trả 403 nếu `request.getRemoteAddr()` không phải loopback. Ở M1 (chưa có `DrainCoordinator`) trả 202 và gọi `NettyGatewayServer.stop()` bất đồng bộ; M3 thay bằng drain thật.
   - `EventLoopLagProbe(LoopRegistry, TickScheduler, LongSupplier nanoClock)`: mỗi 100 ms, mỗi loop được `execute` một no-op để đo độ trễ. Lưu 100 mẫu gần nhất của mỗi loop vào `AtomicLongArray`. Method `double p99Seconds(int loop)`, `double maxP99Seconds()`. Gauge `gw.eventloop.lag{loop}` = p99.
   - `HealthCheck.main(String[] args)`: GET `args[0]` với timeout 2 s, `System.exit(0)` nếu 200, ngược lại `exit(1)`.
   - `GatewayConfig`: khai báo bean cho `IoGroups`, `LoopRegistry` (wheel 128 slot, đồng hồ `System.currentTimeMillis()/1000`), `LimitsHolder`, `NodeState`, `TickScheduler`, `AdmissionController`, `IpConnectionCounter`, `PrincipalIndex`, `SessionTracker`, `TicketKeyRing`, `ResumeTicketService`, `JwksCache` (start/stop theo lifecycle bean), `JwtVerifier`, `PrincipalHandshakeLimiter`, `SslContextProvider`, `GatewayMetrics`, `EventLoopLagProbe`, hai initializer, offload executor là virtual thread.
@@ -1168,16 +1169,18 @@ git commit -m "feat(gateway): TLS 1.3 contexts, upgrade guard and WS/TCP pipelin
 
 ```java
 @Test void lagProbeReportsDelayOfBlockedLoop() { /* group 1 thread đặt tên "test-io" (không thuộc gw-io-* nên BlockHound cho phép sleep), chặn loop 300 ms → p99Seconds(0) ≥ 0.25 */ }
-@Test void readyReflectsChecks() { /* check trả reason "listeners not bound" → GET /ready 503 với reason; sau khi bỏ check → 200 */ }
-@Test void prometheusEndpointExposesGatewayMeters() { /* body chứa "gw_handshakes_total" */ }
+@Test void readinessIndicatorListsReasons() { /* check trả "listeners not bound" → Health OUT_OF_SERVICE, details.reasons chứa lý do; bỏ check → UP */ }
+@Test void livenessIndicatorDownWhenLagOver5s() { }
+@Test void drainRejectsNonLoopback() { /* MockMvc với remoteAddr 10.0.0.5 → 403; 127.0.0.1 → 202 */ }
 ```
 
 - [ ] **Step 2: Viết IT thất bại `GatewayLocalIT`**
 
-`@SpringBootTest(classes = GatewayApplication.class)`, `@ActiveProfiles("local")`. `@DynamicPropertySource` đặt cổng trống (ws, tcp, management), `gateway.dev.dir` = thư mục `@TempDir` tĩnh, `gateway.io.threads=4`. Token được mint bằng `JwtMinter` với key đọc qua `DevKeys.load(devDir/es256.pem)`.
+`@SpringBootTest(classes = GatewayApplication.class)`, `@ActiveProfiles("local")`. `@DynamicPropertySource` đặt cổng trống (ws, tcp, `server.port`), `gateway.dev.dir` = thư mục `@TempDir` tĩnh, `gateway.io.threads=4`. Token được mint bằng `JwtMinter` với key đọc qua `DevKeys.load(devDir/es256.pem)`.
 
 ```java
-@Test void becomesReadyWithin30s() { /* poll /ready ≤ 30 s → 200; /live → 200 */ }
+@Test void becomesReadyWithin30s() { /* poll /ready ≤ 30 s → 200 {"status":"UP"}; /live → 200; /actuator/prometheus chứa "gw_handshakes_total" */ }
+@Test void managementPortServesBeforeNettyAndDuringShutdown() { /* trong lúc NettyGatewayServer.stop() đang chạy, GET /ready trả 503 (draining) chứ không bị từ chối kết nối */ }
 @Test void jwtHelloThenPingOverWss() { /* ClientTls.trust(ca.crt); CONNECTED.seq_unknown; ping → PONG */ }
 @Test void ticketReconnectKeepsExpiry() { }
 @Test void tcpListenerAcceptsHello() { /* tcps:// với ALPN pangate.v1 */ }
@@ -1204,7 +1207,7 @@ Hai test cuối tự tạo `SpringApplicationBuilder` riêng thay vì dùng cont
 Run: `./mvnw -f gateway-service verify`
 Expected: unit test mới fail hoặc lỗi compile; `GatewayLocalIT` fail.
 
-- [ ] **Step 4: Hiện thực `NettyGatewayServer`, `ManagementServer`, `ReadinessState`, `EventLoopLagProbe`, `HealthCheck`, `GatewayConfig`**
+- [ ] **Step 4: Hiện thực `NettyGatewayServer`, `ReadinessCheck` + 2 health indicator, `AdminController`, `EventLoopLagProbe`, `HealthCheck`, `GatewayConfig`**
 
 - [ ] **Step 5: Chạy để thấy pass**
 
@@ -1214,7 +1217,7 @@ Expected: toàn bộ unit test và `GatewayLocalIT` pass; BlockHound không báo
 - [ ] **Step 6: Kiểm tra chạy local từ dòng lệnh**
 
 Run: `make bootstrap && (./mvnw -f gateway-service spring-boot:run -Dspring-boot.run.profiles=local &) && sleep 25 && curl -s localhost:8081/ready`
-Expected: `{"ready":true}`; thư mục `~/.pangate-dev` có đủ file. Dừng process (Ctrl-C hoặc `kill`) và thấy thoát trong ≤ 15 s.
+Expected: `{"status":"UP"}`; thư mục `~/.pangate-dev` có đủ file. Dừng process (Ctrl-C hoặc `kill`) và thấy thoát trong ≤ 15 s.
 
 - [ ] **Step 7: Commit**
 
