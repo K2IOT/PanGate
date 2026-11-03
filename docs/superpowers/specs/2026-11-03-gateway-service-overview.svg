@@ -1,285 +1,285 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1075" width="1600" height="1075" font-family="Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif">
 <defs>
-<marker id="a-7c3aed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#7c3aed"/></marker>
-<marker id="a-475569" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#475569"/></marker>
-<marker id="a-64748b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#64748b"/></marker>
-<marker id="a-2563eb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#2563eb"/></marker>
-<marker id="a-ea580c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#ea580c"/></marker>
-<marker id="a-16a34a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#16a34a"/></marker>
+<marker id="a-fb923c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#fb923c"/></marker>
+<marker id="a-a3b1c6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#a3b1c6"/></marker>
+<marker id="a-60a5fa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#60a5fa"/></marker>
+<marker id="a-4ade80" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#4ade80"/></marker>
+<marker id="a-8b9bb4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#8b9bb4"/></marker>
+<marker id="a-a78bfa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#a78bfa"/></marker>
 </defs>
-<rect width="1600" height="1075" fill="#ffffff"/>
-<text x="20" y="32" font-size="20" font-weight="700" fill="#0f172a" text-anchor="start">PanGate gateway-service — tổng quan thiết kế (spec 2026-11-03)</text>
-<text x="20" y="52" font-size="12" font-weight="normal" fill="#475569" text-anchor="start">1 cell, 1 node chi tiết · Netty data plane trên nền Spring Boot · shared-nothing theo event loop · hộp bên phải là dependency (bản thay thế ở dev ghi kèm)</text>
-<text x="20" y="150" font-size="11" font-weight="700" fill="#475569" text-anchor="start">① kết nối + HELLO</text>
-<rect x="20" y="170" width="170" height="80" rx="6" fill="#ffffff" stroke="#94a3b8" stroke-width="1.2"/>
-<text x="29" y="187" font-size="11.5" font-weight="700" fill="#0f172a" text-anchor="start">Web / Mobile SDK</text>
-<text x="29" y="202" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">WSS :8443</text>
-<text x="29" y="215.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">subprotocol pangate.v1</text>
-<rect x="20" y="370" width="170" height="80" rx="6" fill="#ffffff" stroke="#94a3b8" stroke-width="1.2"/>
-<text x="29" y="387" font-size="11.5" font-weight="700" fill="#0f172a" text-anchor="start">IoT device</text>
-<text x="29" y="402" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">TLS raw TCP :8883</text>
-<text x="29" y="415.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">4-byte length prefix</text>
-<rect x="20" y="480" width="170" height="66" rx="6" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="5 4"/>
-<text x="29" y="497" font-size="11.5" font-weight="700" fill="#0f172a" text-anchor="start">dev: gateway-devtools</text>
-<text x="29" y="512" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">client --load N</text>
-<text x="29" y="525.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">(thay SDK khi test)</text>
-<rect x="215" y="120" width="90" height="360" rx="6" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.2"/>
-<text x="260.0" y="137" font-size="12" font-weight="700" fill="#0f172a" text-anchor="middle">L4 NLB</text>
-<text x="260.0" y="152" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="middle">per cell</text>
-<text x="260.0" y="165.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="middle">TCP pass-</text>
-<text x="260.0" y="179.0" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="middle">through,</text>
-<text x="260.0" y="192.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="middle">giữ client IP</text>
-<text x="260.0" y="206.0" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="middle"></text>
-<text x="260.0" y="219.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="middle">health:</text>
-<text x="260.0" y="233.0" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="middle">/ready :8081</text>
-<path d="M 190 210 L 213 210" fill="none" stroke="#ffffff" stroke-width="5.8"/>
-<path d="M 190 210 L 213 210" fill="none" stroke="#475569" stroke-width="1.8" marker-end="url(#a-475569)"/>
-<path d="M 190 410 L 213 410" fill="none" stroke="#ffffff" stroke-width="5.8"/>
-<path d="M 190 410 L 213 410" fill="none" stroke="#475569" stroke-width="1.8" marker-end="url(#a-475569)"/>
-<path d="M 305 155 L 348 155" fill="none" stroke="#ffffff" stroke-width="5.8"/>
-<path d="M 305 155 L 348 155" fill="none" stroke="#475569" stroke-width="1.8" marker-end="url(#a-475569)"/>
-<rect x="330" y="62" width="820" height="905" rx="10" fill="#f8fafc" stroke="#334155" stroke-width="1.6"/>
-<text x="345" y="84" font-size="12.5" font-weight="700" fill="#0f172a" text-anchor="start">gateway-service · 1 JVM / VM · Spring Boot = lifecycle, config, actuator · Netty = mọi byte trên data plane</text>
-<text x="345" y="113" font-size="11" font-weight="normal" fill="#64748b" text-anchor="start">Pipeline per channel (TCP: thay HTTP/WS bằng LengthField codec)</text>
-<rect x="350" y="122" width="115" height="66" rx="6" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="1.2"/>
-<rect x="350" y="122.0" width="5" height="66.0" fill="#0d9488"/>
-<text x="362" y="139" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">AcceptGate</text>
-<text x="362" y="154" font-size="10" font-weight="normal" fill="#475569" text-anchor="start">cap · per-IP</text>
-<text x="362" y="167.5" font-size="10" font-weight="normal" fill="#475569" text-anchor="start">token bucket</text>
-<path d="M 465 155 L 478 155" fill="none" stroke="#475569" stroke-width="1.4" marker-end="url(#a-475569)"/>
-<rect x="480" y="122" width="115" height="66" rx="6" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="1.2"/>
-<rect x="480" y="122.0" width="5" height="66.0" fill="#0d9488"/>
-<text x="492" y="139" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">SslHandler</text>
-<text x="492" y="154" font-size="10" font-weight="normal" fill="#475569" text-anchor="start">BoringSSL</text>
-<text x="492" y="167.5" font-size="10" font-weight="normal" fill="#475569" text-anchor="start">TLS 1.3 · ECDSA</text>
-<path d="M 595 155 L 608 155" fill="none" stroke="#475569" stroke-width="1.4" marker-end="url(#a-475569)"/>
-<rect x="610" y="122" width="115" height="66" rx="6" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="1.2"/>
-<rect x="610" y="122.0" width="5" height="66.0" fill="#0d9488"/>
-<text x="622" y="139" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">WS / TCP codec</text>
-<text x="622" y="154" font-size="10" font-weight="normal" fill="#475569" text-anchor="start">upgrade 426 / 503</text>
-<text x="622" y="167.5" font-size="10" font-weight="normal" fill="#475569" text-anchor="start">frame ≤ 64 KB</text>
-<path d="M 725 155 L 738 155" fill="none" stroke="#475569" stroke-width="1.4" marker-end="url(#a-475569)"/>
-<rect x="740" y="122" width="115" height="66" rx="6" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="1.2"/>
-<rect x="740" y="122.0" width="5" height="66.0" fill="#0d9488"/>
-<text x="752" y="139" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">FrameCodec</text>
-<text x="752" y="154" font-size="10" font-weight="normal" fill="#475569" text-anchor="start">protobuf Frame</text>
-<text x="752" y="167.5" font-size="10" font-weight="normal" fill="#475569" text-anchor="start">zero-copy</text>
-<path d="M 855 155 L 868 155" fill="none" stroke="#475569" stroke-width="1.4" marker-end="url(#a-475569)"/>
-<rect x="870" y="122" width="115" height="66" rx="6" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="1.2"/>
-<rect x="870" y="122.0" width="5" height="66.0" fill="#0d9488"/>
-<text x="882" y="139" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">HelloAuth</text>
-<text x="882" y="154" font-size="10" font-weight="normal" fill="#475569" text-anchor="start">JWT ES256 |</text>
-<text x="882" y="167.5" font-size="10" font-weight="normal" fill="#475569" text-anchor="start">resume ticket</text>
-<path d="M 985 155 L 998 155" fill="none" stroke="#475569" stroke-width="1.4" marker-end="url(#a-475569)"/>
-<rect x="1000" y="122" width="115" height="66" rx="6" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="1.2"/>
-<rect x="1000" y="122.0" width="5" height="66.0" fill="#0d9488"/>
-<text x="1012" y="139" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">SessionHandler</text>
-<text x="1012" y="154" font-size="10" font-weight="normal" fill="#475569" text-anchor="start">PING · ACK · SUB</text>
-<text x="1012" y="167.5" font-size="10" font-weight="normal" fill="#475569" text-anchor="start">UPSTREAM/REAUTH</text>
-<path d="M 600 188 L 600 234" fill="none" stroke="#475569" stroke-width="1.8" marker-end="url(#a-475569)"/>
-<text x="608" y="216" font-size="10.5" font-weight="normal" fill="#64748b" text-anchor="start" font-style="italic">channel gắn cố định 1 loop</text>
-<rect x="360" y="226" width="500" height="284" rx="8" fill="#ecfdf5" stroke="#86efac"/>
-<rect x="355" y="231" width="500" height="284" rx="8" fill="#ecfdf5" stroke="#86efac"/>
-<rect x="350" y="236" width="500" height="284" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.4"/>
-<text x="365" y="257" font-size="12.5" font-weight="700" fill="#0f172a" text-anchor="start">gw-io × 16 event loop — LoopContext (shared-nothing)</text>
-<text x="365" y="273" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">MultiThreadIoEventLoopGroup + EpollIoHandler · SO_REUSEPORT × 4 listener</text>
-<rect x="365" y="284" width="225" height="62" rx="6" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.2"/>
-<rect x="365" y="284.0" width="5" height="62.0" fill="#0d9488"/>
-<text x="377" y="301" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">sessions: Long2ObjectMap</text>
-<text x="377" y="316" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">Session phẳng, chỉ owner loop sửa</text>
-<text x="377" y="329.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">HANDSHAKING→ACTIVE→DRAINING</text>
-<rect x="610" y="284" width="225" height="62" rx="6" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.2"/>
-<rect x="610" y="284.0" width="5" height="62.0" fill="#0d9488"/>
-<text x="622" y="301" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">DeadlineWheel 128 × 1 s</text>
-<text x="622" y="316" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">heartbeat · HELLO · ack 5 s</text>
-<text x="622" y="329.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">recycle · slow consumer</text>
-<rect x="365" y="352" width="225" height="62" rx="6" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.2"/>
-<rect x="365" y="352.0" width="5" height="62.0" fill="#4f46e5"/>
-<text x="377" y="369" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">PendingAckWindow (lazy)</text>
-<text x="377" y="384" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">32 msg / 64 KB</text>
-<text x="377" y="397.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">NACK → router khi lỗi</text>
-<rect x="610" y="352" width="225" height="62" rx="6" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.2"/>
-<rect x="610" y="352.0" width="5" height="62.0" fill="#4f46e5"/>
-<text x="622" y="369" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">TopicIndex (per loop)</text>
-<text x="622" y="384" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">topic → sessions</text>
-<text x="622" y="397.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">SUBSCRIBE client / control</text>
-<rect x="365" y="420" width="225" height="62" rx="6" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.2"/>
-<rect x="365" y="420.0" width="5" height="62.0" fill="#4f46e5"/>
-<text x="377" y="437" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">BroadcastPacer</text>
-<text x="377" y="452" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">CRITICAL ghi ngay</text>
-<text x="377" y="465.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">NORMAL/BULK 10k write/s</text>
-<rect x="610" y="420" width="225" height="62" rx="6" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.2"/>
-<rect x="610" y="420.0" width="5" height="62.0" fill="#d97706"/>
-<text x="622" y="437" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">outboundBytes / budget</text>
-<text x="622" y="452" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">4 GB ÷ 16 loop</text>
-<text x="622" y="465.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">sampler 100 ms</text>
-<text x="365" y="506" font-size="10.5" font-weight="normal" fill="#64748b" text-anchor="start" font-style="italic">Ngoài vào chỉ qua eventLoop().execute(batch) · BlockHound</text>
-<rect x="870" y="236" width="260" height="284" rx="8" fill="#fefce8" stroke="#facc15" stroke-width="1.4"/>
-<text x="885" y="257" font-size="12.5" font-weight="700" fill="#0f172a" text-anchor="start">Shared (thread-safe)</text>
-<rect x="885" y="270" width="230" height="50" rx="6" fill="#ffffff" stroke="#fde68a" stroke-width="1.2"/>
-<rect x="885" y="270.0" width="5" height="50.0" fill="#0d9488"/>
-<text x="897" y="287" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">PrincipalIndex</text>
-<text x="897" y="302" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">principalId → ConnRef(loop, key)</text>
-<rect x="885" y="326" width="230" height="50" rx="6" fill="#ffffff" stroke="#fde68a" stroke-width="1.2"/>
-<rect x="885" y="326.0" width="5" height="50.0" fill="#4f46e5"/>
-<text x="897" y="343" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">NodeState (volatile)</text>
-<text x="897" y="358" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">nodeId · epoch · draining · shed</text>
-<rect x="885" y="382" width="230" height="50" rx="6" fill="#ffffff" stroke="#fde68a" stroke-width="1.2"/>
-<rect x="885" y="382.0" width="5" height="50.0" fill="#4f46e5"/>
-<text x="897" y="399" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">RevocationList</text>
-<text x="897" y="414" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">principal | device | jti · TTL 24 h</text>
-<rect x="885" y="438" width="230" height="50" rx="6" fill="#ffffff" stroke="#fde68a" stroke-width="1.2"/>
-<rect x="885" y="438.0" width="5" height="50.0" fill="#4f46e5"/>
-<text x="897" y="455" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">TenantLimits + KillSwitches</text>
-<text x="897" y="470" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">AtomicReference&lt;GatewayLimits&gt;</text>
-<text x="885" y="506" font-size="10.5" font-weight="normal" fill="#64748b" text-anchor="start" font-style="italic">connId ULID tự định tuyến: mã hoá loop + key</text>
-<rect x="350" y="570" width="145" height="100" rx="6" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1.2"/>
-<rect x="350" y="570.0" width="5" height="100.0" fill="#4f46e5"/>
-<text x="362" y="587" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">PushStream gRPC</text>
-<text x="362" y="602" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">:9090 · mTLS SPIFFE</text>
-<text x="362" y="615.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">request(n) flow ctl</text>
-<text x="362" y="629.0" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">AckBatcher 2 ms / 256</text>
-<rect x="509" y="570" width="145" height="100" rx="6" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1.2"/>
-<rect x="509" y="570.0" width="5" height="100.0" fill="#4f46e5"/>
-<text x="521" y="587" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">UpstreamPublisher</text>
-<text x="521" y="602" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">reliable: acks=all</text>
-<text x="521" y="615.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">telemetry: acks=1</text>
-<text x="521" y="629.0" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">max.block.ms = 0</text>
-<rect x="668" y="570" width="145" height="100" rx="6" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1.2"/>
-<rect x="668" y="570.0" width="5" height="100.0" fill="#4f46e5"/>
-<text x="680" y="587" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">ControlEventConsumer</text>
-<text x="680" y="602" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">gw.control từ earliest</text>
-<text x="680" y="615.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">revoke · cellmap · cfg</text>
-<text x="680" y="629.0" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">→ controlCaughtUp</text>
-<rect x="827" y="570" width="145" height="100" rx="6" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1.2"/>
-<rect x="827" y="570.0" width="5" height="100.0" fill="#4f46e5"/>
-<text x="839" y="587" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">Registry &amp; Lease</text>
-<text x="839" y="602" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">INCR epoch · lease 15 s</text>
-<text x="839" y="615.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">Lua reg:{p} · resync</text>
-<text x="839" y="629.0" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">GET seq · seqepochs</text>
-<rect x="986" y="570" width="145" height="100" rx="6" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1.2"/>
-<rect x="986" y="570.0" width="5" height="100.0" fill="#4f46e5"/>
-<text x="998" y="587" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">KickClient</text>
-<text x="998" y="602" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">single-session</text>
-<text x="998" y="615.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">PushRequest CONTROL</text>
-<text x="998" y="629.0" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">KICK → Push API</text>
-<rect x="350" y="745" width="145" height="100" rx="6" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.2"/>
-<rect x="350" y="745.0" width="5" height="100.0" fill="#d97706"/>
-<text x="362" y="762" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">gw-tick (100 ms)</text>
-<text x="362" y="777" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">LoadShedLadder L0–L5</text>
-<text x="362" y="790.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">OutboundBudget sampler</text>
-<text x="362" y="804.0" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">admission ramp · lag</text>
-<rect x="509" y="745" width="145" height="100" rx="6" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.2"/>
-<rect x="509" y="745.0" width="5" height="100.0" fill="#d97706"/>
-<text x="521" y="762" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">Drain · WarmUp</text>
-<text x="521" y="777" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">RECONNECT 2% / 5 s</text>
-<text x="521" y="790.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">warm-up loopback</text>
-<text x="521" y="804.0" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">ReadinessState</text>
-<rect x="668" y="745" width="145" height="100" rx="6" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.2"/>
-<rect x="668" y="745.0" width="5" height="50.0" fill="#0d9488"/>
-<rect x="668" y="795.0" width="5" height="50.0" fill="#d97706"/>
-<text x="680" y="762" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">SslContextProvider</text>
-<text x="680" y="777" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">hot-reload cert 30 s</text>
-<text x="680" y="790.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">TLS ticket keys (cell)</text>
-<text x="680" y="804.0" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">SecretSource file|vault</text>
-<rect x="827" y="745" width="145" height="100" rx="6" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.2"/>
-<rect x="827" y="745.0" width="5" height="100.0" fill="#0d9488"/>
-<text x="839" y="762" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">Management :8081</text>
-<text x="839" y="777" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">WebFlux, loop riêng</text>
-<text x="839" y="790.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">/ready · /live</text>
-<text x="839" y="804.0" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">/actuator/prometheus</text>
-<text x="839" y="817.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">POST /admin/drain</text>
-<rect x="986" y="745" width="145" height="100" rx="6" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.2"/>
-<rect x="986" y="745.0" width="5" height="100.0" fill="#0d9488"/>
-<text x="998" y="762" font-size="11" font-weight="700" fill="#0f172a" text-anchor="start">Metrics · Logs · OTel</text>
-<text x="998" y="777" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">label cell/az/node/loop</text>
-<text x="998" y="790.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">log sample 1% · 1k/s</text>
-<text x="998" y="804.0" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">trace 0.1% push</text>
-<rect x="350" y="892" width="780" height="60" rx="6" fill="#ffffff" stroke="#94a3b8" stroke-dasharray="4 3"/>
-<text x="362" y="912" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="start">Spring SmartLifecycle — start: Infra(0: Redis, Kafka metadata, gw.control catch-up, JWKS) → NodeIdentity(1000)</text>
-<text x="362" y="927" font-size="10.5" font-weight="normal" fill="#0f172a" text-anchor="start">→ gRPC(2000) → Netty(MAX−100: bind → warm-up → /ready → admission ramp 500→5k/s trong 2 phút)</text>
-<text x="362" y="942" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">stop (ngược lại): drain Netty → dừng gRPC → DEL lease → flush producer → đóng Redis</text>
-<rect x="1190" y="80" width="390" height="56" rx="6" fill="#ffffff" stroke="#94a3b8" stroke-width="1.2"/>
-<text x="1199" y="97" font-size="11.5" font-weight="700" fill="#0f172a" text-anchor="start">Auth &amp; Token · JWKS (ES256)</text>
-<text x="1199" y="112" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">dev: gateway-devtools issuer</text>
-<rect x="1190" y="160" width="390" height="210" rx="8" fill="#eff6ff" stroke="#93c5fd" stroke-width="1.3"/>
-<text x="1202" y="180" font-size="11.5" font-weight="700" fill="#0f172a" text-anchor="start">Kafka (KRaft) · dev: platform-devenv docker-compose</text>
-<rect x="1205" y="200" width="360" height="38" rx="6" fill="#ffffff" stroke="#bfdbfe" stroke-width="1.2"/>
-<text x="1214" y="217" font-size="10.5" font-weight="700" fill="#0f172a" text-anchor="start">c1.gw.upstream.&lt;type&gt;</text>
-<text x="1214" y="232" font-size="10" font-weight="normal" fill="#475569" text-anchor="start">key principalId · 64 partition</text>
-<rect x="1205" y="248" width="360" height="38" rx="6" fill="#ffffff" stroke="#bfdbfe" stroke-width="1.2"/>
-<text x="1214" y="265" font-size="10.5" font-weight="700" fill="#0f172a" text-anchor="start">c1.gw.lifecycle</text>
-<text x="1214" y="280" font-size="10" font-weight="normal" fill="#475569" text-anchor="start">CONNECTED · DISCONNECTED · TIMEOUT</text>
-<rect x="1205" y="296" width="360" height="38" rx="6" fill="#ffffff" stroke="#bfdbfe" stroke-width="1.2"/>
-<text x="1214" y="313" font-size="10.5" font-weight="700" fill="#0f172a" text-anchor="start">gw.control (compacted)</text>
-<text x="1214" y="328" font-size="10" font-weight="normal" fill="#475569" text-anchor="start">Revoke · CellMap · TenantCfg</text>
-<text x="1202" y="358" font-size="10" font-weight="normal" fill="#64748b" text-anchor="start" font-style="italic">c1.push.requests do Push API ghi → Push Router đọc</text>
-<rect x="1190" y="390" width="390" height="50" rx="6" fill="#ffffff" stroke="#c4b5fd" stroke-width="1.2"/>
-<text x="1199" y="407" font-size="11.5" font-weight="700" fill="#0f172a" text-anchor="start">Redis registry (cell)</text>
-<text x="1199" y="422" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">node:{id} lease · nodes:live · reg:{p} hash</text>
-<rect x="1190" y="455" width="390" height="50" rx="6" fill="#ffffff" stroke="#c4b5fd" stroke-width="1.2"/>
-<text x="1199" y="472" font-size="11.5" font-weight="700" fill="#0f172a" text-anchor="start">Redis state (cell)</text>
-<text x="1199" y="487" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">seq:{p} · seqepochs · tenantconns:{t}</text>
-<rect x="1190" y="575" width="390" height="50" rx="6" fill="#ffffff" stroke="#fdba74" stroke-width="1.2"/>
-<text x="1199" y="592" font-size="11.5" font-weight="700" fill="#0f172a" text-anchor="start">Push API · PushService.SendStream</text>
-<text x="1199" y="607" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">dev: gateway-devtools fake-pushapi</text>
-<rect x="1190" y="645" width="390" height="75" rx="6" fill="#ffffff" stroke="#86efac" stroke-width="1.2"/>
-<text x="1199" y="662" font-size="11.5" font-weight="700" fill="#0f172a" text-anchor="start">Push Router × 3 / cell</text>
-<text x="1199" y="677" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">c1.push.requests → lookup reg:{p} → gRPC</text>
-<text x="1199" y="690.5" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">dev: gateway-devtools fake-router</text>
-<rect x="1190" y="770" width="390" height="50" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
-<text x="1199" y="787" font-size="11.5" font-weight="700" fill="#0f172a" text-anchor="start">Vault KV / PKI</text>
-<text x="1199" y="802" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">dev: platform-devenv/secrets (file)</text>
-<rect x="1190" y="850" width="390" height="60" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
-<text x="1199" y="867" font-size="11.5" font-weight="700" fill="#0f172a" text-anchor="start">Prometheus · Loki · Tempo</text>
-<text x="1199" y="882" font-size="10.5" font-weight="normal" fill="#475569" text-anchor="start">scrape :8081 · NLB health check /ready</text>
-<path d="M 1190 108 L 928 108 L 928 120" fill="none" stroke="#ffffff" stroke-width="5.8"/>
-<path d="M 1190 108 L 928 108 L 928 120" fill="none" stroke="#64748b" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a-64748b)"/>
-<path d="M 560 522 L 560 568" fill="none" stroke="#2563eb" stroke-width="1.8" marker-end="url(#a-2563eb)"/>
-<path d="M 420 570 L 420 524" fill="none" stroke="#16a34a" stroke-width="1.8" marker-end="url(#a-16a34a)"/>
-<text x="426" y="552" font-size="10" font-weight="700" fill="#16a34a" text-anchor="start">③ execute(batch)</text>
-<path d="M 620 570 L 620 538 L 1160 538 L 1160 219 L 1203 219" fill="none" stroke="#ffffff" stroke-width="5.8"/>
-<path d="M 620 570 L 620 538 L 1160 538 L 1160 219 L 1203 219" fill="none" stroke="#2563eb" stroke-width="1.8" marker-end="url(#a-2563eb)"/>
-<path d="M 1160 267 L 1203 267" fill="none" stroke="#2563eb" stroke-width="1.8" marker-end="url(#a-2563eb)"/>
-<text x="1000" y="533" font-size="10" font-weight="700" fill="#2563eb" text-anchor="start">② upstream + lifecycle</text>
-<path d="M 1205 315 L 1170 315 L 1170 548 L 740 548 L 740 568" fill="none" stroke="#ffffff" stroke-width="5.8"/>
-<path d="M 1205 315 L 1170 315 L 1170 548 L 740 548 L 740 568" fill="none" stroke="#ea580c" stroke-width="1.8" marker-end="url(#a-ea580c)"/>
-<path d="M 900 570 L 900 556 L 1180 556 L 1180 415 L 1188 415" fill="none" stroke="#ffffff" stroke-width="5.8"/>
-<path d="M 900 570 L 900 556 L 1180 556 L 1180 415 L 1188 415" fill="none" stroke="#7c3aed" stroke-width="1.8" marker-end="url(#a-7c3aed)"/>
-<path d="M 1180 480 L 1188 480" fill="none" stroke="#7c3aed" stroke-width="1.8" marker-end="url(#a-7c3aed)"/>
-<path d="M 1131 600 L 1188 600" fill="none" stroke="#ffffff" stroke-width="5.8"/>
-<path d="M 1131 600 L 1188 600" fill="none" stroke="#ea580c" stroke-width="1.8" marker-end="url(#a-ea580c)"/>
-<path d="M 1190 665 L 1140 665 L 1140 690 L 460 690 L 460 672" fill="none" stroke="#ffffff" stroke-width="5.8"/>
-<path d="M 1190 665 L 1140 665 L 1140 690 L 460 690 L 460 672" fill="none" stroke="#16a34a" stroke-width="1.8" marker-end="url(#a-16a34a)"/>
-<path d="M 400 670 L 400 702 L 1188 702" fill="none" stroke="#ffffff" stroke-width="5.8"/>
-<path d="M 400 670 L 400 702 L 1188 702" fill="none" stroke="#16a34a" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a-16a34a)"/>
-<text x="760" y="685" font-size="10" font-weight="700" fill="#16a34a" text-anchor="start">③ PushBatch (MESSAGE · BROADCAST · CONTROL)</text>
-<text x="760" y="715" font-size="10" font-weight="700" fill="#16a34a" text-anchor="start">④ DeliveryAck (ACKED · NACK_*)</text>
-<path d="M 1190 795 L 1175 795 L 1175 727 L 740 727 L 740 743" fill="none" stroke="#ffffff" stroke-width="5.8"/>
-<path d="M 1190 795 L 1175 795 L 1175 727 L 740 727 L 740 743" fill="none" stroke="#64748b" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a-64748b)"/>
-<path d="M 1190 880 L 900 880 L 900 847" fill="none" stroke="#ffffff" stroke-width="5.8"/>
-<path d="M 1190 880 L 900 880 L 900 847" fill="none" stroke="#64748b" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a-64748b)"/>
-<rect x="20" y="985" width="1560" height="78" rx="8" fill="#f8fafc" stroke="#e2e8f0"/>
-<text x="34" y="1006" font-size="11.5" font-weight="700" fill="#0f172a" text-anchor="start">Luồng</text>
-<path d="M 90 1002 L 122 1002" fill="none" stroke="#475569" stroke-width="1.8" marker-end="url(#a-475569)"/>
-<text x="130" y="1006" font-size="11" font-weight="normal" fill="#475569" text-anchor="start">① kết nối client</text>
-<path d="M 237.2 1002 L 269.2 1002" fill="none" stroke="#2563eb" stroke-width="1.8" marker-end="url(#a-2563eb)"/>
-<text x="277.2" y="1006" font-size="11" font-weight="normal" fill="#475569" text-anchor="start">② upstream / lifecycle → Kafka</text>
-<path d="M 471.2 1002 L 503.2 1002" fill="none" stroke="#16a34a" stroke-width="1.8" marker-end="url(#a-16a34a)"/>
-<text x="511.2" y="1006" font-size="11" font-weight="normal" fill="#475569" text-anchor="start">③ PushBatch ↓</text>
-<path d="M 599.8 1002 L 631.8 1002" fill="none" stroke="#16a34a" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a-16a34a)"/>
-<text x="639.8" y="1006" font-size="11" font-weight="normal" fill="#475569" text-anchor="start">④ DeliveryAck ↑</text>
-<path d="M 740.8 1002 L 772.8 1002" fill="none" stroke="#7c3aed" stroke-width="1.8" marker-end="url(#a-7c3aed)"/>
-<text x="780.8" y="1006" font-size="11" font-weight="normal" fill="#475569" text-anchor="start">registry · lease · seq (Redis)</text>
-<path d="M 974.8 1002 L 1006.8 1002" fill="none" stroke="#ea580c" stroke-width="1.8" marker-end="url(#a-ea580c)"/>
-<text x="1014.8" y="1006" font-size="11" font-weight="normal" fill="#475569" text-anchor="start">control: gw.control · KICK</text>
-<path d="M 1184.0 1002 L 1216.0 1002" fill="none" stroke="#64748b" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a-64748b)"/>
-<text x="1224.0" y="1006" font-size="11" font-weight="normal" fill="#475569" text-anchor="start">cấu hình · secret · vận hành</text>
-<text x="34" y="1042" font-size="11.5" font-weight="700" fill="#0f172a" text-anchor="start">Milestone (vạch màu bên trái mỗi hộp)</text>
-<rect x="290" y="1032" width="14" height="14" rx="2" fill="#0d9488"/>
-<text x="310" y="1043" font-size="11" font-weight="normal" fill="#475569" text-anchor="start">M1 single-node: TLS · WS/TCP · HELLO · session · heartbeat</text>
-<rect x="668.0" y="1032" width="14" height="14" rx="2" fill="#4f46e5"/>
-<text x="688.0" y="1043" font-size="11" font-weight="normal" fill="#475569" text-anchor="start">M2 cluster: registry · Kafka · PushStream · broadcast · control</text>
-<rect x="1076.0" y="1032" width="14" height="14" rx="2" fill="#d97706"/>
-<text x="1096.0" y="1043" font-size="11" font-weight="normal" fill="#475569" text-anchor="start">M3 hardening: budget · shed ladder · drain · recycle · warm-up</text>
+<rect width="1600" height="1075" fill="#0b1220"/>
+<text x="20" y="32" font-size="20" font-weight="700" fill="#e2e8f0" text-anchor="start">PanGate gateway-service — tổng quan thiết kế (spec 2026-11-03)</text>
+<text x="20" y="52" font-size="12" font-weight="normal" fill="#a3b1c6" text-anchor="start">1 cell, 1 node chi tiết · Netty data plane trên nền Spring Boot · shared-nothing theo event loop · hộp bên phải là dependency (bản thay thế ở dev ghi kèm)</text>
+<text x="20" y="150" font-size="11" font-weight="700" fill="#a3b1c6" text-anchor="start">① kết nối + HELLO</text>
+<rect x="20" y="170" width="170" height="80" rx="6" fill="#111827" stroke="#475569" stroke-width="1.2"/>
+<text x="29" y="187" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Web / Mobile SDK</text>
+<text x="29" y="202" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">WSS :8443</text>
+<text x="29" y="215.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">subprotocol pangate.v1</text>
+<rect x="20" y="370" width="170" height="80" rx="6" fill="#111827" stroke="#475569" stroke-width="1.2"/>
+<text x="29" y="387" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">IoT device</text>
+<text x="29" y="402" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">TLS raw TCP :8883</text>
+<text x="29" y="415.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">4-byte length prefix</text>
+<rect x="20" y="480" width="170" height="66" rx="6" fill="#0f172a" stroke="#475569" stroke-width="1.2" stroke-dasharray="5 4"/>
+<text x="29" y="497" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">dev: gateway-devtools</text>
+<text x="29" y="512" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">client --load N</text>
+<text x="29" y="525.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">(thay SDK khi test)</text>
+<rect x="215" y="120" width="90" height="360" rx="6" fill="#1e293b" stroke="#475569" stroke-width="1.2"/>
+<text x="260.0" y="137" font-size="12" font-weight="700" fill="#e2e8f0" text-anchor="middle">L4 NLB</text>
+<text x="260.0" y="152" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="middle">per cell</text>
+<text x="260.0" y="165.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="middle">TCP pass-</text>
+<text x="260.0" y="179.0" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="middle">through,</text>
+<text x="260.0" y="192.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="middle">giữ client IP</text>
+<text x="260.0" y="206.0" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="middle"></text>
+<text x="260.0" y="219.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="middle">health:</text>
+<text x="260.0" y="233.0" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="middle">/ready :8081</text>
+<path d="M 190 210 L 213 210" fill="none" stroke="#111827" stroke-width="5.8"/>
+<path d="M 190 210 L 213 210" fill="none" stroke="#a3b1c6" stroke-width="1.8" marker-end="url(#a-a3b1c6)"/>
+<path d="M 190 410 L 213 410" fill="none" stroke="#111827" stroke-width="5.8"/>
+<path d="M 190 410 L 213 410" fill="none" stroke="#a3b1c6" stroke-width="1.8" marker-end="url(#a-a3b1c6)"/>
+<path d="M 305 155 L 348 155" fill="none" stroke="#111827" stroke-width="5.8"/>
+<path d="M 305 155 L 348 155" fill="none" stroke="#a3b1c6" stroke-width="1.8" marker-end="url(#a-a3b1c6)"/>
+<rect x="330" y="62" width="820" height="905" rx="10" fill="#0f172a" stroke="#64748b" stroke-width="1.6"/>
+<text x="345" y="84" font-size="12.5" font-weight="700" fill="#e2e8f0" text-anchor="start">gateway-service · 1 JVM / VM · Spring Boot = lifecycle, config, actuator · Netty = mọi byte trên data plane</text>
+<text x="345" y="113" font-size="11" font-weight="normal" fill="#8b9bb4" text-anchor="start">Pipeline per channel (TCP: thay HTTP/WS bằng LengthField codec)</text>
+<rect x="350" y="122" width="115" height="66" rx="6" fill="#0c2a3f" stroke="#0ea5e9" stroke-width="1.2"/>
+<rect x="350" y="122.0" width="5" height="66.0" fill="#2dd4bf"/>
+<text x="362" y="139" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">AcceptGate</text>
+<text x="362" y="154" font-size="10" font-weight="normal" fill="#a3b1c6" text-anchor="start">cap · per-IP</text>
+<text x="362" y="167.5" font-size="10" font-weight="normal" fill="#a3b1c6" text-anchor="start">token bucket</text>
+<path d="M 465 155 L 478 155" fill="none" stroke="#a3b1c6" stroke-width="1.4" marker-end="url(#a-a3b1c6)"/>
+<rect x="480" y="122" width="115" height="66" rx="6" fill="#0c2a3f" stroke="#0ea5e9" stroke-width="1.2"/>
+<rect x="480" y="122.0" width="5" height="66.0" fill="#2dd4bf"/>
+<text x="492" y="139" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">SslHandler</text>
+<text x="492" y="154" font-size="10" font-weight="normal" fill="#a3b1c6" text-anchor="start">BoringSSL</text>
+<text x="492" y="167.5" font-size="10" font-weight="normal" fill="#a3b1c6" text-anchor="start">TLS 1.3 · ECDSA</text>
+<path d="M 595 155 L 608 155" fill="none" stroke="#a3b1c6" stroke-width="1.4" marker-end="url(#a-a3b1c6)"/>
+<rect x="610" y="122" width="115" height="66" rx="6" fill="#0c2a3f" stroke="#0ea5e9" stroke-width="1.2"/>
+<rect x="610" y="122.0" width="5" height="66.0" fill="#2dd4bf"/>
+<text x="622" y="139" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">WS / TCP codec</text>
+<text x="622" y="154" font-size="10" font-weight="normal" fill="#a3b1c6" text-anchor="start">upgrade 426 / 503</text>
+<text x="622" y="167.5" font-size="10" font-weight="normal" fill="#a3b1c6" text-anchor="start">frame ≤ 64 KB</text>
+<path d="M 725 155 L 738 155" fill="none" stroke="#a3b1c6" stroke-width="1.4" marker-end="url(#a-a3b1c6)"/>
+<rect x="740" y="122" width="115" height="66" rx="6" fill="#0c2a3f" stroke="#0ea5e9" stroke-width="1.2"/>
+<rect x="740" y="122.0" width="5" height="66.0" fill="#2dd4bf"/>
+<text x="752" y="139" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">FrameCodec</text>
+<text x="752" y="154" font-size="10" font-weight="normal" fill="#a3b1c6" text-anchor="start">protobuf Frame</text>
+<text x="752" y="167.5" font-size="10" font-weight="normal" fill="#a3b1c6" text-anchor="start">zero-copy</text>
+<path d="M 855 155 L 868 155" fill="none" stroke="#a3b1c6" stroke-width="1.4" marker-end="url(#a-a3b1c6)"/>
+<rect x="870" y="122" width="115" height="66" rx="6" fill="#0c2a3f" stroke="#0ea5e9" stroke-width="1.2"/>
+<rect x="870" y="122.0" width="5" height="66.0" fill="#2dd4bf"/>
+<text x="882" y="139" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">HelloAuth</text>
+<text x="882" y="154" font-size="10" font-weight="normal" fill="#a3b1c6" text-anchor="start">JWT ES256 |</text>
+<text x="882" y="167.5" font-size="10" font-weight="normal" fill="#a3b1c6" text-anchor="start">resume ticket</text>
+<path d="M 985 155 L 998 155" fill="none" stroke="#a3b1c6" stroke-width="1.4" marker-end="url(#a-a3b1c6)"/>
+<rect x="1000" y="122" width="115" height="66" rx="6" fill="#0c2a3f" stroke="#0ea5e9" stroke-width="1.2"/>
+<rect x="1000" y="122.0" width="5" height="66.0" fill="#2dd4bf"/>
+<text x="1012" y="139" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">SessionHandler</text>
+<text x="1012" y="154" font-size="10" font-weight="normal" fill="#a3b1c6" text-anchor="start">PING · ACK · SUB</text>
+<text x="1012" y="167.5" font-size="10" font-weight="normal" fill="#a3b1c6" text-anchor="start">UPSTREAM/REAUTH</text>
+<path d="M 600 188 L 600 234" fill="none" stroke="#a3b1c6" stroke-width="1.8" marker-end="url(#a-a3b1c6)"/>
+<text x="608" y="216" font-size="10.5" font-weight="normal" fill="#8b9bb4" text-anchor="start" font-style="italic">channel gắn cố định 1 loop</text>
+<rect x="360" y="226" width="500" height="284" rx="8" fill="#052e1f" stroke="#15803d"/>
+<rect x="355" y="231" width="500" height="284" rx="8" fill="#052e1f" stroke="#15803d"/>
+<rect x="350" y="236" width="500" height="284" rx="8" fill="#06281c" stroke="#22c55e" stroke-width="1.4"/>
+<text x="365" y="257" font-size="12.5" font-weight="700" fill="#e2e8f0" text-anchor="start">gw-io × 16 event loop — LoopContext (shared-nothing)</text>
+<text x="365" y="273" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">MultiThreadIoEventLoopGroup + EpollIoHandler · SO_REUSEPORT × 4 listener</text>
+<rect x="365" y="284" width="225" height="62" rx="6" fill="#111827" stroke="#166534" stroke-width="1.2"/>
+<rect x="365" y="284.0" width="5" height="62.0" fill="#2dd4bf"/>
+<text x="377" y="301" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">sessions: Long2ObjectMap</text>
+<text x="377" y="316" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">Session phẳng, chỉ owner loop sửa</text>
+<text x="377" y="329.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">HANDSHAKING→ACTIVE→DRAINING</text>
+<rect x="610" y="284" width="225" height="62" rx="6" fill="#111827" stroke="#166534" stroke-width="1.2"/>
+<rect x="610" y="284.0" width="5" height="62.0" fill="#2dd4bf"/>
+<text x="622" y="301" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">DeadlineWheel 128 × 1 s</text>
+<text x="622" y="316" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">heartbeat · HELLO · ack 5 s</text>
+<text x="622" y="329.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">recycle · slow consumer</text>
+<rect x="365" y="352" width="225" height="62" rx="6" fill="#111827" stroke="#166534" stroke-width="1.2"/>
+<rect x="365" y="352.0" width="5" height="62.0" fill="#818cf8"/>
+<text x="377" y="369" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">PendingAckWindow (lazy)</text>
+<text x="377" y="384" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">32 msg / 64 KB</text>
+<text x="377" y="397.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">NACK → router khi lỗi</text>
+<rect x="610" y="352" width="225" height="62" rx="6" fill="#111827" stroke="#166534" stroke-width="1.2"/>
+<rect x="610" y="352.0" width="5" height="62.0" fill="#818cf8"/>
+<text x="622" y="369" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">TopicIndex (per loop)</text>
+<text x="622" y="384" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">topic → sessions</text>
+<text x="622" y="397.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">SUBSCRIBE client / control</text>
+<rect x="365" y="420" width="225" height="62" rx="6" fill="#111827" stroke="#166534" stroke-width="1.2"/>
+<rect x="365" y="420.0" width="5" height="62.0" fill="#818cf8"/>
+<text x="377" y="437" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">BroadcastPacer</text>
+<text x="377" y="452" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">CRITICAL ghi ngay</text>
+<text x="377" y="465.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">NORMAL/BULK 10k write/s</text>
+<rect x="610" y="420" width="225" height="62" rx="6" fill="#111827" stroke="#166534" stroke-width="1.2"/>
+<rect x="610" y="420.0" width="5" height="62.0" fill="#fbbf24"/>
+<text x="622" y="437" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">outboundBytes / budget</text>
+<text x="622" y="452" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">4 GB ÷ 16 loop</text>
+<text x="622" y="465.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">sampler 100 ms</text>
+<text x="365" y="506" font-size="10.5" font-weight="normal" fill="#8b9bb4" text-anchor="start" font-style="italic">Ngoài vào chỉ qua eventLoop().execute(batch) · BlockHound</text>
+<rect x="870" y="236" width="260" height="284" rx="8" fill="#231d05" stroke="#ca8a04" stroke-width="1.4"/>
+<text x="885" y="257" font-size="12.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Shared (thread-safe)</text>
+<rect x="885" y="270" width="230" height="50" rx="6" fill="#111827" stroke="#854d0e" stroke-width="1.2"/>
+<rect x="885" y="270.0" width="5" height="50.0" fill="#2dd4bf"/>
+<text x="897" y="287" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">PrincipalIndex</text>
+<text x="897" y="302" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">principalId → ConnRef(loop, key)</text>
+<rect x="885" y="326" width="230" height="50" rx="6" fill="#111827" stroke="#854d0e" stroke-width="1.2"/>
+<rect x="885" y="326.0" width="5" height="50.0" fill="#818cf8"/>
+<text x="897" y="343" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">NodeState (volatile)</text>
+<text x="897" y="358" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">nodeId · epoch · draining · shed</text>
+<rect x="885" y="382" width="230" height="50" rx="6" fill="#111827" stroke="#854d0e" stroke-width="1.2"/>
+<rect x="885" y="382.0" width="5" height="50.0" fill="#818cf8"/>
+<text x="897" y="399" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">RevocationList</text>
+<text x="897" y="414" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">principal | device | jti · TTL 24 h</text>
+<rect x="885" y="438" width="230" height="50" rx="6" fill="#111827" stroke="#854d0e" stroke-width="1.2"/>
+<rect x="885" y="438.0" width="5" height="50.0" fill="#818cf8"/>
+<text x="897" y="455" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">TenantLimits + KillSwitches</text>
+<text x="897" y="470" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">AtomicReference&lt;GatewayLimits&gt;</text>
+<text x="885" y="506" font-size="10.5" font-weight="normal" fill="#8b9bb4" text-anchor="start" font-style="italic">connId ULID tự định tuyến: mã hoá loop + key</text>
+<rect x="350" y="570" width="145" height="100" rx="6" fill="#1e1b3a" stroke="#6d28d9" stroke-width="1.2"/>
+<rect x="350" y="570.0" width="5" height="100.0" fill="#818cf8"/>
+<text x="362" y="587" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">PushStream gRPC</text>
+<text x="362" y="602" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">:9090 · mTLS SPIFFE</text>
+<text x="362" y="615.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">request(n) flow ctl</text>
+<text x="362" y="629.0" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">AckBatcher 2 ms / 256</text>
+<rect x="509" y="570" width="145" height="100" rx="6" fill="#1e1b3a" stroke="#6d28d9" stroke-width="1.2"/>
+<rect x="509" y="570.0" width="5" height="100.0" fill="#818cf8"/>
+<text x="521" y="587" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">UpstreamPublisher</text>
+<text x="521" y="602" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">reliable: acks=all</text>
+<text x="521" y="615.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">telemetry: acks=1</text>
+<text x="521" y="629.0" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">max.block.ms = 0</text>
+<rect x="668" y="570" width="145" height="100" rx="6" fill="#1e1b3a" stroke="#6d28d9" stroke-width="1.2"/>
+<rect x="668" y="570.0" width="5" height="100.0" fill="#818cf8"/>
+<text x="680" y="587" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">ControlEventConsumer</text>
+<text x="680" y="602" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">gw.control từ earliest</text>
+<text x="680" y="615.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">revoke · cellmap · cfg</text>
+<text x="680" y="629.0" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">→ controlCaughtUp</text>
+<rect x="827" y="570" width="145" height="100" rx="6" fill="#1e1b3a" stroke="#6d28d9" stroke-width="1.2"/>
+<rect x="827" y="570.0" width="5" height="100.0" fill="#818cf8"/>
+<text x="839" y="587" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">Registry &amp; Lease</text>
+<text x="839" y="602" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">INCR epoch · lease 15 s</text>
+<text x="839" y="615.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">Lua reg:{p} · resync</text>
+<text x="839" y="629.0" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">GET seq · seqepochs</text>
+<rect x="986" y="570" width="145" height="100" rx="6" fill="#1e1b3a" stroke="#6d28d9" stroke-width="1.2"/>
+<rect x="986" y="570.0" width="5" height="100.0" fill="#818cf8"/>
+<text x="998" y="587" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">KickClient</text>
+<text x="998" y="602" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">single-session</text>
+<text x="998" y="615.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">PushRequest CONTROL</text>
+<text x="998" y="629.0" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">KICK → Push API</text>
+<rect x="350" y="745" width="145" height="100" rx="6" fill="#1e293b" stroke="#475569" stroke-width="1.2"/>
+<rect x="350" y="745.0" width="5" height="100.0" fill="#fbbf24"/>
+<text x="362" y="762" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">gw-tick (100 ms)</text>
+<text x="362" y="777" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">LoadShedLadder L0–L5</text>
+<text x="362" y="790.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">OutboundBudget sampler</text>
+<text x="362" y="804.0" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">admission ramp · lag</text>
+<rect x="509" y="745" width="145" height="100" rx="6" fill="#1e293b" stroke="#475569" stroke-width="1.2"/>
+<rect x="509" y="745.0" width="5" height="100.0" fill="#fbbf24"/>
+<text x="521" y="762" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">Drain · WarmUp</text>
+<text x="521" y="777" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">RECONNECT 2% / 5 s</text>
+<text x="521" y="790.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">warm-up loopback</text>
+<text x="521" y="804.0" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">ReadinessState</text>
+<rect x="668" y="745" width="145" height="100" rx="6" fill="#1e293b" stroke="#475569" stroke-width="1.2"/>
+<rect x="668" y="745.0" width="5" height="50.0" fill="#2dd4bf"/>
+<rect x="668" y="795.0" width="5" height="50.0" fill="#fbbf24"/>
+<text x="680" y="762" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">SslContextProvider</text>
+<text x="680" y="777" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">hot-reload cert 30 s</text>
+<text x="680" y="790.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">TLS ticket keys (cell)</text>
+<text x="680" y="804.0" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">SecretSource file|vault</text>
+<rect x="827" y="745" width="145" height="100" rx="6" fill="#1e293b" stroke="#475569" stroke-width="1.2"/>
+<rect x="827" y="745.0" width="5" height="100.0" fill="#2dd4bf"/>
+<text x="839" y="762" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">Management :8081</text>
+<text x="839" y="777" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">WebFlux, loop riêng</text>
+<text x="839" y="790.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">/ready · /live</text>
+<text x="839" y="804.0" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">/actuator/prometheus</text>
+<text x="839" y="817.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">POST /admin/drain</text>
+<rect x="986" y="745" width="145" height="100" rx="6" fill="#1e293b" stroke="#475569" stroke-width="1.2"/>
+<rect x="986" y="745.0" width="5" height="100.0" fill="#2dd4bf"/>
+<text x="998" y="762" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">Metrics · Logs · OTel</text>
+<text x="998" y="777" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">label cell/az/node/loop</text>
+<text x="998" y="790.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">log sample 1% · 1k/s</text>
+<text x="998" y="804.0" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">trace 0.1% push</text>
+<rect x="350" y="892" width="780" height="60" rx="6" fill="#111827" stroke="#475569" stroke-dasharray="4 3"/>
+<text x="362" y="912" font-size="10.5" font-weight="normal" fill="#e2e8f0" text-anchor="start">Spring SmartLifecycle — start: Infra(0: Redis, Kafka metadata, gw.control catch-up, JWKS) → NodeIdentity(1000)</text>
+<text x="362" y="927" font-size="10.5" font-weight="normal" fill="#e2e8f0" text-anchor="start">→ gRPC(2000) → Netty(MAX−100: bind → warm-up → /ready → admission ramp 500→5k/s trong 2 phút)</text>
+<text x="362" y="942" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">stop (ngược lại): drain Netty → dừng gRPC → DEL lease → flush producer → đóng Redis</text>
+<rect x="1190" y="80" width="390" height="56" rx="6" fill="#111827" stroke="#475569" stroke-width="1.2"/>
+<text x="1199" y="97" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Auth &amp; Token · JWKS (ES256)</text>
+<text x="1199" y="112" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">dev: gateway-devtools issuer</text>
+<rect x="1190" y="160" width="390" height="210" rx="8" fill="#0b1f3a" stroke="#2563eb" stroke-width="1.3"/>
+<text x="1202" y="180" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Kafka (KRaft) · dev: platform-devenv docker-compose</text>
+<rect x="1205" y="200" width="360" height="38" rx="6" fill="#111827" stroke="#1e40af" stroke-width="1.2"/>
+<text x="1214" y="217" font-size="10.5" font-weight="700" fill="#e2e8f0" text-anchor="start">c1.gw.upstream.&lt;type&gt;</text>
+<text x="1214" y="232" font-size="10" font-weight="normal" fill="#a3b1c6" text-anchor="start">key principalId · 64 partition</text>
+<rect x="1205" y="248" width="360" height="38" rx="6" fill="#111827" stroke="#1e40af" stroke-width="1.2"/>
+<text x="1214" y="265" font-size="10.5" font-weight="700" fill="#e2e8f0" text-anchor="start">c1.gw.lifecycle</text>
+<text x="1214" y="280" font-size="10" font-weight="normal" fill="#a3b1c6" text-anchor="start">CONNECTED · DISCONNECTED · TIMEOUT</text>
+<rect x="1205" y="296" width="360" height="38" rx="6" fill="#111827" stroke="#1e40af" stroke-width="1.2"/>
+<text x="1214" y="313" font-size="10.5" font-weight="700" fill="#e2e8f0" text-anchor="start">gw.control (compacted)</text>
+<text x="1214" y="328" font-size="10" font-weight="normal" fill="#a3b1c6" text-anchor="start">Revoke · CellMap · TenantCfg</text>
+<text x="1202" y="358" font-size="10" font-weight="normal" fill="#8b9bb4" text-anchor="start" font-style="italic">c1.push.requests do Push API ghi → Push Router đọc</text>
+<rect x="1190" y="390" width="390" height="50" rx="6" fill="#111827" stroke="#6d28d9" stroke-width="1.2"/>
+<text x="1199" y="407" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Redis registry (cell)</text>
+<text x="1199" y="422" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">node:{id} lease · nodes:live · reg:{p} hash</text>
+<rect x="1190" y="455" width="390" height="50" rx="6" fill="#111827" stroke="#6d28d9" stroke-width="1.2"/>
+<text x="1199" y="472" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Redis state (cell)</text>
+<text x="1199" y="487" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">seq:{p} · seqepochs · tenantconns:{t}</text>
+<rect x="1190" y="575" width="390" height="50" rx="6" fill="#111827" stroke="#c2410c" stroke-width="1.2"/>
+<text x="1199" y="592" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Push API · PushService.SendStream</text>
+<text x="1199" y="607" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">dev: gateway-devtools fake-pushapi</text>
+<rect x="1190" y="645" width="390" height="75" rx="6" fill="#111827" stroke="#15803d" stroke-width="1.2"/>
+<text x="1199" y="662" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Push Router × 3 / cell</text>
+<text x="1199" y="677" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">c1.push.requests → lookup reg:{p} → gRPC</text>
+<text x="1199" y="690.5" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">dev: gateway-devtools fake-router</text>
+<rect x="1190" y="770" width="390" height="50" rx="6" fill="#111827" stroke="#475569" stroke-width="1.2"/>
+<text x="1199" y="787" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Vault KV / PKI</text>
+<text x="1199" y="802" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">dev: platform-devenv/secrets (file)</text>
+<rect x="1190" y="850" width="390" height="60" rx="6" fill="#111827" stroke="#475569" stroke-width="1.2"/>
+<text x="1199" y="867" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Prometheus · Loki · Tempo</text>
+<text x="1199" y="882" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">scrape :8081 · NLB health check /ready</text>
+<path d="M 1190 108 L 928 108 L 928 120" fill="none" stroke="#111827" stroke-width="5.8"/>
+<path d="M 1190 108 L 928 108 L 928 120" fill="none" stroke="#8b9bb4" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a-8b9bb4)"/>
+<path d="M 560 522 L 560 568" fill="none" stroke="#60a5fa" stroke-width="1.8" marker-end="url(#a-60a5fa)"/>
+<path d="M 420 570 L 420 524" fill="none" stroke="#4ade80" stroke-width="1.8" marker-end="url(#a-4ade80)"/>
+<text x="426" y="552" font-size="10" font-weight="700" fill="#4ade80" text-anchor="start">③ execute(batch)</text>
+<path d="M 620 570 L 620 538 L 1160 538 L 1160 219 L 1203 219" fill="none" stroke="#111827" stroke-width="5.8"/>
+<path d="M 620 570 L 620 538 L 1160 538 L 1160 219 L 1203 219" fill="none" stroke="#60a5fa" stroke-width="1.8" marker-end="url(#a-60a5fa)"/>
+<path d="M 1160 267 L 1203 267" fill="none" stroke="#60a5fa" stroke-width="1.8" marker-end="url(#a-60a5fa)"/>
+<text x="1000" y="533" font-size="10" font-weight="700" fill="#60a5fa" text-anchor="start">② upstream + lifecycle</text>
+<path d="M 1205 315 L 1170 315 L 1170 548 L 740 548 L 740 568" fill="none" stroke="#111827" stroke-width="5.8"/>
+<path d="M 1205 315 L 1170 315 L 1170 548 L 740 548 L 740 568" fill="none" stroke="#fb923c" stroke-width="1.8" marker-end="url(#a-fb923c)"/>
+<path d="M 900 570 L 900 556 L 1180 556 L 1180 415 L 1188 415" fill="none" stroke="#111827" stroke-width="5.8"/>
+<path d="M 900 570 L 900 556 L 1180 556 L 1180 415 L 1188 415" fill="none" stroke="#a78bfa" stroke-width="1.8" marker-end="url(#a-a78bfa)"/>
+<path d="M 1180 480 L 1188 480" fill="none" stroke="#a78bfa" stroke-width="1.8" marker-end="url(#a-a78bfa)"/>
+<path d="M 1131 600 L 1188 600" fill="none" stroke="#111827" stroke-width="5.8"/>
+<path d="M 1131 600 L 1188 600" fill="none" stroke="#fb923c" stroke-width="1.8" marker-end="url(#a-fb923c)"/>
+<path d="M 1190 665 L 1140 665 L 1140 690 L 460 690 L 460 672" fill="none" stroke="#111827" stroke-width="5.8"/>
+<path d="M 1190 665 L 1140 665 L 1140 690 L 460 690 L 460 672" fill="none" stroke="#4ade80" stroke-width="1.8" marker-end="url(#a-4ade80)"/>
+<path d="M 400 670 L 400 702 L 1188 702" fill="none" stroke="#111827" stroke-width="5.8"/>
+<path d="M 400 670 L 400 702 L 1188 702" fill="none" stroke="#4ade80" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a-4ade80)"/>
+<text x="760" y="685" font-size="10" font-weight="700" fill="#4ade80" text-anchor="start">③ PushBatch (MESSAGE · BROADCAST · CONTROL)</text>
+<text x="760" y="715" font-size="10" font-weight="700" fill="#4ade80" text-anchor="start">④ DeliveryAck (ACKED · NACK_*)</text>
+<path d="M 1190 795 L 1175 795 L 1175 727 L 740 727 L 740 743" fill="none" stroke="#111827" stroke-width="5.8"/>
+<path d="M 1190 795 L 1175 795 L 1175 727 L 740 727 L 740 743" fill="none" stroke="#8b9bb4" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a-8b9bb4)"/>
+<path d="M 1190 880 L 900 880 L 900 847" fill="none" stroke="#111827" stroke-width="5.8"/>
+<path d="M 1190 880 L 900 880 L 900 847" fill="none" stroke="#8b9bb4" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a-8b9bb4)"/>
+<rect x="20" y="985" width="1560" height="78" rx="8" fill="#0f172a" stroke="#334155"/>
+<text x="34" y="1006" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Luồng</text>
+<path d="M 90 1002 L 122 1002" fill="none" stroke="#a3b1c6" stroke-width="1.8" marker-end="url(#a-a3b1c6)"/>
+<text x="130" y="1006" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">① kết nối client</text>
+<path d="M 237.2 1002 L 269.2 1002" fill="none" stroke="#60a5fa" stroke-width="1.8" marker-end="url(#a-60a5fa)"/>
+<text x="277.2" y="1006" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">② upstream / lifecycle → Kafka</text>
+<path d="M 471.2 1002 L 503.2 1002" fill="none" stroke="#4ade80" stroke-width="1.8" marker-end="url(#a-4ade80)"/>
+<text x="511.2" y="1006" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">③ PushBatch ↓</text>
+<path d="M 599.8 1002 L 631.8 1002" fill="none" stroke="#4ade80" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a-4ade80)"/>
+<text x="639.8" y="1006" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">④ DeliveryAck ↑</text>
+<path d="M 740.8 1002 L 772.8 1002" fill="none" stroke="#a78bfa" stroke-width="1.8" marker-end="url(#a-a78bfa)"/>
+<text x="780.8" y="1006" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">registry · lease · seq (Redis)</text>
+<path d="M 974.8 1002 L 1006.8 1002" fill="none" stroke="#fb923c" stroke-width="1.8" marker-end="url(#a-fb923c)"/>
+<text x="1014.8" y="1006" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">control: gw.control · KICK</text>
+<path d="M 1184.0 1002 L 1216.0 1002" fill="none" stroke="#8b9bb4" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a-8b9bb4)"/>
+<text x="1224.0" y="1006" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">cấu hình · secret · vận hành</text>
+<text x="34" y="1042" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Milestone (vạch màu bên trái mỗi hộp)</text>
+<rect x="290" y="1032" width="14" height="14" rx="2" fill="#2dd4bf"/>
+<text x="310" y="1043" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">M1 single-node: TLS · WS/TCP · HELLO · session · heartbeat</text>
+<rect x="668.0" y="1032" width="14" height="14" rx="2" fill="#818cf8"/>
+<text x="688.0" y="1043" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">M2 cluster: registry · Kafka · PushStream · broadcast · control</text>
+<rect x="1076.0" y="1032" width="14" height="14" rx="2" fill="#fbbf24"/>
+<text x="1096.0" y="1043" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">M3 hardening: budget · shed ladder · drain · recycle · warm-up</text>
 </svg>
