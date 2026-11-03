@@ -1,0 +1,23 @@
+# Local: gateway runs from the IDE; infra (from M2) on localhost. Dev secrets are generated on first start.
+pangate:
+  az: local
+  secrets:
+    dir: ${gateway.dev.dir}
+
+gateway:
+  node-id: gateway-local
+  cell: cell-1
+  dev:
+    bootstrap-secrets: true
+    dir: ${user.home}/.pangate-dev
+  tls:
+    cert-file: ${gateway.dev.dir}/gateway.crt
+    key-file: ${gateway.dev.dir}/gateway.key
+  auth:
+    jwks-uri: ""
+    jwks-file: ${gateway.dev.dir}/jwks.json
+  limits:
+    hard-cap: 100000
+    soft-cap: 80000
+    per-ip: 100000
+  startup: { dependency-timeout: 30s }

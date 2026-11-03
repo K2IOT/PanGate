@@ -1,0 +1,19 @@
+# Dev: everything runs in docker compose (platform-devenv).
+pangate:
+  az: dev
+  secrets:
+    dir: ${gateway.dev.dir}
+
+gateway:
+  node-id: gateway-dev-1
+  dev:
+    bootstrap-secrets: true
+    dir: /dev-secrets
+  tls:
+    cert-file: ${gateway.dev.dir}/gateway.crt
+    key-file: ${gateway.dev.dir}/gateway.key
+  auth:
+    jwks-uri: http://issuer:8090/.well-known/jwks.json
+  limits:
+    hard-cap: 200000
+  startup: { dependency-timeout: 60s }
