@@ -76,12 +76,14 @@ class GatewayLocalIT {
   }
 
   static ConfigurableApplicationContext start(Ports p) {
-    return new SpringApplicationBuilder(GatewayApplication.class).profiles("local").run(
+    List<String> args = new java.util.ArrayList<>(List.of(
         "--gateway.dev.dir=" + devDir,
         "--gateway.listeners.ws.port=" + p.ws(),
         "--gateway.listeners.tcp.port=" + p.tcp(),
         "--server.port=" + p.mgmt(),
-        "--gateway.io.threads=4");
+        "--gateway.io.threads=4"));
+    args.addAll(InfraContainers.gatewayArgs());
+    return new SpringApplicationBuilder(GatewayApplication.class).profiles("local").run(args.toArray(String[]::new));
   }
 
   private static String SHARED_POOL_ID;
