@@ -1,0 +1,2 @@
+com.pangate.starter.autoconfigure.PangateSecretsAutoConfiguration
+com.pangate.starter.autoconfigure.PangateObservabilityAutoConfiguration
