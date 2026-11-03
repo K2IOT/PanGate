@@ -63,11 +63,20 @@ public final class NettyGatewayServer implements SmartLifecycle {
     loops.all().forEach(LoopContext::startTicker);
     lagProbe.start();
     int ws = props.listeners().ws().port();
-    for (int i = 0; i < io.effectiveAcceptors(props.listeners().ws().acceptors()); i++) {
-      listeners.add(bind(wsInitializer, ws, "ws", "GATEWAY_LISTENERS_WS_PORT"));
-    }
-    if (props.listeners().tcp().enabled()) {
-      listeners.add(bind(tcpInitializer, props.listeners().tcp().port(), "tcp", "GATEWAY_LISTENERS_TCP_PORT"));
+    try {
+      for (int i = 0; i < io.effectiveAcceptors(props.listeners().ws().acceptors()); i++) {
+        listeners.add(bind(wsInitializer, ws, "ws", "GATEWAY_LISTENERS_WS_PORT"));
+      }
+      if (props.listeners().tcp().enabled()) {
+        listeners.add(bind(tcpInitializer, props.listeners().tcp().port(), "tcp", "GATEWAY_LISTENERS_TCP_PORT"));
+      }
+    } catch (RuntimeException e) {
+      // Fail fast (spec §3.7): Spring will not call stop() on a lifecycle that never started, so release here —
+      // otherwise the already-bound listeners keep accepting and the non-daemon gw-io threads keep the JVM alive.
+      listeners.forEach(ch -> ch.close().syncUninterruptibly());
+      listeners.clear();
+      io.shutdown(Duration.ZERO, Duration.ofSeconds(5)).syncUninterruptibly();
+      throw e;
     }
     node.listenersBound(true);
     admission.markReady();

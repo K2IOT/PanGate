@@ -18,7 +18,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** The data-plane event loop group ("gw-io-*"): epoll when available, NIO otherwise (spec §3.2). */
-public final class IoGroups {
+public final class IoGroups implements AutoCloseable {
 
   private static final Logger log = LoggerFactory.getLogger(IoGroups.class);
 
@@ -71,5 +71,13 @@ public final class IoGroups {
 
   public Future<?> shutdown(Duration quiet, Duration timeout) {
     return group.shutdownGracefully(quiet.toMillis(), timeout.toMillis(), TimeUnit.MILLISECONDS);
+  }
+
+  /** Destroy hook (inferred by Spring): releases the event loops if nothing else did. Idempotent. */
+  @Override
+  public void close() {
+    if (!group.isShuttingDown()) {
+      shutdown(Duration.ZERO, Duration.ofSeconds(5)).syncUninterruptibly();
+    }
   }
 }

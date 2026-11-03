@@ -84,10 +84,14 @@ class GatewayLocalIT {
         "--gateway.io.threads=4");
   }
 
+  private static String SHARED_POOL_ID;
+
   @BeforeAll
   static void boot() throws Exception {
     ports = Ports.free();
     ctx = start(ports);
+    SHARED_POOL_ID = Thread.getAllStackTraces().keySet().stream().map(Thread::getName)
+        .filter(n -> n.startsWith("gw-io-")).map(n -> n.split("-")[2]).findFirst().orElse("none");
   }
 
   @AfterAll
@@ -237,6 +241,44 @@ class GatewayLocalIT {
       String status = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.US_ASCII)).readLine();
 
       assertThat(status).startsWith("HTTP/1.1 426");
+    }
+  }
+
+  @Test
+  void busyPortFailsFastAndReleasesEverything() throws Exception {
+    Ports p = Ports.free();
+    try (ServerSocket busy = new ServerSocket(p.tcp())) {
+      Throwable failure = null;
+      try {
+        start(p).close();
+      } catch (Throwable t) {
+        failure = t;
+      }
+      Throwable root = failure;
+      while (root != null && !(root instanceof com.pangate.gateway.diagnostics.ListenerBindException)) {
+        root = root.getCause();
+      }
+      assertThat(root).as("startup must fail with ListenerBindException").isNotNull();
+    }
+    await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+      assertThat(Thread.getAllStackTraces().keySet().stream()
+          .filter(t -> t.isAlive() && t.getName().startsWith("gw-io-"))
+          .filter(t -> !ctxOwns(t))).isEmpty();
+      assertThat(canConnect(p.ws())).isFalse();
+    });
+  }
+
+  /** gw-io threads of the shared context are expected; they belong to its thread group naming "gw-io-1-*". */
+  private static boolean ctxOwns(Thread t) {
+    return t.getName().startsWith("gw-io-" + SHARED_POOL_ID + "-");
+  }
+
+  private static boolean canConnect(int port) {
+    try (Socket s = new Socket()) {
+      s.connect(new java.net.InetSocketAddress("127.0.0.1", port), 500);
+      return true;
+    } catch (Exception e) {
+      return false;
     }
   }
 
