@@ -117,4 +117,45 @@ class ResumeTicketServiceTest {
 
     assertThatThrownBy(() -> TicketKeyRing.load(new FileSecretSource(d))).isInstanceOf(IllegalStateException.class);
   }
+
+  @Test
+  void ticketFromPreviousCurrentVerifiesAfterRotation() {
+    ResumeTicketService s = new ResumeTicketService(new TicketKeyRing(key(1), key(2), key(3)));
+    String token = s.issue(TICKET);
+
+    s.ring(new TicketKeyRing(key(2), key(3), key(4)));
+    assertThat(s.verify(token, 2_000L)).isEqualTo(new TicketVerifyResult.Valid(TICKET));
+
+    s.ring(new TicketKeyRing(key(3), key(4), key(5)));
+    assertThat(s.verify(token, 2_000L)).isInstanceOf(TicketVerifyResult.Invalid.class);
+  }
+
+  @Test
+  void ringsCompareByKeyContent() {
+    assertThat(new TicketKeyRing(key(1), key(2), key(3))).isEqualTo(new TicketKeyRing(key(1), key(2), key(3)));
+    assertThat(new TicketKeyRing(key(1), key(2), key(3))).isNotEqualTo(new TicketKeyRing(key(2), key(3), key(4)));
+  }
+
+  @Test
+  void unreadableRingKeepsOld() {
+    ResumeTicketService s = new ResumeTicketService(RING);
+    io.micrometer.core.instrument.simple.SimpleMeterRegistry meters =
+        new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+    com.pangate.starter.secrets.SecretSource broken = new com.pangate.starter.secrets.SecretSource() {
+      @Override public byte[] get(String name) {
+        return "not a key".getBytes();
+      }
+
+      @Override public String describe(String name) {
+        return name;
+      }
+    };
+
+    com.pangate.gateway.config.EdgeConfig.reloadTicketKeys(broken, s,
+        new com.pangate.gateway.metrics.GatewayMetrics(meters));
+
+    assertThat(s.ring()).isSameAs(RING);
+    assertThat(meters.get("gw.secrets.reload").tag("name", "ticket-keys").tag("result", "failed").counter().count())
+        .isEqualTo(1);
+  }
 }

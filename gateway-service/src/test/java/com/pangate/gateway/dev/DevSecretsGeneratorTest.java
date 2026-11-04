@@ -20,7 +20,8 @@ import org.junit.jupiter.api.io.TempDir;
 class DevSecretsGeneratorTest {
 
   static final List<String> FILES = List.of("ca.crt", "ca.key", "gateway.crt", "gateway.key", "es256.pem",
-      "jwks.json", "ticket-keys/prev", "ticket-keys/current", "ticket-keys/next", "principal-hash.key");
+      "jwks.json", "ticket-keys/prev", "ticket-keys/current", "ticket-keys/next", "principal-hash.key",
+      "tls-ticket-keys/prev", "tls-ticket-keys/current", "tls-ticket-keys/next");
 
   @Test
   void generatesAllFilesWithExpectedFormats(@TempDir Path d) throws Exception {
@@ -51,6 +52,10 @@ class DevSecretsGeneratorTest {
     assertThat(Files.readString(d.resolve("ticket-keys/prev")).trim()).matches("^1 [A-Za-z0-9+/]{43}=$");
     assertThat(Files.readString(d.resolve("ticket-keys/current")).trim()).matches("^2 [A-Za-z0-9+/]{43}=$");
     assertThat(Files.readString(d.resolve("ticket-keys/next")).trim()).matches("^3 [A-Za-z0-9+/]{43}=$");
+    for (String r : List.of("prev", "current", "next")) {
+      assertThat(java.util.Base64.getDecoder().decode(Files.readString(d.resolve("tls-ticket-keys/" + r)).trim()))
+          .hasSize(48);
+    }
   }
 
   @Test

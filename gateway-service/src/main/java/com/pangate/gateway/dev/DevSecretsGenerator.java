@@ -65,12 +65,19 @@ public final class DevSecretsGenerator {
       Files.createDirectories(dir);
       restrict(dir, "rwxr-xr-x");
       Files.createDirectories(dir.resolve("ticket-keys"));
+      Files.createDirectories(dir.resolve("tls-ticket-keys"));
       ensureCertificates(dir);
       ensureEs256(dir);
       for (int i = 0; i < TICKET_ROLES.length; i++) {
         Path f = dir.resolve("ticket-keys").resolve(TICKET_ROLES[i]);
         if (!Files.exists(f)) {
           write(f, (i + 1) + " " + Base64.getEncoder().encodeToString(randomBytes(32)) + "\n");
+        }
+      }
+      for (String role : TICKET_ROLES) {  // TLS session ticket keys (spec §7.7): 48 random bytes, base64
+        Path f = dir.resolve("tls-ticket-keys").resolve(role);
+        if (!Files.exists(f)) {
+          write(f, Base64.getEncoder().encodeToString(randomBytes(48)) + "\n");
         }
       }
       Path hashKey = dir.resolve("principal-hash.key");

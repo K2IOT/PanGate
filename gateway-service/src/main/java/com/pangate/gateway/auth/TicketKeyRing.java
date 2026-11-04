@@ -36,6 +36,31 @@ public final class TicketKeyRing {
     }
   }
 
+  /** Same kids and key bytes in the same roles (TicketKey holds an array, so record equality would not do). */
+  @Override
+  public boolean equals(Object o) {
+    if (!(o instanceof TicketKeyRing r)) {
+      return false;
+    }
+    for (int i = 0; i < all.size(); i++) {
+      TicketKey a = all.get(i);
+      TicketKey b = r.all.get(i);
+      if (a.kid() != b.kid() || !java.util.Arrays.equals(a.key(), b.key())) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @Override
+  public int hashCode() {
+    int h = 1;
+    for (TicketKey k : all) {
+      h = 31 * h + k.kid() * 17 + java.util.Arrays.hashCode(k.key());
+    }
+    return h;
+  }
+
   public TicketKey current() {
     return current;
   }
