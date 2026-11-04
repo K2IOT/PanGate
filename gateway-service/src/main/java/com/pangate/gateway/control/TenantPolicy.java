@@ -34,6 +34,6 @@ public record TenantPolicy(
 
   public static TenantPolicy defaults(GatewayLimits l) {
     return new TenantPolicy((int) l.heartbeatInterval().toSeconds(), l.inboundRate(), l.inboundBurst(),
-        l.topicsPerConn(), 0, "", Set.of(), false, false, true, true, false, false, false, 0);
+        l.topicsPerConn(), 0, "", Set.of(), false, false, true, true, false, true, false, 0);
   }
 }

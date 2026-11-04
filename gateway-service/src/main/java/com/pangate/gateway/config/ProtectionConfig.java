@@ -38,6 +38,21 @@ public class ProtectionConfig {
     return sampler;
   }
 
+  /** One recycler per loop (its random generator is loop-confined). */
+  @Bean
+  java.util.List<com.pangate.gateway.lifecycle.Recycler> recyclers(GatewayProperties p, LoopRegistry loops,
+      com.pangate.gateway.server.NodeState node, com.pangate.gateway.control.TenantLimitsStore tenants,
+      GatewayMetrics metrics) {
+    java.util.List<com.pangate.gateway.lifecycle.Recycler> all = new java.util.ArrayList<>();
+    for (com.pangate.gateway.loop.LoopContext c : loops.all()) {
+      com.pangate.gateway.lifecycle.Recycler r = new com.pangate.gateway.lifecycle.Recycler(p.recycling(), node,
+          tenants, new java.util.SplittableRandom(), metrics);
+      c.recycler(r);
+      all.add(r);
+    }
+    return all;
+  }
+
   /** Kill switch admission.ratePerNode (fleet / cell), applied within a second (spec §7.8). */
   @Bean
   java.util.concurrent.ScheduledFuture<?> admissionKillSwitch(com.pangate.gateway.shed.AdmissionController admission,

@@ -186,6 +186,16 @@ public final class LoopContext {
   }
 
   private com.pangate.gateway.downstream.BroadcastPacer pacer;
+  private com.pangate.gateway.lifecycle.Recycler recycler;
+
+  /** Connection recycling of this loop's sessions (spec §5.9); null = never recycle. */
+  public com.pangate.gateway.lifecycle.Recycler recycler() {
+    return recycler;
+  }
+
+  public void recycler(com.pangate.gateway.lifecycle.Recycler value) {
+    recycler = value;
+  }
 
   /** Broadcast pacing of this loop; attached once at wiring (PushConfig). */
   public com.pangate.gateway.downstream.BroadcastPacer pacer() {

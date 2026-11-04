@@ -79,6 +79,7 @@ public final class Session extends WheelNode implements Deadlined {
   private boolean dirty;
   // Since when the channel is unwritable (spec §7.4); MAX while writable.
   private long unwritableSinceSec = Long.MAX_VALUE;
+  private long recycleAtSec = Long.MAX_VALUE;
   // Subscribed topics (TopicIndex mirror); null while none.
   private String[] topics;
   private int overflowNacks;
@@ -119,6 +120,7 @@ public final class Session extends WheelNode implements Deadlined {
       loop.addHandshaking(-1);
     }
     this.state = SessionState.ACTIVE;
+    this.recycleAtSec = loop.recycler() == null ? Long.MAX_VALUE : loop.recycler().firstRecycleAtSec(loop.nowSec());
     reschedule();
   }
 
@@ -147,7 +149,7 @@ public final class Session extends WheelNode implements Deadlined {
     return switch (state) {
       case HANDSHAKING -> Math.min(acceptedAtSec + l.handshakeTimeout().toSeconds(), helloDeadlineSec);
       // Reads paused for Kafka back-pressure: PINGs cannot arrive, so no heartbeat timeout meanwhile (spec §0.2).
-      case ACTIVE -> Math.min(Math.min(pendingDeadlineSec(l), slowConsumerDeadlineSec(l)),
+      case ACTIVE -> Math.min(Math.min(Math.min(pendingDeadlineSec(l), slowConsumerDeadlineSec(l)), recycleAtSec),
           upstreamPaused ? expMonoSec : Math.min(lastSeenSec + idleTimeoutSec(), expMonoSec));
       case DRAINING -> Math.min(Math.min(pendingDeadlineSec(l), slowConsumerDeadlineSec(l)),
           Math.min(Math.min(lastSeenSec + idleTimeoutSec(), expMonoSec), drainDeadlineSec));
@@ -165,6 +167,13 @@ public final class Session extends WheelNode implements Deadlined {
     if (state != SessionState.HANDSHAKING && nowSec >= slowConsumerDeadlineSec(limits.current())) {
       close(CloseCode.SLOW_CONSUMER, "SLOW_CONSUMER");
       return;
+    }
+    if (state == SessionState.ACTIVE && nowSec >= recycleAtSec) {
+      recycleAtSec = loop.recycler().onDue(this, nowSec);
+      if (state == SessionState.ACTIVE) {
+        reschedule();
+        return;
+      }
     }
     if (nowSec >= nextDeadlineSec()) {
       if (state == SessionState.HANDSHAKING) {
@@ -362,6 +371,11 @@ public final class Session extends WheelNode implements Deadlined {
    * {@code delay + 30 s} later if it has not. Only from ACTIVE.
    */
   public void drain(long delayMs, boolean reBootstrap) {
+    drain(delayMs, reBootstrap, 30);
+  }
+
+  /** As {@link #drain(long, boolean)}, closing with 1001 {@code delay + graceSec} later. */
+  public void drain(long delayMs, boolean reBootstrap, long graceSec) {
     checkLoop();
     if (state != SessionState.ACTIVE) {
       return;
@@ -369,7 +383,7 @@ public final class Session extends WheelNode implements Deadlined {
     channel.writeAndFlush(Frames.reconnect(com.pangate.contracts.v1.Reconnect.newBuilder()
         .setDelayMs((int) delayMs).setReBootstrap(reBootstrap).build()));
     state = SessionState.DRAINING;
-    drainDeadlineSec = loop.nowSec() + (delayMs + 999) / 1000 + 30;
+    drainDeadlineSec = loop.nowSec() + (delayMs + 999) / 1000 + graceSec;
     reschedule();
   }
 
