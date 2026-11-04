@@ -91,6 +91,8 @@ services:
     profiles: ["app"]
     image: pangate/gateway-service:dev
     user: "0"
+    # drain (profile dev: max 5 s) + loop shutdown must fit before SIGKILL (spec §7.5, §9.1 R3)
+    stop_grace_period: 20s
     environment:
       SPRING_PROFILES_ACTIVE: dev
       JAVA_TOOL_OPTIONS: "-Xmx1g -XX:MaxDirectMemorySize=1g"

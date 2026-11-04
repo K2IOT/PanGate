@@ -46,5 +46,13 @@ java -jar "$DEVTOOLS_JAR" client --url wss://localhost:8443/v1/ws --ca "$GATEWAY
   --token "$TOKEN" --device check-1 --once 2>/dev/null | grep -q '^PONG$' || fail "client HELLO/PING failed"
 stop
 start
+# R3 with a live session: SIGTERM drains (RECONNECT, then 1001 within drain.max-duration) and still exits in <= 15 s.
+java -jar "$DEVTOOLS_JAR" client --url wss://localhost:8443/v1/ws --ca "$GATEWAY_DEV_DIR/ca.crt" \
+  --token "$TOKEN" --device check-1 --ping-interval PT1S >/dev/null 2>&1 &
+CLIENT=$!
+sleep 2
+kill -0 "$CLIENT" 2>/dev/null || fail "client did not stay connected"
 stop
+kill "$CLIENT" 2>/dev/null || true
+grep -q "warm-up: ok=50" "$LOG" || fail "warm-up did not run 50 iterations"
 echo "LOCAL START OK"

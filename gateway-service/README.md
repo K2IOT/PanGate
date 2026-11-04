@@ -14,6 +14,10 @@ Dependencies (M2): Redis (lease, registry `reg:{p}`, `seq:{p}`, `seqepochs`) and
 Single-session KICK for connections on other nodes goes to the Push API (`gateway.push-api.*`; disabled in `local`,
 where every connection is on the one node; `fake-pushapi` in `dev`).
 
+Protection (M3): load-shedding ladder L1–L5 (`gw_shed_level`), outbound budget, slow-consumer close (4008),
+connection recycling, warm-up before `/ready`, and a staged drain on SIGTERM or `POST /admin/drain` (local/dev:
+at most 5 s). Kernel listen-queue metrics `gw_kernel_*` on Linux.
+
 Push by hand while a client is connected (`client` prints PUSH and ACKs reliable ones):
 
 ```bash
@@ -42,4 +46,5 @@ From the shell: `make run-local`.
 - `./mvnw -f gateway-service verify` — plus the ITs on Testcontainers Redis 7.4.2 and Kafka 3.9.1 (Docker needed):
   `GatewayLocalIT` (M1 behaviour), `GatewayClusterIT` (registry, seq, lifecycle, upstream, control, lease drills),
   `GatewayPushIT` (push/ack, timeouts, broadcast across loops, control push, single-session kick across two
-  gateways through `fake-pushapi`) and component ITs.
+  gateways through `fake-pushapi`), `GatewayProtectionIT` (warm-up, drain, slow consumer, shed, recycling, admission
+  kill switch) and component ITs.

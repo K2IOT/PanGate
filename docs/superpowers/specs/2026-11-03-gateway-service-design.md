@@ -663,11 +663,11 @@ Khi Lua registry trả về entry cũ và tenant đặt `singleSession=true`:
 
 Nguồn tín hiệu:
 - Lag: `EventLoopLagProbe`, mỗi 100 ms lên lịch một no-op trên từng loop, đo độ trễ; lấy p99 trên cửa sổ trượt 10 s.
-- CPU: `OperatingSystemMXBean.getProcessCpuLoad()`.
+- CPU: `OperatingSystemMXBean.getProcessCpuLoad()`, lấy trung bình trên cửa sổ trượt 10 s (100 mẫu, giống lag), để một đỉnh JIT hoặc GC không đẩy node lên L3 trong 60 s. Có thể tắt tín hiệu CPU bằng `gateway.shed.cpu=false`; profile `local` và `dev` tắt sẵn vì máy dev dùng chung CPU với IDE và test.
 - Kafka: metric `buffer-available-bytes` / `buffer-total-bytes`.
 - Direct memory: `PlatformDependent.usedDirectMemory()`.
 
-Level 6 là kill switch do operator bật (§7.8). `shedLevel` được publish vào `NodeState` và metric `gw_shed_level`.
+Level 6 là kill switch do operator bật (§7.8). **Hoãn lại:** `KillSwitches` trong `control.proto` chưa có field cho level 6. `shedLevel` được publish vào `NodeState` và metric `gw_shed_level`.
 
 ### 7.4 Slow consumer
 
@@ -682,6 +682,8 @@ Kích hoạt bởi `NettyGatewayServer.stop()` hoặc `POST /admin/drain` (chỉ
 2. Mỗi `drain.interval` (5 s), mỗi loop chọn `ceil(batchPercent × activeAtStart / 100)` session đang ACTIVE, gửi `RECONNECT{delay_ms = random(0, maxDelay)}`, state → DRAINING, `drainDeadlineSec = now + delay + 30 s`.
 3. Kết thúc khi tổng session = 0 hoặc hết `maxDuration` (10 phút) → force close 1001 phần còn lại (pending → `NACK_CLOSED`).
 4. Trả `CompletableFuture` để `stop()` tiếp tục các phase sau (§3.7).
+
+Profile `local` và `dev` đặt `drain.max-duration=5s`, `listener-close-delay=0s`, `interval=1s`, để SIGTERM vẫn thoát trong ≤ 15 s (R3) khi đang có client kết nối. Prod giữ 10 phút và đặt `spring.lifecycle.timeout-per-shutdown-phase=11m`. `POST /admin/drain` chỉ drain, không dừng process: SIGTERM đến sau sẽ chờ đúng lần drain đó.
 
 ### 7.6 Warm-up (`WarmUpRunner`)
 
@@ -707,7 +709,7 @@ Kích hoạt bởi `NettyGatewayServer.stop()` hoặc `POST /admin/drain` (chỉ
 | `upstream.telemetry.enabled` | fleet, cell, tenant | `false` → drop telemetry |
 | `tenant.blocked` | tenant | HELLO → 4009; session đang mở → close 4013 với `retryAfter` 300 s |
 | `sse.fallback.enabled` | tenant | Bật hoặc tắt `/v1/sse` |
-| `recycle.enabled` | tenant | Bật hoặc tắt recycling |
+| `recycle.enabled` | tenant | Bật hoặc tắt recycling (mặc định bật) |
 | `trace.principal` (TTL 15 phút) | fleet | Log DEBUG và trace 100% cho session của principal đó |
 
 ### 7.9 Endpoint quản trị (:8081)
@@ -773,14 +775,16 @@ gateway:
     inbound-rate: 50
     inbound-burst: 100
     handshakes-per-principal-per-min: 20
-    pending-ack: { msgs: 32, bytes: 65536, timeout: 5s }
+    pending-ack: { msgs: 32, bytes: 65536, timeout: 5s }   # timeout ≥ 1s
+    slow-consumer-timeout: 30s
     topics-per-conn: 100
     heartbeat-interval: 30s
   admission: { rate: 5000, burst: 10000, ramp-from: 500, ramp-duration: 2m }
   outbound-budget: 4GB
   broadcast: { rate-per-loop: 10000 }
   recycling: { min: 30m, max: 90m, grace: 30s }
-  drain: { batch-percent: 2, interval: 5s, max-delay: 60s, max-duration: 10m }
+  drain: { batch-percent: 2, interval: 5s, max-delay: 60s, max-duration: 10m, listener-close-delay: 10s }
+  shed: { cpu: true }
   warmup: { iterations: 2000, concurrency: 32, timeout: 60s }
   grpc:
     port: 9090
