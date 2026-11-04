@@ -25,6 +25,7 @@
     <netty.version>4.2.20.Final</netty.version>
     <protobuf-java.version>4.36.2</protobuf-java.version>
     <protoc.version>4.36.2</protoc.version>
+    <grpc.version>1.85.1</grpc.version>
     <protobuf-maven-plugin.version>5.1.12</protobuf-maven-plugin.version>
     <nimbus-jose-jwt.version>10.10</nimbus-jose-jwt.version>
     <bcpkix.version>1.86</bcpkix.version>
@@ -37,6 +38,13 @@
 
   <dependencyManagement>
     <dependencies>
+      <dependency>
+        <groupId>io.grpc</groupId>
+        <artifactId>grpc-bom</artifactId>
+        <version>${grpc.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
       <dependency>
         <groupId>com.google.protobuf</groupId>
         <artifactId>protobuf-java</artifactId>
