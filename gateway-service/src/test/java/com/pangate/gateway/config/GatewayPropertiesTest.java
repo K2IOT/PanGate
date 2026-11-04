@@ -180,4 +180,45 @@ class GatewayPropertiesTest {
           .hasMessageContaining("gateway.limits.pending-ack.timeout");
     });
   }
+
+  @Test
+  void bindsProtectionDefaults() {
+    runner.run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      assertThat(p.outboundBudget()).isEqualTo(DataSize.ofGigabytes(4));
+      assertThat(p.recycling().min()).isEqualTo(Duration.ofMinutes(30));
+      assertThat(p.recycling().max()).isEqualTo(Duration.ofMinutes(90));
+      assertThat(p.recycling().grace()).isEqualTo(Duration.ofSeconds(30));
+      assertThat(p.drain().batchPercent()).isEqualTo(2);
+      assertThat(p.drain().interval()).isEqualTo(Duration.ofSeconds(5));
+      assertThat(p.drain().maxDelay()).isEqualTo(Duration.ofSeconds(60));
+      assertThat(p.drain().maxDuration()).isEqualTo(Duration.ofMinutes(10));
+      assertThat(p.drain().listenerCloseDelay()).isEqualTo(Duration.ofSeconds(10));
+      assertThat(p.warmup().iterations()).isEqualTo(2000);
+      assertThat(p.warmup().concurrency()).isEqualTo(32);
+      assertThat(p.warmup().timeout()).isEqualTo(Duration.ofSeconds(60));
+      assertThat(p.limits().slowConsumerTimeout()).isEqualTo(Duration.ofSeconds(30));
+      assertThat(GatewayLimits.from(p).slowConsumerTimeout()).isEqualTo(Duration.ofSeconds(30));
+      assertThat(ctx.getEnvironment().getProperty("spring.lifecycle.timeout-per-shutdown-phase")).isEqualTo("11m");
+    });
+  }
+
+  @Test
+  void localAndDevKeepShutdownUnder15s() {
+    runner.withPropertyValues("spring.profiles.active=local").run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      assertThat(p.drain().maxDuration()).isEqualTo(Duration.ofSeconds(5));
+      assertThat(p.drain().listenerCloseDelay()).isEqualTo(Duration.ZERO);
+      assertThat(p.drain().interval()).isEqualTo(Duration.ofSeconds(1));
+      assertThat(p.outboundBudget()).isEqualTo(DataSize.ofMegabytes(256));
+      assertThat(p.warmup().iterations()).isEqualTo(50);
+    });
+    runner.withPropertyValues("spring.profiles.active=dev").run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      assertThat(p.drain().maxDuration()).isEqualTo(Duration.ofSeconds(5));
+      assertThat(p.drain().listenerCloseDelay()).isEqualTo(Duration.ZERO);
+      assertThat(p.outboundBudget()).isEqualTo(DataSize.ofGigabytes(1));
+      assertThat(p.warmup().iterations()).isEqualTo(200);
+    });
+  }
 }

@@ -10,6 +10,7 @@ public final class NodeState {
   private volatile boolean leaseAlive;
   private volatile boolean controlCaughtUp;
   private volatile int shedLevel;
+  private volatile boolean warmedUp;
 
   public boolean draining() {
     return draining;
@@ -67,5 +68,14 @@ public final class NodeState {
 
   public void shedLevel(int value) {
     shedLevel = value;
+  }
+
+  /** Warm-up finished (or skipped); readiness waits for it (spec §7.6). */
+  public boolean warmedUp() {
+    return warmedUp;
+  }
+
+  public void warmedUp(boolean value) {
+    warmedUp = value;
   }
 }

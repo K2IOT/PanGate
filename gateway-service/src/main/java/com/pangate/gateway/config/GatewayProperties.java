@@ -24,7 +24,11 @@ public record GatewayProperties(
     Kafka kafka,
     Grpc grpc,
     PushApi pushApi,
-    Broadcast broadcast) {
+    Broadcast broadcast,
+    DataSize outboundBudget,
+    Recycling recycling,
+    Drain drain,
+    Warmup warmup) {
 
   public record Listeners(Ws ws, Tcp tcp) {}
 
@@ -50,7 +54,18 @@ public record GatewayProperties(
       int inboundRate,
       int inboundBurst,
       int topicsPerConn,
-      PendingAck pendingAck) {}
+      PendingAck pendingAck,
+      Duration slowConsumerTimeout) {}
+
+  /** Connection recycling (spec §5.9): RECONNECT after U[min, max], closed after delay + grace. */
+  public record Recycling(Duration min, Duration max, Duration grace) {}
+
+  /** Staged drain (spec §7.5). */
+  public record Drain(int batchPercent, Duration interval, Duration maxDelay, Duration maxDuration,
+      Duration listenerCloseDelay) {}
+
+  /** Warm-up before readiness (spec §7.6). */
+  public record Warmup(int iterations, int concurrency, Duration timeout) {}
 
   /** Downstream pending-ack window per session (spec §5.3, §5.4). */
   public record PendingAck(int msgs, DataSize bytes, Duration timeout) {}

@@ -148,6 +148,7 @@ public final class BroadcastPacer {
         Channel ch = s.channel();
         ch.write(job.frame.retainedDuplicate(), ch.voidPromise());
         written.add(ch);
+        loop.markDirty(s);
         job.counter.increment();
       }
     }

@@ -75,6 +75,8 @@ public final class Session extends WheelNode implements Deadlined {
   private String closeReason;
   // Downstream pushes awaiting ACK (spec §5.4); null while none, so idle sessions stay small.
   private PendingAckWindow pending;
+  // In the loop's dirty list (written since the last outbound sample, spec §7.2).
+  private boolean dirty;
   // Subscribed topics (TopicIndex mirror); null while none.
   private String[] topics;
   private int overflowNacks;
@@ -233,6 +235,20 @@ public final class Session extends WheelNode implements Deadlined {
     }
     topics = left;
     return true;
+  }
+
+  public boolean dirty() {
+    return dirty;
+  }
+
+  public void dirty(boolean value) {
+    dirty = value;
+  }
+
+  /** Bytes queued in Netty's outbound buffer for this connection (0 once closed). */
+  public long pendingOutboundBytes() {
+    io.netty.channel.ChannelOutboundBuffer buf = channel.unsafe().outboundBuffer();
+    return buf == null ? 0 : buf.totalPendingWriteBytes();
   }
 
   public PendingAckWindow pending() {

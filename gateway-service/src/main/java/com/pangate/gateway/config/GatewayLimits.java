@@ -20,7 +20,8 @@ public record GatewayLimits(
     int pendingAckMsgs,
     int pendingAckBytes,
     Duration pendingAckTimeout,
-    int broadcastRatePerLoop) {
+    int broadcastRatePerLoop,
+    Duration slowConsumerTimeout) {
 
   public static GatewayLimits from(GatewayProperties p) {
     GatewayProperties.Limits l = p.limits();
@@ -32,7 +33,7 @@ public record GatewayLimits(
     return new GatewayLimits(l.hardCap(), l.softCap(), l.perIp(), l.frameMax(), l.helloMax(), l.helloTimeout(),
         l.handshakeTimeout(), l.handshakesPerPrincipalPerMin(), l.heartbeatInterval(), l.sessionTtl(), l.inboundRate(), l.inboundBurst(), l.topicsPerConn(),
         l.pendingAck().msgs(), (int) l.pendingAck().bytes().toBytes(), l.pendingAck().timeout(),
-        p.broadcast().ratePerLoop());
+        p.broadcast().ratePerLoop(), l.slowConsumerTimeout());
   }
 
   /** Idle timeout = three missed heartbeats. */

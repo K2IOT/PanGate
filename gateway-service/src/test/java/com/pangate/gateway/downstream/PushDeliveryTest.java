@@ -275,4 +275,10 @@ class PushDeliveryTest {
         .setEnqueuedAtMs(f.wallNow() * 1000 - 250).build());
     assertThat(f.meters.timer("gw.push.handoff").count()).isEqualTo(1);
   }
+
+  @Test
+  void deliveredSessionIsMarkedDirty() {
+    deliver(item(1, DeliveryClass.DELIVERY_CLASS_EPHEMERAL, "m1", 1));
+    assertThat(session.dirty()).isTrue();
+  }
 }

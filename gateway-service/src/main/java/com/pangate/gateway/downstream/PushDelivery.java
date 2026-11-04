@@ -99,6 +99,10 @@ public final class PushDelivery {
 
   private void write(Channel ch, PushItem item) {
     ch.write(item.getFrame(), ch.voidPromise());
+    Session s = ch.attr(Session.KEY).get();
+    if (s != null) {
+      s.loop().markDirty(s);
+    }
     if (item.getEnqueuedAtMs() > 0) {
       handoff.record(Math.max(0, wallMillis.getAsLong() - item.getEnqueuedAtMs()), TimeUnit.MILLISECONDS);
     }

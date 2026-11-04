@@ -5,6 +5,9 @@ pangate:
     dir: ${gateway.dev.dir}
 
 gateway:
+  outbound-budget: 1GB
+  warmup: { iterations: 200 }
+  drain: { interval: 1s, max-duration: 5s, listener-close-delay: 0s }
   grpc: { plaintext: true }
   push-api: { enabled: true, target: "dns:///fake-pushapi:9443", plaintext: true }
   node-id: gateway-dev-1

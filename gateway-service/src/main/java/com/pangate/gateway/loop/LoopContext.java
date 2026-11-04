@@ -23,6 +23,9 @@ public final class LoopContext {
   private long counter;
   private volatile int activeCount;
   private int pendingInflight;
+  private final it.unimi.dsi.fastutil.objects.ObjectArrayList<Session> dirty =
+      new it.unimi.dsi.fastutil.objects.ObjectArrayList<>();
+  private volatile long outboundBytes;
   private static final java.lang.invoke.VarHandle PENDING;
 
   static {
@@ -113,6 +116,42 @@ public final class LoopContext {
   @SuppressWarnings("NonAtomicVolatileUpdate")
   public void decrementActive() {
     activeCount--;
+  }
+
+  /** A session was written to: it is sampled until its outbound buffer is empty (spec §7.2). */
+  public void markDirty(Session s) {
+    if (!s.dirty()) {
+      s.dirty(true);
+      dirty.add(s);
+    }
+  }
+
+  /** On the loop: sums the dirty sessions' pending bytes and drops those that are empty (or closed). */
+  public void sampleOutbound() {
+    long sum = 0;
+    int keep = 0;
+    for (int i = 0; i < dirty.size(); i++) {
+      Session s = dirty.get(i);
+      long b = s.pendingOutboundBytes();
+      if (b > 0 && s.state() != com.pangate.gateway.session.SessionState.CLOSED) {
+        sum += b;
+        dirty.set(keep++, s);
+      } else {
+        s.dirty(false);
+      }
+    }
+    dirty.size(keep);
+    outboundBytes = sum;
+  }
+
+  /** Last sampled outbound bytes of this loop; any thread. */
+  public long outboundBytes() {
+    return outboundBytes;
+  }
+
+  /** On the loop: sessions with outbound bytes at the last sample (largest first is the caller's job). */
+  public java.util.List<Session> dirtySessions() {
+    return java.util.Collections.unmodifiableList(dirty);
   }
 
   /** Pushes awaiting ACK on this loop: written on the loop, read anywhere (opaque, for the gauge). */
