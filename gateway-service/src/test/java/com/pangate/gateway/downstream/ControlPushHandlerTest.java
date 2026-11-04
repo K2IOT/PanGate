@@ -45,7 +45,6 @@ class ControlPushHandlerTest {
     assertThat(f.loop.topics().snapshot("t1:any")).containsExactly(a, b);
     assertThat(f.loop.topics().snapshot("t2:other")).isEmpty();
     assertThat(f.meters.counter("gw.subscribe.rejected", "reason", "control").count()).isEqualTo(2);
-    assertThat(f.meters.counter("gw.control.push", "op", "subscribe").count()).isEqualTo(1);
   }
 
   @Test
@@ -75,7 +74,6 @@ class ControlPushHandlerTest {
     assertThat(old.state()).isEqualTo(SessionState.CLOSED);
     assertThat(old.closeCode()).isEqualTo(CloseCode.DUPLICATE_SESSION);
     assertThat(fresh.state()).isEqualTo(SessionState.ACTIVE);
-    assertThat(f.meters.counter("gw.control.push", "op", "kick").count()).isEqualTo(1);
   }
 
   @Test
@@ -103,7 +101,6 @@ class ControlPushHandlerTest {
     Session a = session("t1:u1", 1);
     handler.apply(f.loop, "t1:u1", ControlOp.newBuilder().setRefreshConfig(RefreshConfig.getDefaultInstance()).build());
     assertThat(a.state()).isEqualTo(SessionState.ACTIVE);
-    assertThat(f.meters.counter("gw.control.push", "op", "refresh_config").count()).isEqualTo(1);
   }
 
   @Test

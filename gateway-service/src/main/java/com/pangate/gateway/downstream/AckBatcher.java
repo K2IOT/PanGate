@@ -78,18 +78,39 @@ public final class AckBatcher {
 
   /** Stops batching; with {@code complete}, ends the response stream after any flush in progress. */
   public void close(boolean complete) {
-    stop();
+    ScheduledFuture<?> p = periodic;
+    if (p != null) {
+      p.cancel(false);
+    }
+    if (!complete) {
+      stop();  // cancelled or failed: nothing can be sent any more
+    }
     exec.execute(() -> {
       while (!flushing.compareAndSet(false, true)) {
         Thread.onSpinWait();
       }
       try {
         if (complete) {
+          // Graceful half-close: the acks already queued are still owed to the router (the ref is dead, so no
+          // new ones arrive), then the response stream ends.
+          AckItem a;
+          DeliveryAck.Builder b = DeliveryAck.newBuilder();
+          while ((a = queue.poll()) != null) {
+            b.addAcks(a);
+            if (b.getAcksCount() == BATCH) {
+              out.onNext(b.build());
+              b = DeliveryAck.newBuilder();
+            }
+          }
+          if (b.getAcksCount() > 0) {
+            out.onNext(b.build());
+          }
           out.onCompleted();
         }
       } catch (RuntimeException ignored) {
         // already cancelled
       } finally {
+        stop();
         flushing.set(false);
       }
     });

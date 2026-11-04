@@ -190,4 +190,52 @@ class PushDispatcherTest {
     assertThat(calls).hasSize(3);
     assertThat(flushes.get()).isEqualTo(1);
   }
+
+  @Test
+  void terminatedLoopNacksReliableAndReleasesBroadcast() throws Exception {
+    l1.shutdownGracefully(0, 0, java.util.concurrent.TimeUnit.SECONDS).sync();
+    dispatch(message(1, conn(1), DeliveryClass.DELIVERY_CLASS_RELIABLE),
+        message(2, conn(1), DeliveryClass.DELIVERY_CLASS_EPHEMERAL),
+        PushItem.newBuilder().setKind(PushItem.Kind.KIND_BROADCAST).setTenantId("t1").setTopic("t1:x")
+            .setFrame(Frame.newBuilder().setType(FrameType.FRAME_TYPE_PUSH)).build());
+    assertThat(acks).extracting(AckItem::getDeliveryId, AckItem::getStatus).containsExactly(
+        org.assertj.core.groups.Tuple.tuple(1L, AckItem.Status.STATUS_NACK_CLOSED));
+    await().atMost(Duration.ofSeconds(2)).until(() -> frames.size() == 1);  // loop 0 still got its share
+    assertThat(frames.get(0).refCnt()).isEqualTo(1);                       // loop 1's share was released
+    frames.get(0).releaseShare();
+  }
+
+  @Test
+  void failingItemDoesNotStopTheRestOfTheTask() {
+    LoopItemHandler throwing = new LoopItemHandler() {
+      @Override
+      public Channel message(LoopContext loop, PushItem item, StreamRef s) {
+        if (item.getDeliveryId() == 1) {
+          throw new IllegalStateException("boom");
+        }
+        calls.add(new Call(loop.index(), "message", item.getDeliveryId()));
+        return written;
+      }
+
+      @Override public void broadcast(LoopContext l, String t, PushItem.Priority p, PreEncodedFrame f) { }
+      @Override public void control(LoopContext l, String p, ControlOp op) { }
+    };
+    PushDispatcher d = new PushDispatcher(loops, principals, node, throwing, new GatewayMetrics(meters));
+    DeliveryClass r = DeliveryClass.DELIVERY_CLASS_RELIABLE;
+    d.dispatch(PushBatch.newBuilder().addItems(message(1, conn(0), r)).addItems(message(2, conn(0), r)).build(),
+        stream);
+    await().atMost(Duration.ofSeconds(2)).until(() -> flushes.get() == 1);
+    assertThat(calls).extracting(Call::arg).containsExactly(2L);
+    assertThat(meters.counter("gw.push.dropped", "reason", "error").count()).isEqualTo(1);
+  }
+
+  @Test
+  void controlOpCountedOncePerItemNotPerLoop() {
+    principals.add("t1:u1", new ConnRef(0, 3));
+    principals.add("t1:u1", new ConnRef(1, (1L << 40) | 3));
+    dispatch(PushItem.newBuilder().setKind(PushItem.Kind.KIND_CONTROL).setPrincipalId("t1:u1")
+        .setControl(ControlOp.newBuilder().setRefreshConfig(RefreshConfig.getDefaultInstance())).build());
+    await().atMost(Duration.ofSeconds(2)).until(() -> calls.size() == 2);
+    assertThat(meters.counter("gw.control.push", "op", "refresh_config").count()).isEqualTo(1);
+  }
 }

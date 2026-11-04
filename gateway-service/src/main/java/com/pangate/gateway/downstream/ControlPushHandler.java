@@ -21,26 +21,17 @@ public final class ControlPushHandler {
 
   private final PrincipalIndex principals;
   private final TenantLimitsStore tenants;
-  private final Counter subscribe;
-  private final Counter unsubscribe;
-  private final Counter kick;
-  private final Counter refresh;
   private final Counter rejected;
 
   public ControlPushHandler(PrincipalIndex principals, TenantLimitsStore tenants, GatewayMetrics m) {
     this.principals = principals;
     this.tenants = tenants;
-    this.subscribe = m.counter("gw.control.push", "op", "subscribe");
-    this.unsubscribe = m.counter("gw.control.push", "op", "unsubscribe");
-    this.kick = m.counter("gw.control.push", "op", "kick");
-    this.refresh = m.counter("gw.control.push", "op", "refresh_config");
     this.rejected = m.counter("gw.subscribe.rejected", "reason", "control");
   }
 
   public void apply(LoopContext loop, String principal, ControlOp op) {
     switch (op.getOpCase()) {
       case SUBSCRIBE -> {
-        subscribe.increment();
         for (Session s : sessions(loop, principal)) {
           int cap = tenants.policy(s.identity().tenantId()).topicsPerConn();
           for (String t : op.getSubscribe().getTopicsList()) {
@@ -55,13 +46,12 @@ public final class ControlPushHandler {
         }
       }
       case UNSUBSCRIBE -> {
-        unsubscribe.increment();
         for (Session s : sessions(loop, principal)) {
           op.getUnsubscribe().getTopicsList().forEach(t -> loop.topics().remove(s, t));
         }
       }
       case KICK -> kick(loop, principal, op.getKick().getNewConnId(), op.getKick().getConnectedAtMs());
-      case REFRESH_CONFIG -> refresh.increment();  // no per-principal limit cache exists to drop
+      case REFRESH_CONFIG -> { }  // no per-principal limit cache exists to drop
       default -> { }
     }
   }
@@ -76,7 +66,6 @@ public final class ControlPushHandler {
 
   /** Closes 4012 every session of the principal that is {@link #older} than {@code newConnId}. */
   public void kick(LoopContext loop, String principal, String newConnId, long connectedAtMs) {
-    kick.increment();
     for (Session s : sessions(loop, principal)) {
       if (!s.connId().equals(newConnId) && older(s.connectedAtMs(), s.connId(), connectedAtMs, newConnId)) {
         s.close(CloseCode.DUPLICATE_SESSION, "KICKED");

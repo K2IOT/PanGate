@@ -134,12 +134,36 @@ class PushDeliveryTest {
   }
 
   @Test
-  void duplicateMsgIdRetargetsEntryWithoutRewrite() {
+  void duplicateMsgIdFromNewStreamRetargetsEntryWithoutRewrite() {
+    List<AckItem> oldAcks = new ArrayList<>();
+    StreamRef old = new StreamRef(oldAcks::add);
+    f.delivery.deliver(f.loop, item(1, DeliveryClass.DELIVERY_CLASS_RELIABLE, "m1", 1), old);
+    old.markDead();  // router failed over to a new stream and replays
+    deliver(item(2, DeliveryClass.DELIVERY_CLASS_RELIABLE, "m1", 1));
+    f.channel.flush();
+    assertThat(written()).hasSize(1);
+    clientAck("m1");
+    assertThat(acks).containsExactly(ack(2, AckItem.Status.STATUS_ACKED));
+    assertThat(oldAcks).isEmpty();
+  }
+
+  @Test
+  void duplicateMsgIdOnSameStreamAnswersBothDeliveryIds() {
     deliver(item(1, DeliveryClass.DELIVERY_CLASS_RELIABLE, "m1", 1));
     deliver(item(2, DeliveryClass.DELIVERY_CLASS_RELIABLE, "m1", 1));
     assertThat(written()).hasSize(1);
     clientAck("m1");
-    assertThat(acks).containsExactly(ack(2, AckItem.Status.STATUS_ACKED));
+    assertThat(acks).containsExactlyInAnyOrder(ack(1, AckItem.Status.STATUS_ACKED),
+        ack(2, AckItem.Status.STATUS_ACKED));
+  }
+
+  @Test
+  void duplicateOnSameStreamTimesOutBothDeliveryIds() {
+    deliver(item(1, DeliveryClass.DELIVERY_CLASS_RELIABLE, "m1", 1));
+    deliver(item(2, DeliveryClass.DELIVERY_CLASS_RELIABLE, "m1", 1));
+    f.advanceTo(f.now() + 5);
+    assertThat(acks).containsExactlyInAnyOrder(ack(1, AckItem.Status.STATUS_NACK_TIMEOUT),
+        ack(2, AckItem.Status.STATUS_NACK_TIMEOUT));
   }
 
   @Test

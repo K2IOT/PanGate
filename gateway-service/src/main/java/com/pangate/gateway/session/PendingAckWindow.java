@@ -44,12 +44,15 @@ public final class PendingAckWindow {
     return e;
   }
 
-  /** The router sent the same message again: acks go to the newest delivery id and stream. */
+  /**
+   * The router sent the same message again. From a new stream (failover): the old delivery is dropped, its stream is
+   * gone. On the same stream: the old delivery id is kept and answered together with the new one.
+   */
   public void replace(String msgId, long deliveryId, StreamRef s) {
     int i = indexOf(msgId);
     if (i >= 0) {
       PendingEntry e = entries[i];
-      entries[i] = new PendingEntry(msgId, deliveryId, s, e.sentAtSec(), e.bytes());
+      entries[i] = new PendingEntry(msgId, deliveryId, s, e.sentAtSec(), e.bytes(), e.stream() == s ? e : null);
     }
   }
 

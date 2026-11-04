@@ -170,4 +170,14 @@ class GatewayPropertiesTest {
       assertThat(p.pushApi().plaintext()).isTrue();
     });
   }
+
+  @Test
+  void pendingAckTimeoutBelowOneSecondIsRejected() {
+    runner.withPropertyValues("gateway.limits.pending-ack.timeout=500ms").run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      org.assertj.core.api.Assertions.assertThatThrownBy(() -> GatewayLimits.from(p))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("gateway.limits.pending-ack.timeout");
+    });
+  }
 }

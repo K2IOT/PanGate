@@ -179,7 +179,7 @@ public final class Session extends WheelNode implements Deadlined {
     if (pending != null) {
       int before = pending.size();
       pending.expire(nowSec, limits.current().pendingAckTimeout().toSeconds(),
-          e -> e.stream().ack(e.deliveryId(), com.pangate.contracts.v1.AckItem.Status.STATUS_NACK_TIMEOUT));
+          e -> e.answer(com.pangate.contracts.v1.AckItem.Status.STATUS_NACK_TIMEOUT));
       loop.addPendingInflight(pending.size() - before);
       releasePendingIfEmpty();
     }
@@ -282,7 +282,7 @@ public final class Session extends WheelNode implements Deadlined {
   public void failPending(com.pangate.contracts.v1.AckItem.Status status) {
     if (pending != null) {
       loop.addPendingInflight(-pending.size());
-      pending.drain(e -> e.stream().ack(e.deliveryId(), status));
+      pending.drain(e -> e.answer(status));
       pending = null;
     }
   }

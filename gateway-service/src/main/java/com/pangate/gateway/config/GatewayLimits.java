@@ -24,6 +24,11 @@ public record GatewayLimits(
 
   public static GatewayLimits from(GatewayProperties p) {
     GatewayProperties.Limits l = p.limits();
+    // Deadlines run on a 1 s wheel: a shorter ack timeout would truncate to 0 and expire every push at the next tick.
+    if (l.pendingAck().timeout().compareTo(Duration.ofSeconds(1)) < 0) {
+      throw new IllegalArgumentException("gateway.limits.pending-ack.timeout must be at least 1s, got "
+          + l.pendingAck().timeout());
+    }
     return new GatewayLimits(l.hardCap(), l.softCap(), l.perIp(), l.frameMax(), l.helloMax(), l.helloTimeout(),
         l.handshakeTimeout(), l.handshakesPerPrincipalPerMin(), l.heartbeatInterval(), l.sessionTtl(), l.inboundRate(), l.inboundBurst(), l.topicsPerConn(),
         l.pendingAck().msgs(), (int) l.pendingAck().bytes().toBytes(), l.pendingAck().timeout(),

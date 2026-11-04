@@ -112,7 +112,7 @@ public final class PushDelivery {
     for (String id : ack.getMsgIdsList()) {
       PendingEntry e = s.ackPending(id);
       if (e != null) {
-        e.stream().ack(e.deliveryId(), AckItem.Status.STATUS_ACKED);
+        e.answer(AckItem.Status.STATUS_ACKED);
       }
     }
   }

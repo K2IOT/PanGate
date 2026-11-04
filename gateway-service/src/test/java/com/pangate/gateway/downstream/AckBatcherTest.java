@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
 class AckBatcherTest {
 
   /** Records onNext; readiness is controlled by the test. */
-  static final class FakeObserver extends ServerCallStreamObserver<DeliveryAck> {
+  static class FakeObserver extends ServerCallStreamObserver<DeliveryAck> {
     final List<DeliveryAck> sent = new CopyOnWriteArrayList<>();
     volatile boolean ready = true;
     volatile Runnable onReady;
@@ -145,5 +145,19 @@ class AckBatcherTest {
     await().atMost(Duration.ofSeconds(2)).until(() -> out.items() == 5_000);
     b.stop();
     counting.shutdownNow();
+  }
+
+  @Test
+  void gracefulCloseSendsQueuedAcksBeforeCompleting() throws Exception {
+    java.util.concurrent.atomic.AtomicBoolean completedAfterAcks = new java.util.concurrent.atomic.AtomicBoolean();
+    FakeObserver o = new FakeObserver() {
+      @Override public void onCompleted() { completedAfterAcks.set(items() == 3); }
+    };
+    AckBatcher b = new AckBatcher(o, exec, new GatewayMetrics(meters));
+    b.offer(item(1));
+    b.offer(item(2));
+    b.offer(item(3));
+    b.close(true);
+    await().atMost(Duration.ofSeconds(2)).untilTrue(completedAfterAcks);
   }
 }

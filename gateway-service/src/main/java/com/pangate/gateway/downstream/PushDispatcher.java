@@ -26,6 +26,9 @@ public final class PushDispatcher {
   private final Counter droppedShed;
   private final Counter droppedNotFound;
   private final Counter badItem;
+  private final Counter itemErrors;
+  private final java.util.Map<com.pangate.contracts.v1.ControlOp.OpCase, Counter> controlOps =
+      new java.util.EnumMap<>(com.pangate.contracts.v1.ControlOp.OpCase.class);
 
   public PushDispatcher(LoopRegistry loops, PrincipalIndex principals, NodeState node, PushDelivery delivery,
       ControlPushHandler control, GatewayMetrics m) {
@@ -41,6 +44,12 @@ public final class PushDispatcher {
     this.droppedShed = m.counter("gw.push.dropped", "reason", "shed");
     this.droppedNotFound = m.counter("gw.push.dropped", "reason", "not_found");
     this.badItem = m.counter("gw.push.dropped", "reason", "bad_item");
+    this.itemErrors = m.counter("gw.push.dropped", "reason", "error");
+    for (com.pangate.contracts.v1.ControlOp.OpCase op : com.pangate.contracts.v1.ControlOp.OpCase.values()) {
+      if (op != com.pangate.contracts.v1.ControlOp.OpCase.OP_NOT_SET) {
+        controlOps.put(op, m.counter("gw.control.push", "op", op.name().toLowerCase(java.util.Locale.ROOT)));
+      }
+    }
   }
 
   public void dispatch(PushBatch batch, StreamRef stream) {
@@ -59,6 +68,10 @@ public final class PushDispatcher {
           }
         }
         case KIND_CONTROL -> {
+          Counter op = controlOps.get(item.getControl().getOpCase());
+          if (op != null) {
+            op.increment();
+          }
           boolean[] seen = new boolean[tasks.length];
           for (ConnRef ref : principals.get(item.getPrincipalId())) {
             if (ref.loopIdx() < tasks.length && !seen[ref.loopIdx()]) {
@@ -77,7 +90,11 @@ public final class PushDispatcher {
     }
     for (int i = 0; i < tasks.length; i++) {
       if (tasks[i] != null) {
-        loops.get(i).eventLoop().execute(tasks[i]);
+        try {
+          loops.get(i).eventLoop().execute(tasks[i]);
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+          tasks[i].rejected();  // data plane already stopped (shutdown)
+        }
       }
     }
   }
@@ -107,7 +124,7 @@ public final class PushDispatcher {
 
   private LoopBatchTask task(LoopBatchTask[] tasks, int idx, StreamRef stream) {
     if (tasks[idx] == null) {
-      tasks[idx] = new LoopBatchTask(loops.get(idx), handler, stream);
+      tasks[idx] = new LoopBatchTask(loops.get(idx), handler, stream, itemErrors);
     }
     return tasks[idx];
   }
