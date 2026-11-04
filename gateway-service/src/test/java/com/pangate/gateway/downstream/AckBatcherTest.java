@@ -68,17 +68,33 @@ class AckBatcherTest {
   }
 
   @Test
-  void queueOf256FlushesImmediatelyInChunksOf256() {
-    // not started: no periodic flush, only the size trigger
+  void queueOf256FlushesImmediatelyInChunksOf256() throws Exception {
+    // not started: no periodic flush, only the size trigger. Hold the executor so all 600 are queued first.
+    java.util.concurrent.CountDownLatch gate = new java.util.concurrent.CountDownLatch(1);
+    exec.execute(() -> {
+      try {
+        gate.await();
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+    });
     for (int i = 0; i < 600; i++) {
       batcher.offer(item(i));
     }
-    await().atMost(Duration.ofSeconds(2)).until(() -> out.items() >= 512);
-    assertThat(out.sent.get(0).getAcksCount()).isEqualTo(256);
-    assertThat(out.sent.get(1).getAcksCount()).isEqualTo(256);
-    batcher.start();
+    gate.countDown();
     await().atMost(Duration.ofSeconds(2)).until(() -> out.items() == 600);
-    assertThat(out.sent.get(out.sent.size() - 1).getAcksCount()).isEqualTo(88);
+    assertThat(out.sent).extracting(DeliveryAck::getAcksCount).containsExactly(256, 256, 88);
+  }
+
+  @Test
+  void belowThresholdWaitsForPeriodicFlush() throws Exception {
+    for (int i = 0; i < 255; i++) {
+      batcher.offer(item(i));
+    }
+    Thread.sleep(50);
+    assertThat(out.sent).isEmpty();
+    batcher.start();
+    await().atMost(Duration.ofSeconds(2)).until(() -> out.items() == 255);
   }
 
   @Test
