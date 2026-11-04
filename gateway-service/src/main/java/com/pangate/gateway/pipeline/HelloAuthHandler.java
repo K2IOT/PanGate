@@ -50,6 +50,7 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
   private final String cell;
   private final GatewayMetrics metrics;
   private final SeqReader seq;
+  private final com.pangate.gateway.tenant.TenantCap cap;
   private final ArrayDeque<Object> held = new ArrayDeque<>();
   private boolean verifying;
   private boolean done;
@@ -58,6 +59,14 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
   public HelloAuthHandler(ResumeTicketService tickets, JwtAuthFlow jwt, SessionTracker tracker,
       HelloPolicy policy, TenantLimitsStore tenants, LimitsHolder limits, String cell, GatewayMetrics metrics,
       SeqReader seq) {
+    this(tickets, jwt, tracker, policy, tenants, limits, cell, metrics, seq,
+        com.pangate.gateway.tenant.TenantCap.localOnly(metrics));
+  }
+
+  public HelloAuthHandler(ResumeTicketService tickets, JwtAuthFlow jwt, SessionTracker tracker,
+      HelloPolicy policy, TenantLimitsStore tenants, LimitsHolder limits, String cell, GatewayMetrics metrics,
+      SeqReader seq,
+      com.pangate.gateway.tenant.TenantCap cap) {
     this.tickets = tickets;
     this.jwt = jwt;
     this.tracker = tracker;
@@ -67,6 +76,7 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
     this.cell = cell;
     this.metrics = metrics;
     this.seq = seq;
+    this.cap = cap;
   }
 
   @Override
@@ -163,9 +173,7 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
       fail(session, CloseCode.AUTH_FAILED, "auth_failed");  // warm-up sessions are never resumable (spec §7.6)
       return;
     }
-    if (admitted(session, hello, t.cell(), t)) {
-      activate(ctx, session, hello, t);
-    }
+    proceed(ctx, session, hello, t.cell(), t);
   }
 
   private void withJwt(ChannelHandlerContext ctx, Session session, Hello hello, JwtResult result, long now) {
@@ -182,9 +190,44 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
     long exp = now + limits.current().sessionTtl().toSeconds();
     ResumeTicket t = new ResumeTicket(cell, c.tenant(), c.principal(), c.device(), now, exp,
         ResumeTicketService.jtiHash(c.jti()), c.topics());
-    if (admitted(session, hello, cell, t)) {
-      activate(ctx, session, hello, t);
+    proceed(ctx, session, hello, cell, t);
+  }
+
+  /** Spec §4.6 step 3 c–h, then step i (tenant cap: local quota, else borrow through Redis), then activation. */
+  private void proceed(ChannelHandlerContext ctx, Session session, Hello hello, String ticketCell, ResumeTicket t) {
+    if (!admitted(session, hello, ticketCell, t)) {
+      return;
     }
+    int max = tenants.policy(t.tenant()).maxConns();
+    if (max <= 0 || com.pangate.gateway.auth.WarmUpTokens.isWarmUp(t.tenant())) {
+      activate(ctx, session, hello, t);
+      return;
+    }
+    if (cap.tryReserve(t.tenant(), max)) {
+      session.tenantReserved(true);
+      activate(ctx, session, hello, t);
+      return;
+    }
+    verifying = true;  // frames the client pipelines meanwhile are held, like during JWKS refresh
+    ctx.channel().config().setAutoRead(false);
+    cap.borrow(t.tenant(), max).thenAccept(ok -> session.loop().eventLoop().execute(() -> {
+      verifying = false;
+      if (session.state() != SessionState.HANDSHAKING || !ctx.channel().isActive()) {
+        releaseHeld();  // closed while borrowing; Redis gets the true total at the next report
+        return;
+      }
+      if (!ok) {
+        failed = true;
+        metrics.handshake("tenant_cap");
+        releaseHeld();
+        session.close(CloseCode.OVERLOADED, "TENANT_CAP",
+            5_000 + java.util.concurrent.ThreadLocalRandom.current().nextLong(25_001));
+        return;
+      }
+      cap.reserveBorrowed(t.tenant());
+      session.tenantReserved(true);
+      activate(ctx, session, hello, t);
+    }));
   }
 
   /** Spec §4.6 step 3 c–h; on rejection the session is closed with the check's code. */

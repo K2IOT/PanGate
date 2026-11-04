@@ -23,6 +23,37 @@ public class EdgeConfig {
   private static final Logger log = LoggerFactory.getLogger(EdgeConfig.class);
   static final Duration KEY_RELOAD = Duration.ofSeconds(60);
 
+  /** Spec §4.6 step i: live nodes of the cell, for the local quota. */
+  @Bean
+  com.pangate.gateway.tenant.CellSize cellSize(com.pangate.gateway.lifecycle.RedisConnections redis) {
+    return new com.pangate.gateway.tenant.CellSize(redis, System::currentTimeMillis);
+  }
+
+  @Bean
+  com.pangate.gateway.tenant.TenantCapBorrower tenantCapBorrower(GatewayProperties p,
+      com.pangate.gateway.lifecycle.RedisConnections redis) {
+    return new com.pangate.gateway.tenant.TenantCapBorrower(redis, p.nodeId(), System::currentTimeMillis);
+  }
+
+  /** Also a SessionListener: gives the slot back when a counted session closes. */
+  @Bean
+  com.pangate.gateway.tenant.TenantCap tenantCap(com.pangate.gateway.tenant.CellSize cells,
+      com.pangate.gateway.tenant.TenantCapBorrower borrower, GatewayMetrics metrics) {
+    return new com.pangate.gateway.tenant.TenantCap(new com.pangate.gateway.tenant.TenantConnCounter(), cells,
+        borrower, metrics);
+  }
+
+  /** Every 10 s on offload: refresh the cell size and report this node's tenant totals (30 s expiry, ruling R2). */
+  @Bean
+  ScheduledFuture<?> tenantCapReport(com.pangate.gateway.tenant.CellSize cells,
+      com.pangate.gateway.tenant.TenantCapBorrower borrower, com.pangate.gateway.tenant.TenantCap cap,
+      com.pangate.gateway.control.TenantLimitsStore tenants, TickScheduler tick, ExecutorService offload) {
+    return tick.scheduleAtFixedRate(() -> offload.execute(() -> {
+      cells.refresh();
+      borrower.report(cap.counter().snapshot(), t -> tenants.policy(t).maxConns());
+    }), Duration.ofSeconds(10));
+  }
+
   /** Spec §7.7: check cert and key every {@code tls.reload-interval}; new connections get the new certificate. */
   @Bean
   ScheduledFuture<?> tlsReload(GatewayProperties p, SslContextProvider tls, TickScheduler tick,

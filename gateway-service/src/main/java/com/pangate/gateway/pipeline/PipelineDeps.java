@@ -30,12 +30,13 @@ public record PipelineDeps(
     SeqReader seq,
     UpstreamPublisher upstream,
     com.pangate.gateway.downstream.PushDelivery delivery,
-    com.pangate.gateway.downstream.ClientTopics clientTopics) {
+    com.pangate.gateway.downstream.ClientTopics clientTopics,
+    com.pangate.gateway.tenant.TenantCap tenantCap) {
 
   static final ErrorTerminator ERROR_TERMINATOR = new ErrorTerminator();
 
   HelloAuthHandler helloAuth() {
-    return new HelloAuthHandler(tickets, jwt, tracker, policy, tenants, limits, props.cell(), metrics, seq);
+    return new HelloAuthHandler(tickets, jwt, tracker, policy, tenants, limits, props.cell(), metrics, seq, tenantCap);
   }
 
   SessionHandler sessionHandler() {

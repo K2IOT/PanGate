@@ -11,13 +11,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 /** A Lua script run with EVALSHA; on NOSCRIPT (fresh or flushed server) it falls back to EVAL, which caches it. */
-final class LuaScript {
+public final class LuaScript {
 
   private final String text;
   private final String sha;
   private final ScriptOutputType type;
 
-  LuaScript(String text, ScriptOutputType type) {
+  public LuaScript(String text, ScriptOutputType type) {
     this.text = text;
     this.type = type;
     try {
@@ -28,7 +28,7 @@ final class LuaScript {
     }
   }
 
-  <T> CompletionStage<T> run(RedisClusterAsyncCommands<String, String> cmds, String key, String... args) {
+  public <T> CompletionStage<T> run(RedisClusterAsyncCommands<String, String> cmds, String key, String... args) {
     String[] keys = {key};
     CompletionStage<T> first;
     try {

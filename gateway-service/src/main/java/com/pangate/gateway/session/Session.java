@@ -77,6 +77,8 @@ public final class Session extends WheelNode implements Deadlined {
   private PendingAckWindow pending;
   // In the loop's dirty list (written since the last outbound sample, spec §7.2).
   private boolean dirty;
+  // Counted in the node's tenant connection count (spec §4.6 step i); released on close.
+  private boolean tenantReserved;
   // Since when the channel is unwritable (spec §7.4); MAX while writable.
   private long unwritableSinceSec = Long.MAX_VALUE;
   private long recycleAtSec = Long.MAX_VALUE;
@@ -424,6 +426,14 @@ public final class Session extends WheelNode implements Deadlined {
     if (state != SessionState.CLOSED) {
       loop.wheel().schedule(this, nextDeadlineSec());
     }
+  }
+
+  public boolean tenantReserved() {
+    return tenantReserved;
+  }
+
+  public void tenantReserved(boolean value) {
+    tenantReserved = value;
   }
 
   /** A warm-up session (spec §7.6): no registry, Kafka, recycling or business metrics. */
