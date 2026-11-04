@@ -124,6 +124,17 @@ public final class LoopContext {
     PENDING.setOpaque(this, pendingInflight + delta);
   }
 
+  private com.pangate.gateway.downstream.BroadcastPacer pacer;
+
+  /** Broadcast pacing of this loop; attached once at wiring (PushConfig). */
+  public com.pangate.gateway.downstream.BroadcastPacer pacer() {
+    return pacer;
+  }
+
+  public void pacer(com.pangate.gateway.downstream.BroadcastPacer value) {
+    pacer = value;
+  }
+
   /** Topic subscriptions of this loop's sessions (spec §6.4). */
   public com.pangate.gateway.downstream.TopicIndex topics() {
     return topics;

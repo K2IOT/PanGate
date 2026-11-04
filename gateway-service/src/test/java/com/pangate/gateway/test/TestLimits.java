@@ -14,6 +14,14 @@ public final class TestLimits {
         20, Duration.ofSeconds(30), Duration.ofHours(24), 50, 100, 100, 32, 65_536, Duration.ofSeconds(5), 10_000);
   }
 
+  public static GatewayLimits withBroadcastRate(int perLoop) {
+    GatewayLimits d = defaults();
+    return new GatewayLimits(d.hardCap(), d.softCap(), d.perIp(), d.frameMax(), d.helloMax(), d.helloTimeout(),
+        d.handshakeTimeout(), d.handshakesPerPrincipalPerMin(), d.heartbeatInterval(), d.sessionTtl(),
+        d.inboundRate(), d.inboundBurst(), d.topicsPerConn(), d.pendingAckMsgs(), d.pendingAckBytes(),
+        d.pendingAckTimeout(), perLoop);
+  }
+
   public static LimitsHolder holder() {
     return new LimitsHolder(defaults());
   }
