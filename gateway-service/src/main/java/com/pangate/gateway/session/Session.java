@@ -75,6 +75,8 @@ public final class Session extends WheelNode implements Deadlined {
   private String closeReason;
   // Downstream pushes awaiting ACK (spec §5.4); null while none, so idle sessions stay small.
   private PendingAckWindow pending;
+  // Subscribed topics (TopicIndex mirror); null while none.
+  private String[] topics;
   private int overflowNacks;
   private long overflowWindowSec;
 
@@ -181,6 +183,56 @@ public final class Session extends WheelNode implements Deadlined {
       loop.addPendingInflight(pending.size() - before);
       releasePendingIfEmpty();
     }
+  }
+
+  public String[] topics() {
+    return topics;
+  }
+
+  public boolean hasTopic(String topic) {
+    if (topics != null) {
+      for (String t : topics) {
+        if (t.equals(topic)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /** Only through {@link com.pangate.gateway.downstream.TopicIndex}, which keeps the loop's index in step. */
+  public boolean addTopic(String topic) {
+    checkLoop();
+    if (hasTopic(topic)) {
+      return false;
+    }
+    if (topics == null) {
+      topics = new String[] {topic};
+    } else {
+      topics = java.util.Arrays.copyOf(topics, topics.length + 1);
+      topics[topics.length - 1] = topic;
+    }
+    return true;
+  }
+
+  public boolean removeTopic(String topic) {
+    checkLoop();
+    if (!hasTopic(topic)) {
+      return false;
+    }
+    if (topics.length == 1) {
+      topics = null;
+      return true;
+    }
+    String[] left = new String[topics.length - 1];
+    int i = 0;
+    for (String t : topics) {
+      if (!t.equals(topic)) {
+        left[i++] = t;
+      }
+    }
+    topics = left;
+    return true;
   }
 
   public PendingAckWindow pending() {

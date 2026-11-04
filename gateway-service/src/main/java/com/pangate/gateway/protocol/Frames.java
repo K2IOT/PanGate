@@ -38,8 +38,15 @@ public final class Frames {
   }
 
   public static Frame error(int code, String message, boolean retryable, boolean fatal, long retryAfterMs) {
+    return error(code, message, retryable, fatal, retryAfterMs, "");
+  }
+
+  /** ERROR answering a specific client frame: carries that frame's msg_id. */
+  public static Frame error(int code, String message, boolean retryable, boolean fatal, long retryAfterMs,
+      String msgId) {
     ErrorInfo e = ErrorInfo.newBuilder().setCode(code).setMessage(message).setRetryable(retryable)
         .setFatal(fatal).setRetryAfterMs((int) retryAfterMs).build();
-    return Frame.newBuilder().setType(FrameType.FRAME_TYPE_ERROR).setPayload(e.toByteString()).build();
+    return Frame.newBuilder().setType(FrameType.FRAME_TYPE_ERROR).setMsgId(msgId).setPayload(e.toByteString())
+        .build();
   }
 }

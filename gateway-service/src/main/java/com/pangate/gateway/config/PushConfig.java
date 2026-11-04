@@ -14,4 +14,9 @@ public class PushConfig {
   PushDelivery pushDelivery(TenantLimitsStore tenants, LimitsHolder limits, GatewayMetrics metrics) {
     return new PushDelivery(tenants, limits, metrics, System::currentTimeMillis);
   }
+
+  @Bean
+  com.pangate.gateway.downstream.ClientTopics clientTopics(TenantLimitsStore tenants, GatewayMetrics metrics) {
+    return new com.pangate.gateway.downstream.ClientTopics(tenants, metrics);
+  }
 }

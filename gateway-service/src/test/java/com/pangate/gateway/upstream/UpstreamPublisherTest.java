@@ -53,7 +53,7 @@ class UpstreamPublisherTest {
     session.activate(new Session.Identity("t1", "t1:u1", "d1", "ios", "1.0", Set.of()), "CONN", 0L,
         f.wallNow(), f.wallNow() + 3_600, 0, List.of());
     f.channel.pipeline().addLast(new SessionHandler(auth.tickets, auth.flow,
-        limiter, f.policy(limiter), f.limits, "cell-1", publisher, f.delivery),
+        limiter, f.policy(limiter), f.limits, "cell-1", publisher, f.delivery, f.clientTopics),
         ErrorTerminatorAccess.create());
   }
 
@@ -144,7 +144,7 @@ class UpstreamPublisherTest {
     UpstreamPublisher p = new UpstreamPublisher(TestKafka.of(throwing, g.telemetry), g.topics, g.node, "cell-1",
         g.tenants, g.metrics, () -> 0L);
     f.channel.pipeline().addLast(new SessionHandler(auth.tickets, auth.flow,
-        limiter, f.policy(limiter), f.limits, "cell-1", p, f.delivery),
+        limiter, f.policy(limiter), f.limits, "cell-1", p, f.delivery, f.clientTopics),
         ErrorTerminatorAccess.create());
 
     ErrorInfo e = error(send(upstream("cmd", "m1")).get(0));

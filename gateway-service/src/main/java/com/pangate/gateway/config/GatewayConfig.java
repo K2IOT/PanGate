@@ -146,10 +146,10 @@ public class GatewayConfig {
       SslContextProvider tls, ResumeTicketService tickets, JwtAuthFlow jwt, PrincipalHandshakeLimiter limiter,
       SeqReader seq, UpstreamPublisher upstream, com.pangate.gateway.auth.HelloPolicy policy,
       com.pangate.gateway.control.TenantLimitsStore tenants,
-      com.pangate.gateway.downstream.PushDelivery delivery) {
+      com.pangate.gateway.downstream.PushDelivery delivery, com.pangate.gateway.downstream.ClientTopics clientTopics) {
     AcceptGate gate = new AcceptGate(node, loops, limits, ips, admission, tracker, metrics);
     return new PipelineDeps(p, limits, loops, node, gate, tls, tickets, jwt, tracker, limiter, policy, tenants,
-        metrics, seq, upstream, delivery);
+        metrics, seq, upstream, delivery, clientTopics);
   }
 
   @Bean

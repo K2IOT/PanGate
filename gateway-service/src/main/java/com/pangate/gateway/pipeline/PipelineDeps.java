@@ -29,7 +29,8 @@ public record PipelineDeps(
     GatewayMetrics metrics,
     SeqReader seq,
     UpstreamPublisher upstream,
-    com.pangate.gateway.downstream.PushDelivery delivery) {
+    com.pangate.gateway.downstream.PushDelivery delivery,
+    com.pangate.gateway.downstream.ClientTopics clientTopics) {
 
   static final ErrorTerminator ERROR_TERMINATOR = new ErrorTerminator();
 
@@ -38,6 +39,6 @@ public record PipelineDeps(
   }
 
   SessionHandler sessionHandler() {
-    return new SessionHandler(tickets, jwt, handshakeLimiter, policy, limits, props.cell(), upstream, delivery);
+    return new SessionHandler(tickets, jwt, handshakeLimiter, policy, limits, props.cell(), upstream, delivery, clientTopics);
   }
 }

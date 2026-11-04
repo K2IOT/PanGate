@@ -19,6 +19,7 @@ public final class LoopContext {
   private final LongSupplier wallSec;
   private final DeadlineWheel wheel;
   private final Long2ObjectOpenHashMap<Session> sessions = new Long2ObjectOpenHashMap<>();
+  private final com.pangate.gateway.downstream.TopicIndex topics = new com.pangate.gateway.downstream.TopicIndex();
   private long counter;
   private volatile int activeCount;
   private int pendingInflight;
@@ -121,6 +122,11 @@ public final class LoopContext {
 
   public void addPendingInflight(int delta) {
     PENDING.setOpaque(this, pendingInflight + delta);
+  }
+
+  /** Topic subscriptions of this loop's sessions (spec §6.4). */
+  public com.pangate.gateway.downstream.TopicIndex topics() {
+    return topics;
   }
 
   public DeadlineWheel wheel() {

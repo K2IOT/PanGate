@@ -37,7 +37,7 @@ class SessionHandlerTest {
     session = f.tracker.admit(f.channel, f.loop, InetAddress.getLoopbackAddress());
     session.activate(new Session.Identity("t1", "t1:u1", "d1", "ios", "1.0", Set.of()), "CONN", 0L,
         f.now() - 100, f.now() + 3_600, 7, List.of("t1:news.*"));
-    f.channel.pipeline().addLast(new SessionHandler(auth.tickets, auth.flow, limiter, f.policy(limiter), f.limits, "cell-1", f.upstream, f.delivery), new ErrorTerminator());
+    f.channel.pipeline().addLast(new SessionHandler(auth.tickets, auth.flow, limiter, f.policy(limiter), f.limits, "cell-1", f.upstream, f.delivery, f.clientTopics), new ErrorTerminator());
   }
 
   private Frame in(Frame frame) {
@@ -129,7 +129,7 @@ class SessionHandlerTest {
     com.pangate.gateway.auth.PrincipalHandshakeLimiter gl =
         new com.pangate.gateway.auth.PrincipalHandshakeLimiter(20, () -> g.now() * 1000);
     g.channel.pipeline().addLast(new SessionHandler(a.tickets, a.flow, gl, g.policy(gl), g.limits, "cell-1",
-        g.upstream, g.delivery),
+        g.upstream, g.delivery, g.clientTopics),
         new ErrorTerminator());
 
     g.channel.writeInbound(Frame.newBuilder().setType(FrameType.FRAME_TYPE_REAUTH)
@@ -139,18 +139,74 @@ class SessionHandlerTest {
     assertThat(s.closeCode()).isEqualTo(CloseCode.AUTH_FAILED);
   }
 
+  private Frame topics(FrameType t, String msgId, String... topics) {
+    return in(Frame.newBuilder().setType(t).setMsgId(msgId).setPayload(
+        com.pangate.contracts.v1.Subscribe.newBuilder().addAllTopics(List.of(topics)).build().toByteString()).build());
+  }
+
   @Test
-  void unsupportedFramesGetNonFatalError() throws Exception {
-    // UPSTREAM and RPC_RES are handled since M2a (UpstreamPublisherTest); topics arrive with M2b.
-    for (FrameType t : List.of(FrameType.FRAME_TYPE_SUBSCRIBE, FrameType.FRAME_TYPE_UNSUBSCRIBE)) {
-      Frame out = in(frame(t));
-      ErrorInfo e = ErrorInfo.parseFrom(out.getPayload());
-      assertThat(e.getCode()).isEqualTo(4500);
-      assertThat(e.getMessage()).isEqualTo("UNSUPPORTED");
-      assertThat(e.getFatal()).isFalse();
-      assertThat(e.getRetryable()).isFalse();
-    }
+  void subscribeAllowedTopicsIndexesThem() {
+    assertThat(topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s1", "t1:news.a", "t1:news.b")).isNull();
+    assertThat(f.loop.topics().snapshot("t1:news.a")).containsExactly(session);
+    assertThat(f.loop.topics().snapshot("t1:news.b")).containsExactly(session);
+  }
+
+  @Test
+  void subscribeWithOneForbiddenTopicAppliesNoneAndErrors4000WithMsgId() throws Exception {
+    Frame out = topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s1", "t1:news.a", "t1:other");
+    ErrorInfo e = ErrorInfo.parseFrom(out.getPayload());
+    assertThat(e.getCode()).isEqualTo(4000);
+    assertThat(e.getMessage()).isEqualTo("topic not allowed: t1:other");
+    assertThat(e.getFatal()).isFalse();
+    assertThat(e.getRetryable()).isFalse();
+    assertThat(out.getMsgId()).isEqualTo("s1");
+    assertThat(f.loop.topics().topicCount()).isZero();
+    assertThat(f.meters.counter("gw.subscribe.rejected", "reason", "not_allowed").count()).isEqualTo(1);
     assertThat(f.channel.isOpen()).isTrue();
+  }
+
+  @Test
+  void subscribeOtherTenantTopicIsNotAllowedEvenIfPatternMatches() throws Exception {
+    session.reauth(f.now(), f.now() + 3_600, 7, List.of("*"));
+    Frame out = topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s1", "t2:x");
+    assertThat(ErrorInfo.parseFrom(out.getPayload()).getCode()).isEqualTo(4000);
+  }
+
+  @Test
+  void subscribeBeyondTopicsPerConnErrors() throws Exception {
+    f.tenants.apply(com.pangate.contracts.v1.TenantCfg.newBuilder()
+        .setScope(com.pangate.contracts.v1.Scope.SCOPE_TENANT).setScopeId("t1")
+        .setLimits(com.pangate.contracts.v1.TenantLimits.newBuilder().setTopicsPerConn(2)).build());
+    assertThat(topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s1", "t1:news.a", "t1:news.b")).isNull();
+    Frame out = topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s2", "t1:news.c");
+    ErrorInfo e = ErrorInfo.parseFrom(out.getPayload());
+    assertThat(e.getMessage()).isEqualTo("too many topics");
+    assertThat(f.loop.topics().snapshot("t1:news.c")).isEmpty();
+    assertThat(f.meters.counter("gw.subscribe.rejected", "reason", "limit").count()).isEqualTo(1);
+    // re-subscribing topics already held does not count twice
+    assertThat(topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s3", "t1:news.a")).isNull();
+  }
+
+  @Test
+  void unsubscribeRemovesAndUnknownIsIgnored() {
+    topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s1", "t1:news.a");
+    assertThat(topics(FrameType.FRAME_TYPE_UNSUBSCRIBE, "u1", "t1:news.a", "t1:never")).isNull();
+    assertThat(f.loop.topics().topicCount()).isZero();
+  }
+
+  @Test
+  void malformedSubscribeIsBadFrame() {
+    in(Frame.newBuilder().setType(FrameType.FRAME_TYPE_SUBSCRIBE)
+        .setPayload(com.google.protobuf.ByteString.copyFrom(new byte[] {(byte) 0xff})).build());
+    assertThat(f.channel.isOpen()).isFalse();
+  }
+
+  @Test
+  void closeRemovesSessionFromTopicIndex() {
+    topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s1", "t1:news.a");
+    f.channel.close();
+    f.channel.runPendingTasks();
+    assertThat(f.loop.topics().topicCount()).isZero();
   }
 
   @Test

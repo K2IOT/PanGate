@@ -76,6 +76,7 @@ public final class SessionTracker {
     s.failPending(s.closeCode() == CloseCode.SLOW_CONSUMER
         ? com.pangate.contracts.v1.AckItem.Status.STATUS_NACK_SLOW_CONSUMER
         : com.pangate.contracts.v1.AckItem.Status.STATUS_NACK_CLOSED);
+    loop.topics().removeAll(s);
     loop.unregister(s);
     loop.decrementActive();
     if (s.identity() != null) {

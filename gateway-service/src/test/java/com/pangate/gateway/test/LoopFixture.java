@@ -56,6 +56,7 @@ public final class LoopFixture {
       new MockProducer<>(true, new StringSerializer(), new ByteArraySerializer());
   public final UpstreamPublisher upstream;
   public final com.pangate.gateway.downstream.PushDelivery delivery;
+  public final com.pangate.gateway.downstream.ClientTopics clientTopics;
 
   public LoopFixture() {
     channel = new EmbeddedChannel();
@@ -67,6 +68,7 @@ public final class LoopFixture {
     node.epoch(7);
     upstream = new UpstreamPublisher(TestKafka.of(reliable, telemetry), topics, node, "cell-1", tenants, metrics,
         () -> clockSec.get() * 1000);
+    clientTopics = new com.pangate.gateway.downstream.ClientTopics(tenants, metrics);
     delivery = new com.pangate.gateway.downstream.PushDelivery(tenants, limits, metrics, () -> wallNow() * 1000);
   }
 

@@ -19,7 +19,7 @@ import com.pangate.gateway.upstream.UpstreamPublisher;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 
-/** Frames of an authenticated session (spec §5): PING, REAUTH, UPSTREAM, RPC_RES; SUBSCRIBE answers UNSUPPORTED until M2b. */
+/** Frames of an authenticated session (spec §5): PING, REAUTH, ACK, UPSTREAM, RPC_RES, SUBSCRIBE, UNSUBSCRIBE. */
 @io.netty.channel.ChannelHandler.Sharable
 public final class SessionHandler extends ChannelInboundHandlerAdapter {
 
@@ -31,11 +31,13 @@ public final class SessionHandler extends ChannelInboundHandlerAdapter {
   private final String cell;
   private final UpstreamPublisher upstream;
   private final com.pangate.gateway.downstream.PushDelivery delivery;
+  private final com.pangate.gateway.downstream.ClientTopics topics;
 
   public SessionHandler(ResumeTicketService tickets, JwtAuthFlow jwt, PrincipalHandshakeLimiter limiter,
       com.pangate.gateway.auth.HelloPolicy policy, LimitsHolder limits, String cell, UpstreamPublisher upstream,
-      com.pangate.gateway.downstream.PushDelivery delivery) {
+      com.pangate.gateway.downstream.PushDelivery delivery, com.pangate.gateway.downstream.ClientTopics topics) {
     this.delivery = delivery;
+    this.topics = topics;
     this.tickets = tickets;
     this.jwt = jwt;
     this.limiter = limiter;
@@ -61,6 +63,7 @@ public final class SessionHandler extends ChannelInboundHandlerAdapter {
       case FRAME_TYPE_ACK -> ack(session, frame);
       case FRAME_TYPE_UPSTREAM -> upstream.publish(ctx, session, frame, null);
       case FRAME_TYPE_RPC_RES -> upstream.publish(ctx, session, frame, "cmd_result");
+      case FRAME_TYPE_SUBSCRIBE, FRAME_TYPE_UNSUBSCRIBE -> topics.onFrame(ctx, session, frame);
       default -> ctx.writeAndFlush(Frames.error(CloseCode.INTERNAL.code(), "UNSUPPORTED", false, false));
     }
   }

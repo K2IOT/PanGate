@@ -62,7 +62,7 @@ class HelloAuthHandlerTest {
     f.channel.pipeline().addLast(new FrameCodec(f.limits),
         new HelloAuthHandler(auth.tickets, auth.flow, f.tracker, f.policy(limiter), f.tenants, f.limits, "cell-1",
             f.metrics, seq),
-        new SessionHandler(auth.tickets, auth.flow, limiter, f.policy(limiter), f.limits, "cell-1", f.upstream, f.delivery), new ErrorTerminator());
+        new SessionHandler(auth.tickets, auth.flow, limiter, f.policy(limiter), f.limits, "cell-1", f.upstream, f.delivery, f.clientTopics), new ErrorTerminator());
   }
 
   private static ByteBuf bytes(Frame frame) {
