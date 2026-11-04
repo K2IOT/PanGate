@@ -54,9 +54,10 @@ public final class PushApiKickClient implements KickClient, AutoCloseable {
       b.usePlaintext();
     } else {
       try {
-        b.sslContext(GrpcSslContexts.forClient().trustManager(tls.trustFile().toFile())
+        b.sslContext(GrpcSslContexts.forClient()
+            .trustManager(SpiffeServerTrustManager.fromBundle(tls.trustFile()))
             .keyManager(tls.certFile().toFile(), tls.keyFile().toFile()).build());
-      } catch (java.io.IOException e) {
+      } catch (java.io.IOException | java.security.GeneralSecurityException e) {
         throw new IllegalStateException("push-api TLS: " + e.getMessage(), e);
       }
     }
