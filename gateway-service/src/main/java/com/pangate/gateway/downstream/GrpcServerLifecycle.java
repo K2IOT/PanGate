@@ -52,6 +52,9 @@ public final class GrpcServerLifecycle implements SmartLifecycle {
         .workerEventLoopGroup(g)
         .channelType(NioServerSocketChannel.class)
         .executor(executor)
+        // Routers keep their long-lived stream alive with pings; the 5 min default would answer GOAWAY too_many_pings.
+        .permitKeepAliveTime(10, TimeUnit.SECONDS)
+        .permitKeepAliveWithoutCalls(true)
         .addService(def);
     try {
       if (!cfg.plaintext()) {
@@ -81,6 +84,7 @@ public final class GrpcServerLifecycle implements SmartLifecycle {
     if (s == null) {
       return;
     }
+    service.completeAll();
     s.shutdown();
     try {
       if (!s.awaitTermination(5, TimeUnit.SECONDS)) {

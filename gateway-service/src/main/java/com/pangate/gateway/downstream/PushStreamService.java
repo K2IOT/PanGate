@@ -100,6 +100,13 @@ public final class PushStreamService extends PushStreamGrpc.PushStreamImplBase {
     }
   }
 
+  /** Shutdown: ends every open router stream cleanly (queued acks first), so stop does not wait out the grace. */
+  public void completeAll() {
+    for (Stream st : active) {
+      st.close(true);
+    }
+  }
+
   public int activeStreams() {
     return active.size();
   }

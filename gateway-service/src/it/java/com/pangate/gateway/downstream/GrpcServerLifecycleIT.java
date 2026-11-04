@@ -127,4 +127,36 @@ class GrpcServerLifecycleIT {
               e -> assertThat(e.envVar()).isEqualTo("GATEWAY_GRPC_PORT"));
     }
   }
+
+  @Test
+  void stopEndsOpenRouterStreamsCleanlyAndQuickly() throws Exception {
+    start(true, null, null);
+    channel = NettyChannelBuilder.forAddress("127.0.0.1", server.port()).usePlaintext().build();
+    java.util.concurrent.CountDownLatch completed = new java.util.concurrent.CountDownLatch(1);
+    Metadata h = new Metadata();
+    h.put(PushVersionInterceptor.HEADER, "1");
+    StreamObserver<PushBatch> out = PushStreamGrpc.newStub(channel)
+        .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(h)).stream(new StreamObserver<>() {
+          @Override public void onNext(DeliveryAck v) { }
+          @Override public void onError(Throwable t) { }
+          @Override public void onCompleted() { completed.countDown(); }
+        });
+    out.onNext(PushBatch.getDefaultInstance());
+    Thread.sleep(300);
+    long t0 = System.nanoTime();
+    server.stop();
+    assertThat(Duration.ofNanos(System.nanoTime() - t0)).isLessThan(Duration.ofSeconds(2));
+    assertThat(completed.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();  // onCompleted, not an error
+  }
+
+  @Test
+  void routerKeepalivePingsEvery10sAreAllowed() throws Exception {
+    start(true, null, null);
+    channel = NettyChannelBuilder.forAddress("127.0.0.1", server.port()).usePlaintext()
+        .keepAliveTime(10, java.util.concurrent.TimeUnit.SECONDS).keepAliveWithoutCalls(true).build();
+    Result r = call();
+    await().atMost(Duration.ofSeconds(5)).until(() -> !r.acks().isEmpty());
+    Thread.sleep(35_000);  // default server policy (5 min) sends GOAWAY too_many_pings by the third ping
+    assertThat(r.error().get()).isNull();
+  }
 }
