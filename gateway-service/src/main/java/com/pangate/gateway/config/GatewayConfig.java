@@ -155,10 +155,11 @@ public class GatewayConfig {
       SeqReader seq, UpstreamPublisher upstream, com.pangate.gateway.auth.HelloPolicy policy,
       com.pangate.gateway.control.TenantLimitsStore tenants,
       com.pangate.gateway.downstream.PushDelivery delivery, com.pangate.gateway.downstream.ClientTopics clientTopics,
-      com.pangate.gateway.tenant.TenantCap tenantCap) {
+      com.pangate.gateway.tenant.TenantCap tenantCap,
+      com.pangate.gateway.upstream.PrincipalRateLimiter upstreamRate) {
     AcceptGate gate = new AcceptGate(node, loops, limits, ips, admission, tracker, metrics);
     return new PipelineDeps(p, limits, loops, node, gate, tls, tickets, jwt, tracker, limiter, policy, tenants,
-        metrics, seq, upstream, delivery, clientTopics, tenantCap);
+        metrics, seq, upstream, delivery, clientTopics, tenantCap, upstreamRate);
   }
 
   @Bean

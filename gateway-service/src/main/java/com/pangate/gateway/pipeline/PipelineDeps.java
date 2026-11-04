@@ -31,7 +31,8 @@ public record PipelineDeps(
     UpstreamPublisher upstream,
     com.pangate.gateway.downstream.PushDelivery delivery,
     com.pangate.gateway.downstream.ClientTopics clientTopics,
-    com.pangate.gateway.tenant.TenantCap tenantCap) {
+    com.pangate.gateway.tenant.TenantCap tenantCap,
+    com.pangate.gateway.upstream.PrincipalRateLimiter upstreamRate) {
 
   static final ErrorTerminator ERROR_TERMINATOR = new ErrorTerminator();
 

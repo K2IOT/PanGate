@@ -227,4 +227,18 @@ class SseAdapterTest {
     assertThat(out).hasSize(1);
     assertThat(text(out.get(0))).isEqualTo(":\n\n");
   }
+
+  @Test
+  void allowedOriginIsEchoedOnTheStream() {
+    f.tenants.apply(TenantCfg.newBuilder().setScope(Scope.SCOPE_TENANT).setScopeId("t1")
+        .setSwitches(KillSwitches.newBuilder().setSseFallbackEnabled(true))
+        .setLimits(com.pangate.contracts.v1.TenantLimits.newBuilder().addOriginAllowlist("https://app.example"))
+        .build());
+    f.channel.writeInbound(post(HttpMethod.POST, "application/x-protobuf", hello()));
+    List<Object> out = outbound();
+    HttpResponse head = (HttpResponse) out.get(0);
+    assertThat(head.headers().get(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN)).isEqualTo("https://app.example");
+    assertThat(head.headers().get(HttpHeaderNames.VARY)).isEqualTo("Origin");
+    out.forEach(ReferenceCountUtil::release);
+  }
 }

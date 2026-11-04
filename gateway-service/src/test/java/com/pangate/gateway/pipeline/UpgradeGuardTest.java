@@ -247,4 +247,23 @@ class UpgradeGuardTest {
     assertThat(f.channel.attr(com.pangate.gateway.protocol.ChannelAttrs.PROTOCOL_READY).get()).isTrue();
     ((FullHttpRequest) f.channel.readInbound()).release();
   }
+
+  @Test
+  void corsPreflightOnRoutedPathsIsAnswered() {
+    guardWithUpstream(550_000);
+    FullHttpRequest r = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.OPTIONS, "/v1/upstream");
+    r.headers().set(HttpHeaderNames.ORIGIN, "https://app.example")
+        .set(HttpHeaderNames.ACCESS_CONTROL_REQUEST_METHOD, "POST");
+    f.channel.writeInbound(r);
+
+    FullHttpResponse res = response();
+    assertThat(res.status().code()).isEqualTo(204);
+    assertThat(res.headers().get(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN)).isEqualTo("https://app.example");
+    assertThat(res.headers().get(HttpHeaderNames.ACCESS_CONTROL_ALLOW_METHODS)).isEqualTo("POST");
+    assertThat(res.headers().get(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS)).contains("content-type")
+        .contains("authorization");
+    assertThat(res.headers().get(HttpHeaderNames.VARY)).isEqualTo("Origin");
+    res.release();
+    assertThat(f.channel.isOpen()).isFalse();
+  }
 }

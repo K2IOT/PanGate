@@ -34,7 +34,7 @@ public final class WsChannelInitializer extends ChannelInitializer<SocketChannel
     this.frameCodec = new FrameCodec(deps.limits());
     this.sessionHandler = deps.sessionHandler();
     this.httpUpstream = new HttpUpstreamHandler(deps.tickets(), deps.policy(), deps.upstream(), deps.limits(),
-        deps.metrics(), () -> System.currentTimeMillis() / 1000);
+        deps.metrics(), () -> System.currentTimeMillis() / 1000, deps.tenants(), deps.upstreamRate());
     java.util.concurrent.atomic.AtomicInteger sseStreams = new java.util.concurrent.atomic.AtomicInteger();
     deps.metrics().gauge("gw.sse.sessions", sseStreams, java.util.concurrent.atomic.AtomicInteger::get);
     this.routes = java.util.Map.of("/v1/upstream", () -> httpUpstream,

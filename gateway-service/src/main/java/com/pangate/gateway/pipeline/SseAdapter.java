@@ -138,6 +138,10 @@ public final class SseAdapter extends ChannelDuplexHandler {
     head.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/event-stream")
         .set(HttpHeaderNames.CACHE_CONTROL, HttpHeaderValues.NO_CACHE)
         .set(HttpHeaderNames.TRANSFER_ENCODING, HttpHeaderValues.CHUNKED);
+    Session owner = ctx.channel().attr(Session.KEY).get();
+    if (owner != null && owner.origin() != null) {
+      Cors.allow(head.headers(), owner.origin());  // HELLO already checked it against the tenant allowlist (§4.6 g)
+    }
     ctx.write(head);
     // The comment is this transport's only sign of life (idle timeout = 3 × heartbeat): never wait longer than the
     // tenant's heartbeat interval.

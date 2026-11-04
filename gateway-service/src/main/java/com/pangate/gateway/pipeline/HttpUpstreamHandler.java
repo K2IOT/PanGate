@@ -50,9 +50,16 @@ public final class HttpUpstreamHandler extends SimpleChannelInboundHandler<FullH
   private final LimitsHolder limits;
   private final GatewayMetrics metrics;
   private final java.util.function.LongSupplier wallSec;
+  private final com.pangate.gateway.control.TenantLimitsStore tenants;
+  private final com.pangate.gateway.upstream.PrincipalRateLimiter rate;
+  private static final io.netty.util.AttributeKey<String> CORS_ORIGIN =
+      io.netty.util.AttributeKey.valueOf("pangate.corsOrigin");
 
   public HttpUpstreamHandler(ResumeTicketService tickets, HelloPolicy policy, UpstreamPublisher upstream,
-      LimitsHolder limits, GatewayMetrics metrics, java.util.function.LongSupplier wallSec) {
+      LimitsHolder limits, GatewayMetrics metrics, java.util.function.LongSupplier wallSec,
+      com.pangate.gateway.control.TenantLimitsStore tenants, com.pangate.gateway.upstream.PrincipalRateLimiter rate) {
+    this.tenants = tenants;
+    this.rate = rate;
     this.wallSec = wallSec;
     this.tickets = tickets;
     this.policy = policy;
@@ -100,6 +107,20 @@ public final class HttpUpstreamHandler extends SimpleChannelInboundHandler<FullH
       }
       return;
     }
+    String tenant = valid.ticket().tenant();
+    String origin = req.headers().get(HttpHeaderNames.ORIGIN);
+    if (!policy.originAllowed(tenant, origin)) {
+      respond(ctx, HttpResponseStatus.FORBIDDEN, 0);  // no CORS headers: the browser blocks the page from reading it
+      return;
+    }
+    if (origin != null) {
+      ctx.channel().attr(CORS_ORIGIN).set(origin);
+    }
+    var tp = tenants.policy(tenant);
+    if (!rate.tryAcquire(valid.ticket().principal(), tp.inboundRate(), tp.inboundBurst())) {
+      respond(ctx, HttpResponseStatus.TOO_MANY_REQUESTS, 1);
+      return;
+    }
     Frame f;
     try {
       f = Frame.parseFrom(new ByteBufInputStream(req.content()));
@@ -141,6 +162,10 @@ public final class HttpUpstreamHandler extends SimpleChannelInboundHandler<FullH
     res.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE).setInt(HttpHeaderNames.CONTENT_LENGTH, 0);
     if (retryAfterSec > 0) {
       res.headers().setInt(HttpHeaderNames.RETRY_AFTER, retryAfterSec);
+    }
+    String origin = ctx.channel().attr(CORS_ORIGIN).get();  // set only once the tenant allowed it
+    if (origin != null) {
+      Cors.allow(res.headers(), origin);
     }
     ctx.writeAndFlush(res).addListener(ChannelFutureListener.CLOSE);
   }

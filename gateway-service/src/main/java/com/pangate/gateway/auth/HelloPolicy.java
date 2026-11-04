@@ -76,6 +76,12 @@ public final class HelloPolicy {
     return Optional.empty();
   }
 
+  /** Spec §4.6 g: no Origin (non-browser) or an empty allowlist allows; otherwise the Origin must be listed. */
+  public boolean originAllowed(String tenant, String origin) {
+    java.util.Set<String> allow = tenants.policy(tenant).originAllowlist();
+    return origin == null || allow.isEmpty() || allow.contains(origin);
+  }
+
   /** Checks c–g only (REAUTH applies the rate limit itself, before the ES256 verify it protects). */
   public Optional<Rejection> checkPolicy(Candidate c) {
     if (!cell.equals(c.ticketCell()) || !cells.servesTenant(c.tenant())) {
@@ -92,7 +98,7 @@ public final class HelloPolicy {
     if (!p.minSdkVersion().isEmpty() && SdkVersion.compare(c.sdkVersion(), p.minSdkVersion()) < 0) {
       return Optional.of(new Rejection(CloseCode.UPGRADE_REQUIRED, 0, "sdk_too_old"));
     }
-    if (c.origin() != null && !p.originAllowlist().isEmpty() && !p.originAllowlist().contains(c.origin())) {
+    if (!originAllowed(c.tenant(), c.origin())) {
       return Optional.of(new Rejection(CloseCode.AUTH_FAILED, 0, "origin"));
     }
     return Optional.empty();

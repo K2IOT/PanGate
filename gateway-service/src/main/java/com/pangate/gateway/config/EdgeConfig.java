@@ -95,6 +95,15 @@ public class EdgeConfig {
     return t;
   }
 
+  /** Per-principal rate for POST /v1/upstream; idle buckets evicted every 60 s. */
+  @Bean
+  com.pangate.gateway.upstream.PrincipalRateLimiter upstreamRate(TickScheduler tick) {
+    com.pangate.gateway.upstream.PrincipalRateLimiter r =
+        new com.pangate.gateway.upstream.PrincipalRateLimiter(System::nanoTime);
+    tick.scheduleAtFixedRate(r::evictIdle, Duration.ofSeconds(60));
+    return r;
+  }
+
   /** Spec §7.7: check cert and key every {@code tls.reload-interval}; new connections get the new certificate. */
   @Bean
   ScheduledFuture<?> tlsReload(GatewayProperties p, SslContextProvider tls, TickScheduler tick,

@@ -62,6 +62,10 @@ public final class UpgradeGuard extends ChannelInboundHandlerAdapter {
       reject(ctx, req, HttpResponseStatus.NOT_FOUND, 0);
       return;
     }
+    if (route != null && io.netty.handler.codec.http.HttpMethod.OPTIONS.equals(req.method())) {
+      preflight(ctx, req);
+      return;
+    }
     if (route != null) {
       if (node.draining() || loops.totalActive() >= limits.current().softCap() || node.shedLevel() >= 3) {
         reject(ctx, req, HttpResponseStatus.SERVICE_UNAVAILABLE, 5 + rnd.nextInt(26));
@@ -118,6 +122,18 @@ public final class UpgradeGuard extends ChannelInboundHandlerAdapter {
         .set(com.pangate.gateway.protocol.ChannelAttrs.TransportKind.HTTP);
     ctx.channel().attr(com.pangate.gateway.protocol.ChannelAttrs.PROTOCOL_READY).set(true);
     ctx.pipeline().addAfter(ctx.name(), path.equals("/v1/upstream") ? "httpUpstream" : "route", handler);
+  }
+
+  /** CORS preflight for the browser fallbacks (see {@link Cors}); answered here, before any session work. */
+  private static void preflight(ChannelHandlerContext ctx, FullHttpRequest req) {
+    String origin = req.headers().get(HttpHeaderNames.ORIGIN);
+    req.release();
+    FullHttpResponse res = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.NO_CONTENT);
+    res.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE).setInt(HttpHeaderNames.CONTENT_LENGTH, 0);
+    if (origin != null) {
+      Cors.preflight(res.headers(), origin);
+    }
+    ctx.writeAndFlush(res).addListener(io.netty.channel.ChannelFutureListener.CLOSE);
   }
 
   private static void reject(ChannelHandlerContext ctx, FullHttpRequest req, HttpResponseStatus status,

@@ -31,10 +31,27 @@ class HttpUpstreamHandlerTest {
   private final com.pangate.gateway.auth.PrincipalHandshakeLimiter limiter =
       new com.pangate.gateway.auth.PrincipalHandshakeLimiter(20, () -> f.now() * 1000);
 
+  private final java.util.concurrent.atomic.AtomicLong nanos = new java.util.concurrent.atomic.AtomicLong();
+  private final com.pangate.gateway.upstream.PrincipalRateLimiter rate =
+      new com.pangate.gateway.upstream.PrincipalRateLimiter(nanos::get);
+  private HttpUpstreamHandler handler;
+
   @BeforeEach
   void pipeline() {
-    f.channel.pipeline().addLast(new HttpUpstreamHandler(auth.tickets, f.policy(limiter), f.upstream, f.limits,
-        f.metrics, f::wallNow));
+    handler = new HttpUpstreamHandler(auth.tickets, f.policy(limiter), f.upstream, f.limits, f.metrics, f::wallNow,
+        f.tenants, rate);
+    f.channel.pipeline().addLast(handler);
+  }
+
+  /** A fresh connection through the same (shared) handler: one request per connection. */
+  private int statusOnNewConnection(FullHttpRequest r) {
+    io.netty.channel.embedded.EmbeddedChannel ch = new io.netty.channel.embedded.EmbeddedChannel(handler);
+    ch.writeInbound(r);
+    ch.runPendingTasks();
+    FullHttpResponse res = ch.readOutbound();
+    int code = res.status().code();
+    res.release();
+    return code;
   }
 
   private String ticket(String cell) {
@@ -209,5 +226,49 @@ class HttpUpstreamHandlerTest {
     FullHttpResponse res = f.channel.readOutbound();
     res.release();
     assertThat((Object) f.channel.readOutbound()).isNull();
+  }
+
+  @Test
+  void principalAboveItsUpstreamRateGets429() {
+    f.tenants.apply(TenantCfg.newBuilder().setScope(Scope.SCOPE_TENANT).setScopeId("t1")
+        .setLimits(com.pangate.contracts.v1.TenantLimits.newBuilder().setInboundRate(1).setInboundBurst(2)).build());
+    byte[] tel = upstream("telemetry", "m1").toByteArray();
+    assertThat(statusOnNewConnection(post("Ticket " + ticket("cell-1"), tel))).isEqualTo(202);
+    assertThat(statusOnNewConnection(post("Ticket " + ticket("cell-1"), tel))).isEqualTo(202);
+    assertThat(statusOnNewConnection(post("Ticket " + ticket("cell-1"), tel))).isEqualTo(429);
+
+    nanos.addAndGet(1_000_000_000L);  // one token per second refills
+    assertThat(statusOnNewConnection(post("Ticket " + ticket("cell-1"), tel))).isEqualTo(202);
+  }
+
+  @Test
+  void corsOriginInTheTenantAllowlistIsEchoed() {
+    f.tenants.apply(TenantCfg.newBuilder().setScope(Scope.SCOPE_TENANT).setScopeId("t1")
+        .setLimits(com.pangate.contracts.v1.TenantLimits.newBuilder().addOriginAllowlist("https://app.example"))
+        .build());
+    FullHttpRequest r = post("Ticket " + ticket("cell-1"), upstream("telemetry", "m1").toByteArray());
+    r.headers().set(HttpHeaderNames.ORIGIN, "https://app.example");
+    f.channel.writeInbound(r);
+    f.channel.runPendingTasks();
+    FullHttpResponse res = f.channel.readOutbound();
+    assertThat(res.status().code()).isEqualTo(202);
+    assertThat(res.headers().get(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN)).isEqualTo("https://app.example");
+    assertThat(res.headers().get(HttpHeaderNames.VARY)).isEqualTo("Origin");
+    res.release();
+  }
+
+  @Test
+  void corsOriginOutsideTheAllowlistIs403WithoutCorsHeaders() {
+    f.tenants.apply(TenantCfg.newBuilder().setScope(Scope.SCOPE_TENANT).setScopeId("t1")
+        .setLimits(com.pangate.contracts.v1.TenantLimits.newBuilder().addOriginAllowlist("https://app.example"))
+        .build());
+    FullHttpRequest r = post("Ticket " + ticket("cell-1"), upstream("telemetry", "m1").toByteArray());
+    r.headers().set(HttpHeaderNames.ORIGIN, "https://evil.example");
+    f.channel.writeInbound(r);
+    f.channel.runPendingTasks();
+    FullHttpResponse res = f.channel.readOutbound();
+    assertThat(res.status().code()).isEqualTo(403);
+    assertThat(res.headers().contains(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN)).isFalse();
+    res.release();
   }
 }
