@@ -30,11 +30,36 @@ public final class ChannelCloser {
         ch.close();
       }
     }, FORCE_CLOSE_AFTER.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+    if (ch.attr(ChannelAttrs.TRANSPORT).get() == ChannelAttrs.TransportKind.SSE) {
+      return closeSse(ch, code, reason, retryAfterMs);
+    }
     if (ch.attr(ChannelAttrs.TRANSPORT).get() == ChannelAttrs.TransportKind.WS) {
       String text = retryAfterMs > 0 ? reason + " retryAfter=" + retryAfterMs : reason;
       return ch.writeAndFlush(new CloseWebSocketFrame(code.code(), text)).addListener(ChannelFutureListener.CLOSE);
     }
     return ch.writeAndFlush(Frames.error(code.code(), reason, code.retryable(), true, retryAfterMs))
+        .addListener(ChannelFutureListener.CLOSE);
+  }
+
+  /**
+   * SSE (spec §4.3): before the stream started the client gets an HTTP status; once streaming, a fatal ERROR event and
+   * the last chunk.
+   */
+  private static ChannelFuture closeSse(Channel ch, CloseCode code, String reason, long retryAfterMs) {
+    if (!ChannelAttrs.isSet(ch, ChannelAttrs.SSE_STREAMING)) {
+      io.netty.handler.codec.http.FullHttpResponse res = new io.netty.handler.codec.http.DefaultFullHttpResponse(
+          io.netty.handler.codec.http.HttpVersion.HTTP_1_1, com.pangate.gateway.pipeline.SseAdapter.httpStatus(code));
+      res.headers().set(io.netty.handler.codec.http.HttpHeaderNames.CONNECTION,
+          io.netty.handler.codec.http.HttpHeaderValues.CLOSE)
+          .setInt(io.netty.handler.codec.http.HttpHeaderNames.CONTENT_LENGTH, 0);
+      if (retryAfterMs > 0) {
+        res.headers().set(io.netty.handler.codec.http.HttpHeaderNames.RETRY_AFTER,
+            Long.toString(Math.max(1, (retryAfterMs + 999) / 1000)));
+      }
+      return ch.writeAndFlush(res).addListener(ChannelFutureListener.CLOSE);
+    }
+    ch.write(Frames.error(code.code(), reason, code.retryable(), true, retryAfterMs));
+    return ch.writeAndFlush(io.netty.handler.codec.http.LastHttpContent.EMPTY_LAST_CONTENT)
         .addListener(ChannelFutureListener.CLOSE);
   }
 }

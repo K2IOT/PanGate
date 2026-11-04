@@ -5,7 +5,7 @@ import io.netty.util.AttributeKey;
 /** Per-channel flags shared by the pipeline handlers. */
 public final class ChannelAttrs {
 
-  public enum TransportKind { WS, TCP }
+  public enum TransportKind { WS, TCP, SSE }
 
   public static final AttributeKey<TransportKind> TRANSPORT = AttributeKey.valueOf("pangate.transport");
   /** Application frames can flow: WS upgraded, or TLS + ALPN done on TCP. */
@@ -15,6 +15,8 @@ public final class ChannelAttrs {
   /** Close code a WS client sent in its close frame. */
   public static final AttributeKey<Integer> CLIENT_CLOSE_CODE = AttributeKey.valueOf("pangate.clientCloseCode");
 
+  /** SSE: the 200 response head was sent, so errors now go out as events instead of an HTTP status. */
+  public static final AttributeKey<Boolean> SSE_STREAMING = AttributeKey.valueOf("pangate.sseStreaming");
   /** The real client address from a PROXY header (spec §4.1); absent for direct connections. */
   public static final AttributeKey<java.net.InetSocketAddress> CLIENT_ADDRESS =
       AttributeKey.valueOf("pangate.clientAddress");

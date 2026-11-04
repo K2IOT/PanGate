@@ -91,6 +91,16 @@ public final class UpgradeGuard extends ChannelInboundHandlerAdapter {
 
   /** Replaces the WS handlers (upgrade, adapter, codec, auth, session) with the route's handler. */
   private static void rewire(ChannelHandlerContext ctx, String path, io.netty.channel.ChannelHandler handler) {
+    if (path.equals("/v1/sse")) {
+      // Same codec, auth and session as WS (spec §4.3); the response is streamed, so no more aggregation.
+      for (String name : new String[] {"ws", "wsBinary", "aggregator"}) {
+        if (ctx.pipeline().get(name) != null) {
+          ctx.pipeline().remove(name);
+        }
+      }
+      ctx.pipeline().addAfter(ctx.name(), "sse", handler);
+      return;
+    }
     for (String name : new String[] {"ws", "wsBinary", "frameCodec", "hello", "session"}) {
       if (ctx.pipeline().get(name) != null) {
         ctx.pipeline().remove(name);

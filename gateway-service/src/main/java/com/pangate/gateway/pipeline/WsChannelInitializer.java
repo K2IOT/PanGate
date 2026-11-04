@@ -35,7 +35,10 @@ public final class WsChannelInitializer extends ChannelInitializer<SocketChannel
     this.sessionHandler = deps.sessionHandler();
     this.httpUpstream = new HttpUpstreamHandler(deps.tickets(), deps.policy(), deps.upstream(), deps.limits(),
         deps.metrics(), () -> System.currentTimeMillis() / 1000);
-    this.routes = java.util.Map.of("/v1/upstream", () -> httpUpstream);
+    java.util.concurrent.atomic.AtomicInteger sseStreams = new java.util.concurrent.atomic.AtomicInteger();
+    deps.metrics().gauge("gw.sse.sessions", sseStreams, java.util.concurrent.atomic.AtomicInteger::get);
+    this.routes = java.util.Map.of("/v1/upstream", () -> httpUpstream,
+        "/v1/sse", () -> new SseAdapter(java.time.Duration.ofSeconds(30), sseStreams, deps.limits()));
     this.wsConfig = WebSocketServerProtocolConfig.newBuilder()
         .websocketPath(deps.props().listeners().ws().path())
         .subprotocols(UpgradeGuard.SUBPROTOCOL)

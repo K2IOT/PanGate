@@ -198,6 +198,11 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
     if (!admitted(session, hello, ticketCell, t)) {
       return;
     }
+    if (ctx.channel().attr(ChannelAttrs.TRANSPORT).get() == ChannelAttrs.TransportKind.SSE
+        && !tenants.policy(t.tenant()).sseFallbackEnabled()) {
+      fail(session, CloseCode.AUTH_FAILED, "sse_disabled");  // kill switch sse.fallback.enabled (spec §7.8)
+      return;
+    }
     int max = tenants.policy(t.tenant()).maxConns();
     if (max <= 0 || com.pangate.gateway.auth.WarmUpTokens.isWarmUp(t.tenant())) {
       activate(ctx, session, hello, t);

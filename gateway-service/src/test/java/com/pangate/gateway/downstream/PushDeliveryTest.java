@@ -281,4 +281,16 @@ class PushDeliveryTest {
     deliver(item(1, DeliveryClass.DELIVERY_CLASS_EPHEMERAL, "m1", 1));
     assertThat(session.dirty()).isTrue();
   }
+
+  @Test
+  void reliablePushOnSseIsAckedWritten() {
+    f.channel.attr(com.pangate.gateway.protocol.ChannelAttrs.TRANSPORT)
+        .set(com.pangate.gateway.protocol.ChannelAttrs.TransportKind.SSE);
+
+    deliver(item(1, DeliveryClass.DELIVERY_CLASS_RELIABLE, "m1", 10));
+
+    assertThat(acks).containsExactly(ack(1, AckItem.Status.STATUS_WRITTEN));
+    assertThat(written()).hasSize(1);
+    assertThat(session.pending()).isNull();
+  }
 }

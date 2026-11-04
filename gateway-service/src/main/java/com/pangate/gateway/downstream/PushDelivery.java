@@ -66,7 +66,10 @@ public final class PushDelivery {
       return null;
     }
     Channel ch = s.channel();
-    if (!reliable || tenants.policy(s.identity().tenantId()).downgradeReliable()) {
+    // SSE clients cannot ACK (plan ruling R1): RELIABLE is acknowledged as WRITTEN, like downgradeReliable.
+    if (!reliable || tenants.policy(s.identity().tenantId()).downgradeReliable()
+        || ch.attr(com.pangate.gateway.protocol.ChannelAttrs.TRANSPORT).get()
+            == com.pangate.gateway.protocol.ChannelAttrs.TransportKind.SSE) {
       boolean written = false;
       if (ch.isWritable()) {
         write(ch, item);
