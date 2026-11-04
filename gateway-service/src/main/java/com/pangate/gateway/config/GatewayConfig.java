@@ -168,14 +168,20 @@ public class GatewayConfig {
   @Bean
   NettyGatewayServer nettyGatewayServer(GatewayProperties p, IoGroups io, LoopRegistry loops, NodeState node,
       AdmissionController admission, EventLoopLagProbe lag, PipelineDeps deps,
-      com.pangate.gateway.lifecycle.DrainCoordinator drain) {
+      com.pangate.gateway.lifecycle.DrainCoordinator drain, com.pangate.gateway.auth.WarmUpTokens warmUpTokens) {
     return new NettyGatewayServer(p, io, loops, node, admission, lag, new WsChannelInitializer(deps),
-        new TcpChannelInitializer(deps), drain);
+        new TcpChannelInitializer(deps), drain, new com.pangate.gateway.lifecycle.WarmUpRunner(p.warmup(),
+            p.listeners().ws().port(), p.listeners().ws().path(), warmUpTokens, () -> System.currentTimeMillis() / 1000));
   }
 
   @Bean
   ReadinessCheck listenersBoundCheck(NodeState node) {
     return () -> node.listenersBound() ? Optional.empty() : Optional.of("listeners not bound");
+  }
+
+  @Bean
+  ReadinessCheck warmedUpCheck(NodeState node) {
+    return () -> node.warmedUp() ? Optional.empty() : Optional.of("warm-up not finished");
   }
 
   @Bean

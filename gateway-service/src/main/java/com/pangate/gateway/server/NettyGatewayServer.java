@@ -43,14 +43,17 @@ public final class NettyGatewayServer implements SmartLifecycle {
   private final ChannelInitializer<SocketChannel> wsInitializer;
   private final ChannelInitializer<SocketChannel> tcpInitializer;
   private final com.pangate.gateway.lifecycle.DrainCoordinator drain;
+  private final com.pangate.gateway.lifecycle.WarmUpRunner warmUp;
   private final List<Channel> listeners = new ArrayList<>();
   private volatile boolean running;
   private final java.util.concurrent.atomic.AtomicBoolean stopping = new java.util.concurrent.atomic.AtomicBoolean();
 
   public NettyGatewayServer(GatewayProperties props, IoGroups io, LoopRegistry loops, NodeState node,
       AdmissionController admission, EventLoopLagProbe lagProbe, ChannelInitializer<SocketChannel> wsInitializer,
-      ChannelInitializer<SocketChannel> tcpInitializer, com.pangate.gateway.lifecycle.DrainCoordinator drain) {
+      ChannelInitializer<SocketChannel> tcpInitializer, com.pangate.gateway.lifecycle.DrainCoordinator drain,
+      com.pangate.gateway.lifecycle.WarmUpRunner warmUp) {
     this.drain = drain;
+    this.warmUp = warmUp;
     this.props = props;
     this.io = io;
     this.loops = loops;
@@ -82,6 +85,9 @@ public final class NettyGatewayServer implements SmartLifecycle {
       throw e;
     }
     node.listenersBound(true);
+    // Spec §3.7, §7.6: bind → warm-up → ready → admission ramp.
+    warmUp.run();
+    node.warmedUp(true);
     admission.markReady();
     running = true;
     log.info("gateway listening: wss :{}{} ({} acceptors), tcp :{}", ws, props.listeners().ws().path(),
