@@ -102,4 +102,49 @@ class FrameCodecTest {
     assertThat(Frame.parseFrom(ByteBufUtil.getBytes(out))).isEqualTo(f);
     out.release();
   }
+
+  private static java.util.List<String> traceLines(Runnable r) {
+    ch.qos.logback.classic.Logger log = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger("pangate.trace");
+    ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> lines =
+        new ch.qos.logback.core.read.ListAppender<>();
+    lines.start();
+    log.addAppender(lines);
+    try {
+      r.run();
+    } finally {
+      log.detachAppender(lines);
+    }
+    return lines.list.stream().map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).toList();
+  }
+
+  private static EmbeddedChannel sessionChannel(boolean traced) {
+    com.pangate.gateway.test.LoopFixture f = new com.pangate.gateway.test.LoopFixture();
+    EmbeddedChannel ch = channel(true);
+    com.pangate.gateway.session.Session s = f.tracker.admit(ch, f.loop, java.net.InetAddress.getLoopbackAddress());
+    s.activate(new com.pangate.gateway.session.Session.Identity("t1", "t1:u1", "d1", "ios", "1.0",
+        java.util.Set.of()), "CONN", 0L, f.wallNow(), f.wallNow() + 3600, 1, java.util.List.of());
+    s.traced(traced);
+    return ch;
+  }
+
+  @Test
+  void tracedSessionLogsFramesWithHashedPrincipalOnly() {
+    EmbeddedChannel ch = sessionChannel(true);
+    java.util.List<String> lines = traceLines(() -> {
+      ch.writeInbound(io.netty.buffer.Unpooled.wrappedBuffer(
+          Frame.newBuilder().setType(FrameType.FRAME_TYPE_PING).build().toByteArray()));
+      ch.writeOutbound(Frame.newBuilder().setType(FrameType.FRAME_TYPE_PONG).build());
+    });
+    assertThat(lines).hasSize(2);
+    assertThat(lines.get(0)).contains("in PING");
+    assertThat(lines.get(1)).contains("out PONG");
+    assertThat(lines).noneMatch(l -> l.contains("t1:u1"));
+  }
+
+  @Test
+  void untracedSessionLogsNothing() {
+    EmbeddedChannel ch = sessionChannel(false);
+    assertThat(traceLines(() -> ch.writeInbound(io.netty.buffer.Unpooled.wrappedBuffer(
+        Frame.newBuilder().setType(FrameType.FRAME_TYPE_PING).build().toByteArray())))).isEmpty();
+  }
 }

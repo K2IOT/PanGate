@@ -102,3 +102,8 @@ management:
         liveness:
           include: eventLoopLag
           additional-path: "server:/live"
+
+# Kill switch trace.principal logs here (spec §7.8); keep at INFO even when the root level is raised.
+logging:
+  level:
+    pangate.trace: INFO

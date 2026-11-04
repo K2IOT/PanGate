@@ -176,6 +176,7 @@ public final class ControlEventConsumer {
       case ControlKeys.RevokeKey k -> each(h -> h.onRevokeRemoved(k.revocationKey()));
       case ControlKeys.CellMapKey k -> each(h -> h.onCellMapRemoved(k.tenant()));
       case ControlKeys.TenantCfgKey k -> each(h -> h.onTenantCfgRemoved(k.scope(), k.id()));
+      case ControlKeys.TraceKey k -> each(h -> h.onTraceRemoved(k.principal()));
       case ControlKeys.Unknown u -> badRecords.increment();
     }
     count("tombstone");
@@ -203,6 +204,14 @@ public final class ControlEventConsumer {
       case TENANT_CFG -> {
         each(h -> h.onTenantCfg(e.getTenantCfg()));
         count("tenantcfg");
+      }
+      case TRACE -> {
+        if (e.getTrace().getPrincipalId().isEmpty()) {
+          badRecords.increment();
+          return;
+        }
+        each(h -> h.onTrace(e.getTrace().getPrincipalId(), e.getIssuedAtMs(), e.getTrace().getExpiresAtMs()));
+        count("trace");
       }
       case EVENT_NOT_SET -> badRecords.increment();
     }

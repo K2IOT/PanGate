@@ -8,6 +8,7 @@
 //   tenantcfg:fleet                 TenantCfg{scope=FLEET}
 //   tenantcfg:cell:<cell>           TenantCfg{scope=CELL}
 //   tenantcfg:tenant:<tenant>       TenantCfg{scope=TENANT}
+//   trace:<principal>               TracePrincipal (kill switch trace.principal, fleet scope, spec §7.8)
 syntax = "proto3";
 
 package pangate.v1;
@@ -20,6 +21,7 @@ message ControlEvent {
     Revoke revoke = 1;
     CellMap cell_map = 2;
     TenantCfg tenant_cfg = 3;
+    TracePrincipal trace = 5;
   }
   int64 issued_at_ms = 4;
 }
@@ -36,6 +38,13 @@ message Revoke {
 message DeviceRef {
   string principal_id = 1;
   string device_id = 2;
+}
+
+// Logs and traces every session of one principal (spec §7.8). Effective until
+// min(expires_at_ms if set, issued_at_ms + 15 min).
+message TracePrincipal {
+  string principal_id = 1;
+  int64 expires_at_ms = 2;
 }
 
 message CellMap {

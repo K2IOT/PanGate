@@ -79,6 +79,8 @@ public final class Session extends WheelNode implements Deadlined {
   private boolean dirty;
   // Counted in the node's tenant connection count (spec §4.6 step i); released on close.
   private boolean tenantReserved;
+  // Kill switch trace.principal is on for this session's principal (spec §7.8).
+  private boolean traced;
   // Since when the channel is unwritable (spec §7.4); MAX while writable.
   private long unwritableSinceSec = Long.MAX_VALUE;
   private long recycleAtSec = Long.MAX_VALUE;
@@ -426,6 +428,14 @@ public final class Session extends WheelNode implements Deadlined {
     if (state != SessionState.CLOSED) {
       loop.wheel().schedule(this, nextDeadlineSec());
     }
+  }
+
+  public boolean traced() {
+    return traced;
+  }
+
+  public void traced(boolean value) {
+    traced = value;
   }
 
   public boolean tenantReserved() {

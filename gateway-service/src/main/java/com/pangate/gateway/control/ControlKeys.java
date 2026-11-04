@@ -6,7 +6,7 @@ import com.pangate.gateway.auth.ResumeTicketService;
 /** Parses gw.control record keys (contract in control.proto); used for tombstones, whose value is empty. */
 public final class ControlKeys {
 
-  public sealed interface Parsed permits RevokeKey, CellMapKey, TenantCfgKey, Unknown {}
+  public sealed interface Parsed permits RevokeKey, CellMapKey, TenantCfgKey, TraceKey, Unknown {}
 
   /** {@code revocationKey} is already in {@link RevocationList} form (jti hashed). */
   public record RevokeKey(String revocationKey) implements Parsed {}
@@ -14,6 +14,8 @@ public final class ControlKeys {
   public record CellMapKey(String tenant) implements Parsed {}
 
   public record TenantCfgKey(Scope scope, String id) implements Parsed {}
+
+  public record TraceKey(String principal) implements Parsed {}
 
   public record Unknown(String key) implements Parsed {}
 
@@ -44,6 +46,9 @@ public final class ControlKeys {
     }
     if (key.startsWith("tenantcfg:tenant:") && key.length() > 17) {
       return new TenantCfgKey(Scope.SCOPE_TENANT, key.substring(17));
+    }
+    if (key.startsWith("trace:") && key.length() > 6) {
+      return new TraceKey(key.substring(6));
     }
     return new Unknown(key);
   }

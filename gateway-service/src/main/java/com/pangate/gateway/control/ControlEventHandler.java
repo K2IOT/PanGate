@@ -18,4 +18,9 @@ public interface ControlEventHandler {
   default void onTenantCfg(TenantCfg cfg) {}
 
   default void onTenantCfgRemoved(Scope scope, String id) {}
+
+  /** Kill switch trace.principal (spec §7.8); {@code expiresAtMs} 0 = not set. */
+  default void onTrace(String principal, long issuedAtMs, long expiresAtMs) {}
+
+  default void onTraceRemoved(String principal) {}
 }

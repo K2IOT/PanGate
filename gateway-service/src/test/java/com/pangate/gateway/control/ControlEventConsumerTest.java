@@ -51,6 +51,16 @@ class ControlEventConsumerTest {
     public void onCellMapRemoved(String tenant) {
       seen.add("cellmap- " + tenant);
     }
+
+    @Override
+    public void onTrace(String principal, long issuedAtMs, long expiresAtMs) {
+      seen.add("trace " + principal + " " + issuedAtMs + " " + expiresAtMs);
+    }
+
+    @Override
+    public void onTraceRemoved(String principal) {
+      seen.add("trace- " + principal);
+    }
   };
 
   private void start(long endOffset, Duration catchUpLimit) {
@@ -132,5 +142,17 @@ class ControlEventConsumerTest {
 
     await().atMost(Duration.ofSeconds(5)).until(() -> !exits.isEmpty());
     assertThat(exits.get(0)).startsWith("1:").contains("bad config");
+  }
+
+  @Test
+  void traceKeyAppliesAndTombstoneRemoves() {
+    add(0, "trace:t1:u1", com.pangate.contracts.v1.ControlEvent.newBuilder().setIssuedAtMs(5)
+        .setTrace(com.pangate.contracts.v1.TracePrincipal.newBuilder().setPrincipalId("t1:u1").setExpiresAtMs(9))
+        .build().toByteArray());
+    add(1, "trace:t1:u1", null);
+    start(2, Duration.ofMinutes(5));
+
+    await().atMost(Duration.ofSeconds(5)).until(node::controlCaughtUp);
+    assertThat(seen).containsExactly("trace t1:u1 5 9", "trace- t1:u1");
   }
 }

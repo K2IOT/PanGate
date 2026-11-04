@@ -54,6 +54,17 @@ public class EdgeConfig {
     }), Duration.ofSeconds(10));
   }
 
+  /** Kill switch trace.principal (spec §7.8): a control handler and a session listener. */
+  @Bean
+  com.pangate.gateway.trace.TraceTargets traceTargets(SecretSource secrets,
+      com.pangate.gateway.session.PrincipalIndex principals, com.pangate.gateway.loop.LoopRegistry loops,
+      TickScheduler tick) {
+    com.pangate.gateway.trace.TraceTargets t = new com.pangate.gateway.trace.TraceTargets(principals, loops,
+        com.pangate.gateway.trace.PrincipalHasher.load(secrets), System::currentTimeMillis);
+    tick.scheduleAtFixedRate(t::sweepExpired, Duration.ofSeconds(10));
+    return t;
+  }
+
   /** Spec §7.7: check cert and key every {@code tls.reload-interval}; new connections get the new certificate. */
   @Bean
   ScheduledFuture<?> tlsReload(GatewayProperties p, SslContextProvider tls, TickScheduler tick,
