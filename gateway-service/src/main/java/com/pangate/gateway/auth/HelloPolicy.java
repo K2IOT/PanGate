@@ -53,6 +53,11 @@ public final class HelloPolicy {
     return Optional.empty();
   }
 
+  /** Revocation only: re-checked after the session became visible to the enforcer (closes the HELLO/revoke race). */
+  public boolean isRevoked(String principal, String device, long jtiHash) {
+    return revocations.isRevoked(principal, device, jtiHash, wallMillis.getAsLong());
+  }
+
   /** Checks c–g only (REAUTH applies the rate limit itself, before the ES256 verify it protects). */
   public Optional<Rejection> checkPolicy(Candidate c) {
     if (!cell.equals(c.ticketCell()) || !cells.servesTenant(c.tenant())) {

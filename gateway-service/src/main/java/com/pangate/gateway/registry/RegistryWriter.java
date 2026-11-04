@@ -44,16 +44,54 @@ public final class RegistryWriter implements SessionListener {
     return nodeId + "|" + epoch + "|" + connectedAtMs + "|" + (platform == null ? "" : platform);
   }
 
-  /** Returns the entries replaced in single-session mode (empty otherwise). Failures are retried. */
+  /**
+   * Returns the entries replaced in single-session mode (empty otherwise). Called on the session's loop; failures
+   * are retried, each retry again on the loop so it is ordered with close (no entry re-created after HDEL).
+   */
   public CompletionStage<Map<String, String>> register(Session s, boolean single) {
-    CompletionStage<Map<String, String>> st = registerOnce(s, single);
+    CompletableFuture<Map<String, String>> st = send(s, single);
     st.whenComplete((v, e) -> {
       if (e != null) {
         redisErrors.increment();
-        retry.retryLater("register", () -> registerOnce(s, single), () -> s.state() == SessionState.ACTIVE || s.state() == SessionState.DRAINING);
+        retry.retryLater("register", () -> retryOnLoop(s, single), () -> wanted(s));
       }
     });
     return st;
+  }
+
+  private static boolean wanted(Session s) {
+    return s.state() == SessionState.ACTIVE || s.state() == SessionState.DRAINING;
+  }
+
+  /** On the owning loop: dispatches the script and remembers it so close can HDEL again after it lands. */
+  private CompletableFuture<Map<String, String>> send(Session s, boolean single) {
+    CompletableFuture<Map<String, String>> cf = registerOnce(s, single).toCompletableFuture();
+    s.registryWrite(cf);
+    // Forget it once done (on the loop): an idle session must not keep the future and its result.
+    cf.whenComplete((v, e) -> s.loop().eventLoop().execute(() -> {
+      if (s.registryWrite() == cf) {
+        s.registryWrite(null);
+      }
+    }));
+    return cf;
+  }
+
+  private CompletionStage<?> retryOnLoop(Session s, boolean single) {
+    CompletableFuture<Object> done = new CompletableFuture<>();
+    s.loop().eventLoop().execute(() -> {
+      if (!wanted(s)) {
+        done.complete(null);
+        return;
+      }
+      send(s, single).whenComplete((v, e) -> {
+        if (e != null) {
+          done.completeExceptionally(e);
+        } else {
+          done.complete(null);
+        }
+      });
+    });
+    return done;
   }
 
   private CompletionStage<Map<String, String>> registerOnce(Session s, boolean single) {
@@ -101,10 +139,22 @@ public final class RegistryWriter implements SessionListener {
     register(s, false);
   }
 
+  /**
+   * HDEL now, and once more after an in-flight register lands: a register can reach Redis after this HDEL (its
+   * EVALSHA→EVAL fallback after a Redis restart is sent from a Lettuce thread) and would otherwise leave a stale
+   * entry for a closed connection.
+   */
   @Override
   public void closed(Session s) {
-    if (s.connId() != null) {
-      unregister(s.identity().principalId(), s.connId());
+    if (s.connId() == null) {
+      return;
+    }
+    String principal = s.identity().principalId();
+    String connId = s.connId();
+    unregister(principal, connId);
+    CompletableFuture<?> inFlight = s.registryWrite();
+    if (inFlight != null && !inFlight.isDone()) {
+      inFlight.whenComplete((v, e) -> unregister(principal, connId));
     }
   }
 }

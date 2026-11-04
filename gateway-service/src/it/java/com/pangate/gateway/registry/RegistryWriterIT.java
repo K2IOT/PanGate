@@ -58,9 +58,15 @@ class RegistryWriterIT {
 
   @Test
   void registerWritesValueWithNodeEpochAndPlatform() throws Exception {
-    get(writer.register(session("t1:u1", "C1", 1234), false));
+    Session s = session("t1:u1", "C1", 1234);
+    get(writer.register(s, false));
 
     assertThat(fx.sync.hget("reg:{t1:u1}", "C1")).isEqualTo("n1|7|1234|android");
+    // The finished write is not kept for the life of the session (idle heap budget).
+    await().atMost(Duration.ofSeconds(2)).until(() -> {
+      ((io.netty.channel.embedded.EmbeddedChannel) s.channel()).runPendingTasks();
+      return s.registryWrite() == null;
+    });
   }
 
   @Test
@@ -97,6 +103,7 @@ class RegistryWriterIT {
   @Test
   void redisDownGoesToRetryQueue() throws Exception {
     Session s = session("t1:u4", "C1", 1);
+    io.netty.channel.embedded.EmbeddedChannel loop = (io.netty.channel.embedded.EmbeddedChannel) s.channel();
     RedisFixture.pause();
     try {
       writer.activated(s);
@@ -105,6 +112,40 @@ class RegistryWriterIT {
       RedisFixture.unpause();
     }
 
-    await().atMost(Duration.ofSeconds(10)).until(() -> fx.sync.hexists("reg:{t1:u4}", "C1"));
+    await().atMost(Duration.ofSeconds(10)).until(() -> {
+      loop.runPendingTasks();  // retries run on the session's loop
+      return fx.sync.hexists("reg:{t1:u4}", "C1");
+    });
+  }
+  @Test
+  void closeDuringInFlightRegisterLeavesNoEntry() throws Exception {
+    // After a Redis restart the script cache is empty: EVALSHA answers NOSCRIPT and the EVAL fallback goes out
+    // after the close's HDEL. Pausing Redis while both are sent makes that order deterministic.
+    RedisFixture slow = new RedisFixture(Duration.ofSeconds(10));
+    try {
+      NodeState node = new NodeState();
+      node.nodeId("n1");
+      node.epoch(7);
+      GatewayMetrics metrics = new GatewayMetrics(new SimpleMeterRegistry());
+      RegistryWriter w = new RegistryWriter(slow.redis, node,
+          new RetryQueue((r, d) -> sched.schedule(r, d, TimeUnit.MILLISECONDS), 10, metrics), metrics);
+      slow.sync.scriptFlush();
+      Session s = session("t1:u5", "C1", 1);
+
+      RedisFixture.pause();
+      try {
+        w.activated(s);
+        s.close(com.pangate.gateway.protocol.CloseCode.NORMAL, "bye");
+        w.closed(s);
+        Thread.sleep(300);
+      } finally {
+        RedisFixture.unpause();
+      }
+
+      Thread.sleep(1_500);
+      assertThat(slow.sync.hexists("reg:{t1:u5}", "C1")).isFalse();
+    } finally {
+      slow.close();
+    }
   }
 }

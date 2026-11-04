@@ -34,8 +34,10 @@ public final class JwtAuthFlow {
           if (again instanceof JwtResult.UnknownKid) {
             again = new JwtResult.Rejected("unknown kid " + unknown.kid());
           }
-          // Resume reads before the callback: it may pause them again (HELLO waits for the seq read).
-          if (ch.isActive()) {
+          // Resume reads before the callback: it may pause them again (HELLO waits for the seq read). A session
+          // paused for Kafka back-pressure stays paused until UpstreamPressure resumes it.
+          com.pangate.gateway.session.Session s = ch.attr(com.pangate.gateway.session.Session.KEY).get();
+          if (ch.isActive() && (s == null || !s.upstreamPaused())) {
             ch.config().setAutoRead(true);
           }
           try {

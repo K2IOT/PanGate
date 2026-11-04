@@ -204,4 +204,19 @@ class SessionHandlerTest {
 
     assertThat(f.channel.config().isAutoRead()).isFalse();
   }
+  @Test
+  void reauthWithUnknownKidKeepsPressurePausedSessionPaused() throws Exception {
+    ECKey rotated = AuthFixture.newKey();
+    auth.published.add(rotated);
+    session.upstreamPaused(true);
+    f.channel.config().setAutoRead(false);
+
+    f.channel.writeInbound(Frame.newBuilder().setType(FrameType.FRAME_TYPE_REAUTH)
+        .setPayload(Reauth.newBuilder().setJwt(auth.jwt(rotated, "t1:u1", "d1", f.now())).build().toByteString())
+        .build());
+    f.channel.runPendingTasks();
+
+    assertThat(f.channel.config().isAutoRead()).isFalse();
+    assertThat(session.upstreamPaused()).isTrue();
+  }
 }

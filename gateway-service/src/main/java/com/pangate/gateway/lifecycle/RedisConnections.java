@@ -44,13 +44,22 @@ public final class RedisConnections implements AutoCloseable {
     if (resources == null) {
       resources = DefaultClientResources.builder().ioThreadPoolSize(2).computationThreadPoolSize(2).build();
     }
-    RedisClusterAsyncCommands<String, String> reg = open(cfg.registryUri());
-    RedisClusterAsyncCommands<String, String> st = cfg.stateUri().equals(cfg.registryUri()) ? reg : open(cfg.stateUri());
-    state = st;
-    registry = reg;
+    List<AutoCloseable> attempt = new ArrayList<>();
+    try {
+      RedisClusterAsyncCommands<String, String> reg = open(cfg.registryUri(), attempt);
+      RedisClusterAsyncCommands<String, String> st =
+          cfg.stateUri().equals(cfg.registryUri()) ? reg : open(cfg.stateUri(), attempt);
+      closeables.addAll(attempt);
+      state = st;
+      registry = reg;
+    } catch (RuntimeException e) {
+      // A retried startup must not accumulate auto-reconnecting connections from failed attempts.
+      closeAll(attempt);
+      throw e;
+    }
   }
 
-  private RedisClusterAsyncCommands<String, String> open(String uri) {
+  private RedisClusterAsyncCommands<String, String> open(String uri, List<AutoCloseable> attempt) {
     Duration timeout = cfg.commandTimeout();
     TimeoutOptions timeouts = TimeoutOptions.enabled(timeout);
     if (cfg.topology() == RedisTopology.CLUSTER) {
@@ -64,9 +73,14 @@ public final class RedisConnections implements AutoCloseable {
               .enableAllAdaptiveRefreshTriggers()
               .build())
           .build());
-      var conn = client.connect();
-      track(conn, client::shutdown);
-      return conn.async();
+      try {
+        var conn = client.connect();
+        track(attempt, conn, client::shutdown);
+        return conn.async();
+      } catch (RuntimeException e) {
+        client.shutdown();
+        throw e;
+      }
     }
     RedisClient client = RedisClient.create(resources, RedisURI.create(uri));
     client.setOptions(ClientOptions.builder()
@@ -76,7 +90,7 @@ public final class RedisConnections implements AutoCloseable {
         .build());
     try {
       var conn = client.connect();
-      track(conn, client::shutdown);
+      track(attempt, conn, client::shutdown);
       return conn.async();
     } catch (RuntimeException e) {
       client.shutdown();
@@ -84,9 +98,20 @@ public final class RedisConnections implements AutoCloseable {
     }
   }
 
-  private void track(StatefulConnection<?, ?> conn, Runnable shutdown) {
-    closeables.add(conn::close);
-    closeables.add(shutdown::run);
+  private static void track(List<AutoCloseable> into, StatefulConnection<?, ?> conn, Runnable shutdown) {
+    into.add(conn::close);
+    into.add(shutdown::run);
+  }
+
+  private static void closeAll(List<AutoCloseable> list) {
+    for (AutoCloseable c : list) {
+      try {
+        c.close();
+      } catch (Exception ignored) {
+        // best effort
+      }
+    }
+    list.clear();
   }
 
   public RedisClusterAsyncCommands<String, String> registry() {
@@ -113,14 +138,7 @@ public final class RedisConnections implements AutoCloseable {
   public synchronized void close() {
     registry = null;
     state = null;
-    for (AutoCloseable c : closeables) {
-      try {
-        c.close();
-      } catch (Exception ignored) {
-        // best effort on shutdown
-      }
-    }
-    closeables.clear();
+    closeAll(closeables);
     if (resources != null) {
       resources.shutdown(0, 2, java.util.concurrent.TimeUnit.SECONDS);
       resources = null;

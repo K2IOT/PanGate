@@ -70,6 +70,8 @@ public final class Session extends WheelNode implements Deadlined {
   private long upstreamWindowSec;
   private boolean upstreamWindowStarted;
   private boolean upstreamPaused;
+  // The last registry register sent for this session (RegistryWriter); null once known to be done.
+  private java.util.concurrent.CompletableFuture<?> registryWrite;
   private String closeReason;
 
   public Session(LoopContext loop, Channel channel, long sessionKey, long acceptedAtSec, LimitsHolder limits,
@@ -288,6 +290,15 @@ public final class Session extends WheelNode implements Deadlined {
 
   public boolean upstreamPaused() {
     return upstreamPaused;
+  }
+
+  public java.util.concurrent.CompletableFuture<?> registryWrite() {
+    return registryWrite;
+  }
+
+  public void registryWrite(java.util.concurrent.CompletableFuture<?> write) {
+    checkLoop();
+    registryWrite = write;
   }
 
   /** Resuming counts as a sign of life: the heartbeat clock restarts from now. */

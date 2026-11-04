@@ -81,7 +81,10 @@ class GatewayLocalIT {
         "--gateway.listeners.ws.port=" + p.ws(),
         "--gateway.listeners.tcp.port=" + p.tcp(),
         "--server.port=" + p.mgmt(),
-        "--gateway.io.threads=4"));
+        "--gateway.io.threads=4",
+        // Several gateways run at once in this class: one node id each, or the lease fences the older one
+        // (spec §6.1). A restart on the same ports keeps its node id.
+        "--gateway.node-id=gw-local-it-" + p.ws()));
     args.addAll(InfraContainers.gatewayArgs());
     return new SpringApplicationBuilder(GatewayApplication.class).profiles("local").run(args.toArray(String[]::new));
   }

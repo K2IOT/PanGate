@@ -201,6 +201,12 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
         t.authJtiHash(), t.topicPatterns());
     ctx.channel().attr(ChannelAttrs.AUTHENTICATED).set(true);
     tracker.onActivated(session);  // listeners: registry write and lifecycle CONNECTED, in parallel with the seq read
+    // A revoke handled between the policy check and indexing found no session to close: check once more now.
+    if (policy.isRevoked(t.principal(), t.device(), t.authJtiHash())) {
+      metrics.handshake("revoked");
+      session.close(CloseCode.REVOKED, CloseCode.REVOKED.name());
+      return;
+    }
     // CONNECTED waits for seq (≤ 200 ms); frames the client pipelines meanwhile stay held, reads pause.
     ctx.channel().config().setAutoRead(false);
     CompletionStage<OptionalLong> read;

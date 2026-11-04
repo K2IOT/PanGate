@@ -420,4 +420,20 @@ class HelloAuthHandlerTest {
 
     assertThat(send(jwtHello(auth.jwt("t1:u1", "d1", f.now()), "d1")).getHeartbeatSec()).isEqualTo(45);
   }
+  @Test
+  void revokeLandingBetweenPolicyCheckAndIndexingStillCloses() throws Exception {
+    // gw-ctl adds the revocation after HELLO's policy check but before the session is visible in PrincipalIndex.
+    f.listeners.add(new com.pangate.gateway.session.SessionListener() {
+      @Override
+      public void activated(Session s) {
+        f.revocations.add(com.pangate.gateway.control.RevocationList.principalKey("t1:u1"), Long.MAX_VALUE);
+      }
+    });
+
+    f.channel.writeInbound(bytes(hello(jwtHello(auth.jwt("t1:u1", "d1", f.now()), "d1"))));
+    List<Frame> out = outbound();
+
+    assertThat(out).extracting(Frame::getType).doesNotContain(FrameType.FRAME_TYPE_CONNECTED);
+    assertThat(session.closeCode().code()).isEqualTo(4003);
+  }
 }

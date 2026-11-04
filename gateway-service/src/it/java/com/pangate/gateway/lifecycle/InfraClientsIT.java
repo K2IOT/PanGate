@@ -85,4 +85,27 @@ class InfraClientsIT {
         .filter(v -> !v.artifactId().startsWith("netty-tcnative")).toList())
         .isNotEmpty().allSatisfy(v -> assertThat(v.artifactVersion()).startsWith("4.2.20"));
   }
+  @Test
+  void failedPartialConnectsDoNotLeakConnections() throws Exception {
+    io.lettuce.core.RedisClient probe = io.lettuce.core.RedisClient.create(InfraContainers.redisUri());
+    try (var conn = probe.connect()) {
+      java.util.function.IntSupplier clients = () -> conn.sync().clientList().split("\n").length;
+      int before = clients.getAsInt();
+      RedisConnections redis = new RedisConnections(new GatewayProperties.Redis(RedisTopology.STANDALONE,
+          InfraContainers.redisUri(), "redis://localhost:1", Duration.ofSeconds(1)));
+      for (int i = 0; i < 3; i++) {
+        try {
+          redis.connect();
+        } catch (RuntimeException expected) {
+          // state endpoint unreachable
+        }
+      }
+
+      org.awaitility.Awaitility.await().atMost(Duration.ofSeconds(5))
+          .until(() -> clients.getAsInt() == before);
+      redis.close();
+    } finally {
+      probe.shutdown();
+    }
+  }
 }
