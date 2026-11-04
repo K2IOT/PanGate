@@ -156,6 +156,16 @@ public final class GatewayClient implements AutoCloseable {
     handler.pushListener = listener;
   }
 
+  /** Stops reading from the socket (a slow consumer): the gateway's writes back up into its buffers. */
+  public void pauseReading() {
+    channel.config().setAutoRead(false);
+  }
+
+  public void resumeReading() {
+    channel.config().setAutoRead(true);
+    channel.read();
+  }
+
   /** ACK for RELIABLE / ORDERED pushes (at most 32 ids per frame). */
   public void ack(String... msgIds) {
     send(Frame.newBuilder().setType(FrameType.FRAME_TYPE_ACK)

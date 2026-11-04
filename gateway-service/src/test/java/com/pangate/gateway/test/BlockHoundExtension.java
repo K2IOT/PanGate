@@ -24,6 +24,10 @@ public final class BlockHoundExtension implements BeforeAllCallback {
       // max.block.ms=0: send() never waits for metadata or buffer space; it may only take the accumulator's
       // short-held locks, which BlockHound would report as parking under contention.
       builder.allowBlockingCallsInside("org.apache.kafka.clients.producer.KafkaProducer", "send");
+      // Lettuce's command dispatch takes SharedLock (a ReentrantLock held only to enqueue the command); under
+      // contention it parks for microseconds. Caught by GatewayProtectionIT (HDEL on close under load).
+      builder.allowBlockingCallsInside("io.lettuce.core.protocol.SharedLock", "incrementWriters");
+      builder.allowBlockingCallsInside("io.lettuce.core.protocol.SharedLock", "decrementWriters");
       builder.nonBlockingThreadPredicate(p -> p.or(t -> t.getName().startsWith("gw-io-"))).install();
       installed = true;
     }

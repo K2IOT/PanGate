@@ -140,4 +140,16 @@ class GatewayClientTest {
       org.awaitility.Awaitility.await().atMost(T).until(() -> got.size() == 1);
     }
   }
+
+  @Test
+  void pausedClientReadsNothingUntilResumed() {
+    try (GatewayClient c = GatewayClient.connect(ws(), ClientTls.insecure(), T)) {
+      c.hello(Hellos.jwt("x", "d1"), T);
+      c.pauseReading();
+      c.subscribe("t1:x");  // the fake server answers with a PUSH
+      assertThatThrownBy(() -> c.awaitPush(Duration.ofMillis(300))).isInstanceOf(IllegalStateException.class);
+      c.resumeReading();
+      assertThat(c.awaitPush(T).getMsgId()).isEqualTo("p1");
+    }
+  }
 }
