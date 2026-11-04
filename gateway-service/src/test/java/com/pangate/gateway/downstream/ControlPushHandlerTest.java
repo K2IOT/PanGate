@@ -105,4 +105,16 @@ class ControlPushHandlerTest {
     assertThat(a.state()).isEqualTo(SessionState.ACTIVE);
     assertThat(f.meters.counter("gw.control.push", "op", "refresh_config").count()).isEqualTo(1);
   }
+
+  @Test
+  void kickTieOnConnectedAtIsBrokenByConnId() {
+    Session a = session("t1:u1", 100);
+    Session b = session("t1:u1", 100);
+    String newer = a.connId().compareTo(b.connId()) > 0 ? a.connId() : b.connId();
+    handler.kick(f.loop, "t1:u1", newer, 100);
+    Session older = a.connId().equals(newer) ? b : a;
+    Session kept = older == a ? b : a;
+    assertThat(older.closeCode()).isEqualTo(CloseCode.DUPLICATE_SESSION);
+    assertThat(kept.state()).isEqualTo(SessionState.ACTIVE);
+  }
 }

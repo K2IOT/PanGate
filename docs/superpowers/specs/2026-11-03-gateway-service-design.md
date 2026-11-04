@@ -599,6 +599,14 @@ Khi Lua registry trả về entry cũ và tenant đặt `singleSession=true`:
 - Entry cũ thuộc node này (`nodeId` trùng, `epoch` trùng): kick local qua `PrincipalIndex`.
 - Entry cũ thuộc node khác: `KickClient` gửi `PushRequest{kind=CONTROL, target=principal, control=KICK{new_conn_id, connected_at_ms}}` qua một stream `PushService.SendStream` dùng lâu dài tới Push API (mTLS). Retry 2 lần (100 ms, 400 ms) rồi bỏ, đếm `gw_kick_failures_total`.
 
+**Thứ tự "cũ hơn"** (cập nhật sau review M2b):
+- So theo `(connectedAtMs, connId)`: session nào kết nối sớm hơn là session cũ hơn. Nếu cùng millisecond, session có `connId` nhỏ hơn (theo thứ tự chữ) là cũ hơn. Thứ tự này là toàn phần, nên không có cặp session nào cùng được giữ lại.
+- KICK đóng mọi session cũ hơn `(connected_at_ms, new_conn_id)`.
+- Lần register có thể đến Redis không theo thứ tự kết nối, vì retry hoặc độ trễ giữa các node. Khi đó, nếu Lua trả về một entry mới hơn chính session đang register:
+  - Gateway ghi lại entry mới hơn đó (`HSET`).
+  - Gateway đóng chính session của mình với code 4012.
+  - Chỉ các entry cũ hơn mới bị kick.
+
 Ở dev, đích là `gateway-devtools fake-pushapi`. Ở local, `gateway.push-api.enabled=false`: chỉ kick các entry cũ nằm trên chính node (luôn đúng vì local chỉ có một node); entry thuộc node khác bị bỏ qua kèm WARN.
 
 ### 6.7 SeqReader và seqepochs

@@ -182,4 +182,22 @@ class RegistryWriterIT {
     ((io.netty.channel.embedded.EmbeddedChannel) second.channel()).runPendingTasks();
     assertThat(replaced).isEmpty();
   }
+
+  @Test
+  void olderSessionRegisteringLastIsKickedAndNewerEntryRestored() throws Exception {
+    tenants.apply(com.pangate.contracts.v1.TenantCfg.newBuilder()
+        .setScope(com.pangate.contracts.v1.Scope.SCOPE_TENANT).setScopeId("t1")
+        .setLimits(com.pangate.contracts.v1.TenantLimits.newBuilder().setSingleSession(true)).build());
+    Session newer = session("t1:race", "C2", 200);
+    get(writer.register(newer, true));
+    Session older = session("t1:race", "C1", 100);  // its register reaches Redis last (retry, jitter)
+    get(writer.register(older, true));
+    await().atMost(Duration.ofSeconds(5)).until(() -> {
+      ((io.netty.channel.embedded.EmbeddedChannel) older.channel()).runPendingTasks();
+      return older.state() == com.pangate.gateway.session.SessionState.CLOSED;
+    });
+    assertThat(older.closeCode()).isEqualTo(com.pangate.gateway.protocol.CloseCode.DUPLICATE_SESSION);
+    await().atMost(Duration.ofSeconds(5)).until(() -> "n1|7|200|android".equals(fx.sync.hget("reg:{t1:race}", "C2")));
+    assertThat(replaced).isEmpty();  // the newer entry is never handed to the kicker
+  }
 }

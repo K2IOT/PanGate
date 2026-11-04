@@ -78,13 +78,7 @@ public final class RegistryWriter implements SessionListener {
     CompletableFuture<Map<String, String>> cf = registerOnce(s, single).toCompletableFuture();
     s.registryWrite(cf);
     if (single) {
-      cf.thenAccept(prev -> {
-        Map<String, String> others = new HashMap<>(prev);
-        others.remove(s.connId());
-        if (!others.isEmpty()) {
-          s.loop().eventLoop().execute(() -> onReplaced.accept(s, others));
-        }
-      });
+      cf.thenAccept(prev -> replaced(s, prev));
     }
     // Forget it once done (on the loop): an idle session must not keep the future and its result.
     cf.whenComplete((v, e) -> s.loop().eventLoop().execute(() -> {
@@ -93,6 +87,54 @@ public final class RegistryWriter implements SessionListener {
       }
     }));
     return cf;
+  }
+
+  /**
+   * Registers can reach Redis out of connection order (retries, jitter between nodes). An entry newer than this
+   * session must win: it is written back and this session is the one kicked (spec §6.6). Older entries go to
+   * {@code onReplaced}.
+   */
+  private void replaced(Session s, Map<String, String> prev) {
+    Map<String, String> older = new HashMap<>();
+    Map<String, String> newer = new HashMap<>();
+    prev.forEach((connId, value) -> {
+      if (!connId.equals(s.connId())) {
+        long at = connectedAtMs(value);
+        boolean isNewer = at >= 0
+            && com.pangate.gateway.downstream.ControlPushHandler.older(s.connectedAtMs(), s.connId(), at, connId);
+        (isNewer ? newer : older).put(connId, value);
+      }
+    });
+    if (!newer.isEmpty()) {
+      String key = RegistryKeys.reg(s.identity().principalId());
+      try {
+        redis.registry().hset(key, newer).whenComplete((v, e) -> {
+          if (e != null) {
+            redisErrors.increment();
+          }
+        });
+      } catch (RuntimeException e) {
+        redisErrors.increment();
+      }
+      s.loop().eventLoop().execute(() -> {
+        if (wanted(s)) {
+          s.close(com.pangate.gateway.protocol.CloseCode.DUPLICATE_SESSION, "KICKED");
+        }
+      });
+    }
+    if (!older.isEmpty()) {
+      s.loop().eventLoop().execute(() -> onReplaced.accept(s, older));
+    }
+  }
+
+  /** {@code nodeId|epoch|connectedAtMs|platform} → connectedAtMs, or -1 if malformed. */
+  static long connectedAtMs(String value) {
+    String[] parts = value.split("\\|", -1);
+    try {
+      return parts.length >= 3 ? Long.parseLong(parts[2]) : -1;
+    } catch (NumberFormatException e) {
+      return -1;
+    }
   }
 
   private CompletionStage<?> retryOnLoop(Session s, boolean single) {

@@ -66,11 +66,19 @@ public final class ControlPushHandler {
     }
   }
 
-  /** Closes 4012 every session of the principal other than {@code newConnId} that connected before it. */
+  /**
+   * Single-session order (spec §6.6): a connection is older when it connected earlier; on the same millisecond the
+   * smaller connId (ULID-like, time-sortable) is older. Total, so two sessions never spare each other.
+   */
+  public static boolean older(long atMs, String connId, long otherAtMs, String otherConnId) {
+    return atMs < otherAtMs || (atMs == otherAtMs && connId.compareTo(otherConnId) < 0);
+  }
+
+  /** Closes 4012 every session of the principal that is {@link #older} than {@code newConnId}. */
   public void kick(LoopContext loop, String principal, String newConnId, long connectedAtMs) {
     kick.increment();
     for (Session s : sessions(loop, principal)) {
-      if (!s.connId().equals(newConnId) && s.connectedAtMs() < connectedAtMs) {
+      if (!s.connId().equals(newConnId) && older(s.connectedAtMs(), s.connId(), connectedAtMs, newConnId)) {
         s.close(CloseCode.DUPLICATE_SESSION, "KICKED");
       }
     }
