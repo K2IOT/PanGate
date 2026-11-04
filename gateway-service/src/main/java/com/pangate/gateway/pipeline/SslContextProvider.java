@@ -75,6 +75,7 @@ public final class SslContextProvider {
 
   private Contexts build() {
     long[] st = stat();
+    checkPair(tls);
     SslContext ws = build(tls, provider, "http/1.1");
     SslContext tcp;
     try {
@@ -92,6 +93,51 @@ public final class SslContextProvider {
           Files.getLastModifiedTime(tls.keyFile()).toMillis(), Files.size(tls.keyFile())};
     } catch (IOException e) {
       throw new IllegalStateException("Cannot stat TLS files " + tls.certFile() + ", " + tls.keyFile(), e);
+    }
+  }
+
+  /**
+   * OpenSSL binds the key only at handshake time, so a valid key that is not this certificate's would build a context
+   * that fails every handshake. Sign a nonce with the key and verify it with the certificate's public key first.
+   */
+  static void checkPair(GatewayProperties.Tls tls) {
+    try {
+      java.security.cert.X509Certificate cert;
+      try (java.io.InputStream in = Files.newInputStream(tls.certFile())) {
+        cert = (java.security.cert.X509Certificate) java.security.cert.CertificateFactory.getInstance("X.509")
+            .generateCertificate(in);
+      }
+      java.security.PrivateKey key;
+      try (org.bouncycastle.openssl.PEMParser pem = new org.bouncycastle.openssl.PEMParser(
+          Files.newBufferedReader(tls.keyFile(), java.nio.charset.StandardCharsets.US_ASCII))) {
+        Object o = pem.readObject();
+        org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter conv = new org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter();
+        if (o instanceof org.bouncycastle.openssl.PEMKeyPair kp) {
+          key = conv.getKeyPair(kp).getPrivate();
+        } else if (o instanceof org.bouncycastle.asn1.pkcs.PrivateKeyInfo info) {
+          key = conv.getPrivateKey(info);
+        } else {
+          throw new IllegalStateException("no private key in " + tls.keyFile());
+        }
+      }
+      String alg = key.getAlgorithm().equals("RSA") ? "SHA256withRSA" : "SHA256withECDSA";
+      byte[] nonce = new byte[32];
+      new java.security.SecureRandom().nextBytes(nonce);
+      java.security.Signature sign = java.security.Signature.getInstance(alg);
+      sign.initSign(key);
+      sign.update(nonce);
+      byte[] sig = sign.sign();
+      java.security.Signature verify = java.security.Signature.getInstance(alg);
+      verify.initVerify(cert.getPublicKey());
+      verify.update(nonce);
+      if (!verify.verify(sig)) {
+        throw new IllegalStateException(tls.keyFile() + " does not match the certificate " + tls.certFile());
+      }
+    } catch (IllegalStateException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new IllegalStateException("Cannot check TLS key " + tls.keyFile() + " against " + tls.certFile()
+          + " (does not match or unreadable): " + e.getMessage(), e);
     }
   }
 

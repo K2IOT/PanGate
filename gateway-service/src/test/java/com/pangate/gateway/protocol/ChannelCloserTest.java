@@ -114,4 +114,16 @@ class ChannelCloserTest {
     assertThat(CloseCode.OVERLOADED.defaultRetryAfterMs()).isEqualTo(15_000);
     assertThat(CloseCode.REVOKED.retryable()).isFalse();
   }
+
+  @Test
+  void httpTransportClosesWithAnHttpResponse() {
+    EmbeddedChannel ch = ready(ChannelAttrs.TransportKind.HTTP);
+
+    ChannelCloser.close(ch, CloseCode.GOING_AWAY, "DRAINED", 0);
+
+    io.netty.handler.codec.http.FullHttpResponse r = ch.readOutbound();
+    assertThat(r.status().code()).isEqualTo(503);
+    r.release();
+    assertThat(ch.isOpen()).isFalse();
+  }
 }

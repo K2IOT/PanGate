@@ -113,6 +113,10 @@ public final class UpgradeGuard extends ChannelInboundHandlerAdapter {
         ctx.pipeline().remove(name);
       }
     }
+    // A plain HTTP exchange from now on: closes (deadlines, drain) answer with an HTTP status, not a WS frame.
+    ctx.channel().attr(com.pangate.gateway.protocol.ChannelAttrs.TRANSPORT)
+        .set(com.pangate.gateway.protocol.ChannelAttrs.TransportKind.HTTP);
+    ctx.channel().attr(com.pangate.gateway.protocol.ChannelAttrs.PROTOCOL_READY).set(true);
     ctx.pipeline().addAfter(ctx.name(), path.equals("/v1/upstream") ? "httpUpstream" : "route", handler);
   }
 

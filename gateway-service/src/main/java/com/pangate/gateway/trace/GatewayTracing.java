@@ -81,10 +81,22 @@ public final class GatewayTracing {
 
   private SpanBuilder builder(String name, Frame f, String tenant, String principal, long enqueuedAtMs) {
     String tp = f.getHeadersOrDefault("traceparent", null);
-    Context parent = tp != null && TRACEPARENT.matcher(tp).matches()
+    Context remote = tp != null && TRACEPARENT.matcher(tp).matches()
         ? W3CTraceContextPropagator.getInstance().extract(Context.root(), tp, GETTER)
         : Context.root();
-    SpanBuilder b = tracer.spanBuilder(name).setParent(parent)
+    // A sampled caller: be its child. An unsampled one: the SDK's parent-based sampler would drop a child, but these
+    // spans are wanted anyway (trace.principal, NACK) — start a new trace and link to the caller's span instead.
+    SpanBuilder b = tracer.spanBuilder(name);
+    if (sampled(tp)) {
+      b.setParent(remote);
+    } else {
+      b.setNoParent();
+      io.opentelemetry.api.trace.SpanContext caller = Span.fromContext(remote).getSpanContext();
+      if (caller.isValid()) {
+        b.addLink(caller);
+      }
+    }
+    b
         .setAttribute(MSG_ID, f.getMsgId())
         .setAttribute(CLASS, f.getClass_().name())
         .setAttribute(TENANT, tenant)

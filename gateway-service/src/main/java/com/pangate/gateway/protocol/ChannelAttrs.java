@@ -5,7 +5,7 @@ import io.netty.util.AttributeKey;
 /** Per-channel flags shared by the pipeline handlers. */
 public final class ChannelAttrs {
 
-  public enum TransportKind { WS, TCP, SSE }
+  public enum TransportKind { WS, TCP, SSE, HTTP }
 
   public static final AttributeKey<TransportKind> TRANSPORT = AttributeKey.valueOf("pangate.transport");
   /** Application frames can flow: WS upgraded, or TLS + ALPN done on TCP. */

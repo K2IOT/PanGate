@@ -292,7 +292,7 @@ Start lỗi ở bất kỳ phase nào thì process exit (fail fast) và pod sẽ
   - Khi đang stream: một event `Frame(ERROR, fatal=true)`, rồi chunk cuối, rồi đóng.
 - `POST /v1/upstream`: header `Authorization: Ticket <resume>`, body là `Frame(UPSTREAM)`. Gateway verify ticket, kiểm tra c–e của §4.6 (cell, revoke, blocked) rồi produce vào Kafka, không tra cứu session (`conn_id` rỗng). Luật type, telemetry và shed giống §5.5.
   - Mã trả: `202` (với `cmd`/`cmd_result` chỉ sau khi Kafka ack); `400` body hỏng, frame không phải UPSTREAM, type lạ hoặc thiếu `msg_id`; `401` thiếu, sai hoặc hết hạn ticket; `403` revoked hoặc sai cell; `405`; `413` body > `frame-max`; `415`; `429` kèm `Retry-After: 300` khi tenant bị block; `503` Kafka không nhận.
-  - Mỗi kết nối một request (`Connection: close`). Kết nối vẫn qua `AcceptGate` và các luật 503 của `UpgradeGuard`.
+  - Mỗi kết nối một request (`Connection: close`); request gửi nối tiếp trên cùng kết nối bị bỏ. Kafka chưa trả lời sau 5 s → `503`. Kết nối vẫn qua `AcceptGate` và các luật 503 của `UpgradeGuard`; nếu gateway đóng kết nối (deadline, drain) thì client nhận một mã HTTP (mặc định `503`), không phải frame WS.
 
 ### 4.4 FrameCodec
 

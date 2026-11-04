@@ -120,4 +120,30 @@ class SslContextProviderTest {
         .isInstanceOf(SecretNotFoundException.class)
         .hasMessageContaining("gateway.crt");
   }
+
+  @Test
+  void mismatchedKeyKeepsCurrentContext(@TempDir Path d, @TempDir Path other) throws Exception {
+    DevSecretsGenerator.ensure(d);
+    DevSecretsGenerator.ensure(other);
+    SslContextProvider p = provider(d);
+    io.netty.handler.ssl.SslContext before = p.ws();
+
+    java.nio.file.Files.copy(other.resolve("gateway.key"), d.resolve("gateway.key"),
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING);  // a valid key, but not this certificate's
+    bumpMtime(d);
+
+    assertThat(p.reloadIfChanged()).isFalse();
+    assertThat(p.ws()).isSameAs(before);
+    assertThat(reloads("failed")).isEqualTo(1);
+  }
+
+  @Test
+  void mismatchedPairFailsAtStart(@TempDir Path d, @TempDir Path other) throws Exception {
+    DevSecretsGenerator.ensure(d);
+    DevSecretsGenerator.ensure(other);
+    java.nio.file.Files.copy(other.resolve("gateway.key"), d.resolve("gateway.key"),
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+    assertThatThrownBy(() -> provider(d)).isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("does not match");
+  }
 }

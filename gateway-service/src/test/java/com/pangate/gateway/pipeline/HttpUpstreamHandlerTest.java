@@ -181,4 +181,33 @@ class HttpUpstreamHandlerTest {
   void oversizeIs413() {
     assertThat(status(post("Ticket " + ticket("cell-1"), new byte[65_537]))).isEqualTo(413);
   }
+
+  @Test
+  void slowKafkaAnswers503AfterFiveSeconds() {
+    f.channel.writeInbound(post("Ticket " + ticket("cell-1"), upstream("cmd", "m1").toByteArray()));
+    f.channel.runPendingTasks();
+    assertThat((Object) f.channel.readOutbound()).isNull();
+
+    f.channel.advanceTimeBy(5, java.util.concurrent.TimeUnit.SECONDS);
+    f.channel.runScheduledPendingTasks();
+    FullHttpResponse res = f.channel.readOutbound();
+    assertThat(res.status().code()).isEqualTo(503);
+    res.release();
+
+    f.reliable.completeNext();  // a late broker ack must not write a second response
+    f.channel.runPendingTasks();
+    assertThat((Object) f.channel.readOutbound()).isNull();
+  }
+
+  @Test
+  void pipelinedSecondRequestIsIgnored() {
+    f.channel.config().setAutoClose(false);
+    f.channel.writeInbound(post("Ticket " + ticket("cell-1"), upstream("telemetry", "m1").toByteArray()),
+        post("Ticket " + ticket("cell-1"), upstream("telemetry", "m2").toByteArray()));
+    f.channel.runPendingTasks();
+    assertThat(f.telemetry.history()).hasSize(1);
+    FullHttpResponse res = f.channel.readOutbound();
+    res.release();
+    assertThat((Object) f.channel.readOutbound()).isNull();
+  }
 }

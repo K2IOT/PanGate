@@ -50,26 +50,32 @@ public final class TenantCap implements SessionListener {
     return counter.tryReserve(tenant, TenantCapBorrower.quota(maxConns, nodes.getAsInt()));
   }
 
-  /** Never fails: a Redis error or timeout completes false (spec §10: only the local quota then). */
+  /**
+   * Reserves the slot first, so concurrent borrows on this node each send a higher total, then asks Redis; on deny,
+   * error or timeout the slot is given back. Never fails: a Redis error completes false (spec §10). A true result
+   * leaves the slot reserved: the caller releases it if the session can no longer be activated.
+   */
   public CompletionStage<Boolean> borrow(String tenant, int maxConns) {
+    counter.reserveBorrowed(tenant);
     CompletionStage<Boolean> s;
     try {
-      s = borrower.borrow(tenant, maxConns, counter.count(tenant) + 1);
+      s = borrower.borrow(tenant, maxConns, counter.count(tenant));
     } catch (RuntimeException e) {
       s = CompletableFuture.failedFuture(e);
     }
     return s.handle((ok, e) -> {
-      if (e != null) {
-        borrowError.increment();
-        return false;
+      boolean granted = e == null && Boolean.TRUE.equals(ok);
+      (e != null ? borrowError : granted ? borrowOk : borrowDenied).increment();
+      if (!granted) {
+        counter.release(tenant);
       }
-      (Boolean.TRUE.equals(ok) ? borrowOk : borrowDenied).increment();
-      return Boolean.TRUE.equals(ok);
+      return granted;
     });
   }
 
-  public void reserveBorrowed(String tenant) {
-    counter.reserveBorrowed(tenant);
+  /** Gives back a slot taken by {@link #tryReserve} or a granted {@link #borrow} that was never activated. */
+  public void release(String tenant) {
+    counter.release(tenant);
   }
 
   @Override

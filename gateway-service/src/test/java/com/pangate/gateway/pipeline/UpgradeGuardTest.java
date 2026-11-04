@@ -236,4 +236,15 @@ class UpgradeGuardTest {
     assertThat(seen).singleElement().isInstanceOf(io.netty.buffer.ByteBuf.class);
     ((io.netty.buffer.ByteBuf) seen.get(0)).release();
   }
+
+  @Test
+  void upstreamRouteMarksTheChannelHttp() {
+    guardWithUpstream(550_000);
+    FullHttpRequest r = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/v1/upstream");
+    f.channel.writeInbound(r);
+    assertThat(f.channel.attr(com.pangate.gateway.protocol.ChannelAttrs.TRANSPORT).get())
+        .isEqualTo(com.pangate.gateway.protocol.ChannelAttrs.TransportKind.HTTP);
+    assertThat(f.channel.attr(com.pangate.gateway.protocol.ChannelAttrs.PROTOCOL_READY).get()).isTrue();
+    ((FullHttpRequest) f.channel.readInbound()).release();
+  }
 }

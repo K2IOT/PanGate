@@ -364,4 +364,22 @@ class PushDeliveryTest {
           .isEqualTo("STATUS_NACK_NOT_FOUND");
     });
   }
+
+  private static final String UNSAMPLED = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00";
+
+  @Test
+  void tracedSessionIsTracedEvenWithAnUnsampledTraceparent() {
+    session.traced(true);
+    deliverWith(traced(), withTraceparent(item(1, DeliveryClass.DELIVERY_CLASS_EPHEMERAL, "m1", 4), UNSAMPLED));
+    assertThat(spans.getFinishedSpanItems()).hasSize(2);
+  }
+
+  @Test
+  void nackWithAnUnsampledTraceparentStillEmitsTheErrorSpan() {
+    PushItem gone = withTraceparent(item(1, DeliveryClass.DELIVERY_CLASS_RELIABLE, "m1", 4), UNSAMPLED).toBuilder()
+        .setConnId("01NOPE").build();
+    deliverWith(traced(), gone);
+    assertThat(spans.getFinishedSpanItems()).singleElement()
+        .satisfies(sd -> assertThat(sd.getLinks()).hasSize(1));  // linked to the caller's trace, not its child
+  }
 }

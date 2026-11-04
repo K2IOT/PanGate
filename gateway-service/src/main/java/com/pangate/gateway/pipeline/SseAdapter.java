@@ -139,7 +139,11 @@ public final class SseAdapter extends ChannelDuplexHandler {
         .set(HttpHeaderNames.CACHE_CONTROL, HttpHeaderValues.NO_CACHE)
         .set(HttpHeaderNames.TRANSFER_ENCODING, HttpHeaderValues.CHUNKED);
     ctx.write(head);
-    long ms = heartbeat.toMillis();
+    // The comment is this transport's only sign of life (idle timeout = 3 × heartbeat): never wait longer than the
+    // tenant's heartbeat interval.
+    Session s = ctx.channel().attr(Session.KEY).get();
+    long ms = s == null ? heartbeat.toMillis()
+        : Math.max(1_000, Math.min(heartbeat.toMillis(), s.heartbeatSec() * 1000));
     beat = ctx.executor().scheduleAtFixedRate(() -> keepAlive(ctx), ms, ms, TimeUnit.MILLISECONDS);
   }
 

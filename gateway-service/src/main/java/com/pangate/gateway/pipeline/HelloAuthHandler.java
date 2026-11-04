@@ -218,7 +218,10 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
     cap.borrow(t.tenant(), max).thenAccept(ok -> session.loop().eventLoop().execute(() -> {
       verifying = false;
       if (session.state() != SessionState.HANDSHAKING || !ctx.channel().isActive()) {
-        releaseHeld();  // closed while borrowing; Redis gets the true total at the next report
+        if (ok) {
+          cap.release(t.tenant());  // closed while borrowing: give the granted slot back
+        }
+        releaseHeld();
         return;
       }
       if (!ok) {
@@ -229,7 +232,6 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
             5_000 + java.util.concurrent.ThreadLocalRandom.current().nextLong(25_001));
         return;
       }
-      cap.reserveBorrowed(t.tenant());
       session.tenantReserved(true);
       activate(ctx, session, hello, t);
     }));

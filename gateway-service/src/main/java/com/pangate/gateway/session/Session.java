@@ -366,6 +366,11 @@ public final class Session extends WheelNode implements Deadlined {
     reschedule();
   }
 
+  /** The tenant's effective heartbeat interval (kill switch heartbeat.intervalSec applies at once). */
+  public long heartbeatSec() {
+    return tenants.policy(identity == null ? null : identity.tenantId()).heartbeatSec();
+  }
+
   /** Heartbeat timeout of the tenant's effective policy (kill switch heartbeat.intervalSec applies at once). */
   private long idleTimeoutSec() {
     return tenants.policy(identity == null ? null : identity.tenantId()).idleTimeoutSec();

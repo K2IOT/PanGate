@@ -36,6 +36,12 @@ import java.util.Optional;
 public final class HttpUpstreamHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
 
   static final String CONTENT_TYPE = "application/x-protobuf";
+  /** Kafka may hold a record up to delivery.timeout.ms (10 s): answer 503 well before the session deadline. */
+  static final java.time.Duration RESPONSE_TIMEOUT = java.time.Duration.ofSeconds(5);
+  // Set on the first request: one request per connection (plan ruling R3); pipelined extras are dropped.
+  private static final io.netty.util.AttributeKey<Boolean> SEEN = io.netty.util.AttributeKey.valueOf("pangate.httpSeen");
+  private static final io.netty.util.AttributeKey<Boolean> ANSWERED =
+      io.netty.util.AttributeKey.valueOf("pangate.httpAnswered");
   private static final String SCHEME = "Ticket ";
 
   private final ResumeTicketService tickets;
@@ -57,6 +63,10 @@ public final class HttpUpstreamHandler extends SimpleChannelInboundHandler<FullH
 
   @Override
   protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest req) {
+    if (Boolean.TRUE.equals(ctx.channel().attr(SEEN).getAndSet(true))) {
+      return;  // a pipelined second request: ignored (auto-released), the connection closes after the first
+    }
+    ctx.channel().config().setAutoRead(false);
     if (!HttpMethod.POST.equals(req.method())) {
       respond(ctx, HttpResponseStatus.METHOD_NOT_ALLOWED, 0);
       return;
@@ -104,6 +114,8 @@ public final class HttpUpstreamHandler extends SimpleChannelInboundHandler<FullH
       respond(ctx, HttpResponseStatus.BAD_REQUEST, 0);
       return;
     }
+    ctx.executor().schedule(() -> respond(ctx, HttpResponseStatus.SERVICE_UNAVAILABLE, 0),
+        RESPONSE_TIMEOUT.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
     upstream.publishHttp(valid.ticket(), f).whenComplete((outcome, e) -> ctx.executor().execute(() -> {
       if (e != null) {
         respond(ctx, HttpResponseStatus.SERVICE_UNAVAILABLE, 0);
@@ -118,6 +130,9 @@ public final class HttpUpstreamHandler extends SimpleChannelInboundHandler<FullH
   }
 
   private void respond(ChannelHandlerContext ctx, HttpResponseStatus status, int retryAfterSec) {
+    if (Boolean.TRUE.equals(ctx.channel().attr(ANSWERED).getAndSet(true))) {
+      return;  // already answered (e.g. the 5 s timeout fired before a late Kafka ack)
+    }
     metrics.counter("gw.http.upstream", "status", Integer.toString(status.code())).increment();
     if (!ctx.channel().isActive()) {
       return;

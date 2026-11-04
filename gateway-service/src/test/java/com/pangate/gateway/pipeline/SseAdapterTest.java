@@ -213,4 +213,18 @@ class SseAdapterTest {
     assertThat(SseAdapter.httpStatus(CloseCode.OVERLOADED).code()).isEqualTo(503);
     assertThat(SseAdapter.httpStatus(CloseCode.BAD_FRAME).code()).isEqualTo(400);
   }
+
+  @Test
+  void heartbeatFollowsAShortTenantHeartbeat() {
+    f.tenants.apply(TenantCfg.newBuilder().setScope(Scope.SCOPE_TENANT).setScopeId("t1")
+        .setSwitches(KillSwitches.newBuilder().setSseFallbackEnabled(true).setHeartbeatIntervalSec(5)).build());
+    f.channel.writeInbound(post(HttpMethod.POST, "application/x-protobuf", hello()));
+    outbound().forEach(ReferenceCountUtil::release);
+
+    f.channel.advanceTimeBy(5, TimeUnit.SECONDS);
+    f.channel.runScheduledPendingTasks();
+    List<Object> out = outbound();
+    assertThat(out).hasSize(1);
+    assertThat(text(out.get(0))).isEqualTo(":\n\n");
+  }
 }
