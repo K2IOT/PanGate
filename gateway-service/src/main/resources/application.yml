@@ -23,6 +23,8 @@ gateway:
     cert-file: /etc/pangate/tls/gateway.crt
     key-file: /etc/pangate/tls/gateway.key
     reload-interval: 30s
+  # OTLP/HTTP traces endpoint, e.g. http://otel-collector:4318/v1/traces; empty = spans off (spec §8)
+  tracing: { otlp-endpoint: "" }
   limits:
     hard-cap: 700000
     soft-cap: 550000

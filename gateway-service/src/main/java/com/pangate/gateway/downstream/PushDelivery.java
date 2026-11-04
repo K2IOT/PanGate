@@ -36,8 +36,15 @@ public final class PushDelivery {
   private final Counter droppedUnwritable;
   private final Counter droppedNotFound;
   private final Timer handoff;
+  private final com.pangate.gateway.trace.GatewayTracing tracing;
 
   public PushDelivery(TenantLimitsStore tenants, LimitsHolder limits, GatewayMetrics m, LongSupplier wallMillis) {
+    this(tenants, limits, m, wallMillis, com.pangate.gateway.trace.GatewayTracing.noop());
+  }
+
+  public PushDelivery(TenantLimitsStore tenants, LimitsHolder limits, GatewayMetrics m, LongSupplier wallMillis,
+      com.pangate.gateway.trace.GatewayTracing tracing) {
+    this.tracing = tracing;
     this.tenants = tenants;
     this.limits = limits;
     this.wallMillis = wallMillis;
@@ -60,6 +67,7 @@ public final class PushDelivery {
         || (s.state() != SessionState.ACTIVE && s.state() != SessionState.DRAINING)) {
       if (reliable) {
         stream.ack(item.getDeliveryId(), AckItem.Status.STATUS_NACK_NOT_FOUND);
+        tracing.nack(item, AckItem.Status.STATUS_NACK_NOT_FOUND);
       } else {
         droppedNotFound.increment();
       }
@@ -90,6 +98,7 @@ public final class PushDelivery {
     int bytes = frame.getSerializedSize();
     if (w != null && !w.fits(bytes)) {
       stream.ack(item.getDeliveryId(), AckItem.Status.STATUS_NACK_OVERFLOW);
+      tracing.nack(item, AckItem.Status.STATUS_NACK_OVERFLOW);
       if (s.countOverflowNack(loop.nowSec())) {
         s.close(CloseCode.SLOW_CONSUMER, "PENDING_OVERFLOW");
       }
@@ -101,8 +110,20 @@ public final class PushDelivery {
   }
 
   private void write(Channel ch, PushItem item) {
-    ch.write(item.getFrame(), ch.voidPromise());
     Session s = ch.attr(Session.KEY).get();
+    if (s != null && tracing.wants(item.getFrame(), s)) {
+      io.opentelemetry.api.trace.Span handoffSpan = tracing.handoff(item.getFrame(), s, item.getEnqueuedAtMs());
+      io.opentelemetry.api.trace.Span writeSpan = tracing.write(handoffSpan);
+      handoffSpan.end();
+      ch.write(item.getFrame()).addListener(f -> {
+        if (!f.isSuccess()) {
+          writeSpan.setStatus(io.opentelemetry.api.trace.StatusCode.ERROR, String.valueOf(f.cause()));
+        }
+        writeSpan.end();
+      });
+    } else {
+      ch.write(item.getFrame(), ch.voidPromise());
+    }
     if (s != null) {
       s.loop().markDirty(s);
     }

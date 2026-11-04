@@ -26,8 +26,8 @@ import org.springframework.context.annotation.Configuration;
 public class PushConfig {
 
   @Bean
-  PushDelivery pushDelivery(TenantLimitsStore tenants, LimitsHolder limits, GatewayMetrics metrics) {
-    return new PushDelivery(tenants, limits, metrics, System::currentTimeMillis);
+  PushDelivery pushDelivery(TenantLimitsStore tenants, LimitsHolder limits, GatewayMetrics metrics, com.pangate.gateway.trace.GatewayTracing tracing) {
+    return new PushDelivery(tenants, limits, metrics, System::currentTimeMillis, tracing);
   }
 
   @Bean

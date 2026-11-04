@@ -26,6 +26,10 @@ public final class SessionTrace {
     return s.identity() == null ? "-" : hasher.hash(s.identity().principalId());
   }
 
+  public static String hash(String principal) {
+    return principal == null || principal.isEmpty() ? "-" : hasher.hash(principal);
+  }
+
   public static void activated(Session s) {
     log.info("trace p={} conn={} activated tenant={} device_platform={}", principalHash(s), s.connId(),
         s.identity().tenantId(), s.identity().platform());

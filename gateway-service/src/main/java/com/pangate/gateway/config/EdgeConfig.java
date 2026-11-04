@@ -54,6 +54,36 @@ public class EdgeConfig {
     }), Duration.ofSeconds(10));
   }
 
+  /**
+   * Push spans (spec §8). {@code gateway.tracing.otlp-endpoint} empty (default) = no-op; otherwise OTLP/HTTP with the
+   * JDK HttpClient sender and a batch processor (never blocks the event loop).
+   */
+  @Bean(destroyMethod = "close")
+  io.opentelemetry.sdk.OpenTelemetrySdk openTelemetry(GatewayProperties p,
+      @org.springframework.beans.factory.annotation.Value("${gateway.tracing.otlp-endpoint:}") String endpoint) {
+    var builder = io.opentelemetry.sdk.OpenTelemetrySdk.builder();
+    if (!endpoint.isBlank()) {
+      var resource = io.opentelemetry.sdk.resources.Resource.getDefault().merge(io.opentelemetry.sdk.resources.Resource
+          .create(io.opentelemetry.api.common.Attributes.of(
+              io.opentelemetry.api.common.AttributeKey.stringKey("service.name"), "gateway",
+              io.opentelemetry.api.common.AttributeKey.stringKey("service.instance.id"), p.nodeId())));
+      builder.setTracerProvider(io.opentelemetry.sdk.trace.SdkTracerProvider.builder().setResource(resource)
+          .addSpanProcessor(io.opentelemetry.sdk.trace.export.BatchSpanProcessor.builder(
+              io.opentelemetry.exporter.otlp.http.trace.OtlpHttpSpanExporter.builder().setEndpoint(endpoint).build())
+              .build())
+          .build());
+      log.info("OTel spans exported to {}", endpoint);
+    }
+    return builder.build();
+  }
+
+  @Bean
+  com.pangate.gateway.trace.GatewayTracing gatewayTracing(io.opentelemetry.sdk.OpenTelemetrySdk otel,
+      @org.springframework.beans.factory.annotation.Value("${gateway.tracing.otlp-endpoint:}") String endpoint) {
+    return endpoint.isBlank() ? com.pangate.gateway.trace.GatewayTracing.noop()
+        : com.pangate.gateway.trace.GatewayTracing.create(otel);
+  }
+
   /** Kill switch trace.principal (spec §7.8): a control handler and a session listener. */
   @Bean
   com.pangate.gateway.trace.TraceTargets traceTargets(SecretSource secrets,

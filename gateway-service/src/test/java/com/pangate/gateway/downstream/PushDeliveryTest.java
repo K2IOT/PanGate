@@ -293,4 +293,75 @@ class PushDeliveryTest {
     assertThat(written()).hasSize(1);
     assertThat(session.pending()).isNull();
   }
+
+  private static final String TRACEPARENT = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+
+  private final io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter spans =
+      io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter.create();
+
+  private PushDelivery traced() {
+    io.opentelemetry.sdk.trace.SdkTracerProvider provider = io.opentelemetry.sdk.trace.SdkTracerProvider.builder()
+        .addSpanProcessor(io.opentelemetry.sdk.trace.export.SimpleSpanProcessor.create(spans)).build();
+    return new PushDelivery(f.tenants, f.limits, f.metrics, () -> f.wallNow() * 1000,
+        com.pangate.gateway.trace.GatewayTracing.create(io.opentelemetry.sdk.OpenTelemetrySdk.builder()
+            .setTracerProvider(provider).build()));
+  }
+
+  private PushItem withTraceparent(PushItem i, String tp) {
+    return i.toBuilder().setEnqueuedAtMs(f.wallNow() * 1000 - 5)
+        .setFrame(i.getFrame().toBuilder().putHeaders("traceparent", tp)).build();
+  }
+
+  private void deliverWith(PushDelivery d, PushItem i) {
+    io.netty.channel.Channel written = d.deliver(f.loop, i, stream);
+    if (written != null) {
+      written.flush();
+    }
+    f.channel.runPendingTasks();
+  }
+
+  @Test
+  void sampledPushEmitsHandoffAndWriteUnderTheCallersTrace() {
+    deliverWith(traced(), withTraceparent(item(1, DeliveryClass.DELIVERY_CLASS_EPHEMERAL, "m1", 4), TRACEPARENT));
+
+    var done = spans.getFinishedSpanItems();
+    assertThat(done).extracting(io.opentelemetry.sdk.trace.data.SpanData::getName)
+        .containsExactlyInAnyOrder("gw.push.handoff", "gw.push.write");
+    var handoff = done.stream().filter(sd -> sd.getName().equals("gw.push.handoff")).findFirst().orElseThrow();
+    var write = done.stream().filter(sd -> sd.getName().equals("gw.push.write")).findFirst().orElseThrow();
+    assertThat(handoff.getTraceId()).isEqualTo("4bf92f3577b34da6a3ce929d0e0e4736");
+    assertThat(handoff.getParentSpanId()).isEqualTo("00f067aa0ba902b7");
+    assertThat(write.getParentSpanId()).isEqualTo(handoff.getSpanId());
+    assertThat(handoff.getAttributes().asMap().values()).noneMatch(v -> v.toString().contains("t1:u1"));
+    assertThat(handoff.getAttributes().asMap().keySet()).extracting(io.opentelemetry.api.common.AttributeKey::getKey)
+        .contains("pangate.msg_id", "pangate.delivery_class", "pangate.tenant", "pangate.principal_hash");
+  }
+
+  @Test
+  void unsampledPushEmitsNothing() {
+    deliverWith(traced(), withTraceparent(item(1, DeliveryClass.DELIVERY_CLASS_EPHEMERAL, "m1", 4),
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"));
+    assertThat(spans.getFinishedSpanItems()).isEmpty();
+  }
+
+  @Test
+  void tracedSessionIsAlwaysTraced() {
+    session.traced(true);
+    deliverWith(traced(), item(1, DeliveryClass.DELIVERY_CLASS_EPHEMERAL, "m1", 4));
+    assertThat(spans.getFinishedSpanItems()).hasSize(2);
+  }
+
+  @Test
+  void nackNotFoundEmitsErrorSpanEvenUnsampled() {
+    PushItem gone = item(1, DeliveryClass.DELIVERY_CLASS_RELIABLE, "m1", 4).toBuilder().setConnId("01NOPE").build();
+    deliverWith(traced(), gone);
+
+    var done = spans.getFinishedSpanItems();
+    assertThat(done).singleElement().satisfies(sd -> {
+      assertThat(sd.getName()).isEqualTo("gw.push.handoff");
+      assertThat(sd.getStatus().getStatusCode()).isEqualTo(io.opentelemetry.api.trace.StatusCode.ERROR);
+      assertThat(sd.getAttributes().get(io.opentelemetry.api.common.AttributeKey.stringKey("pangate.nack")))
+          .isEqualTo("STATUS_NACK_NOT_FOUND");
+    });
+  }
 }
