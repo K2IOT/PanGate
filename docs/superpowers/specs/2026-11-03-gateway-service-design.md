@@ -875,7 +875,7 @@ Topic Kafka: profile `local` và `dev` đặt `gateway.kafka.create-topics=true`
 
 | Target | Việc |
 |---|---|
-| `make doctor` | Kiểm Java 21, Docker, các port 8443, 8883, 9090, 8081 còn trống và (từ M2) Kafka, Redis trên `localhost` có kết nối được không |
+| `make doctor` | Kiểm Java 21, Docker, các port 8443, 8883, 9090, 8081 (và 9443 của `fake-pushapi` ở dev) còn trống và (từ M2) Kafka, Redis trên `localhost` có kết nối được không |
 | `make bootstrap` | `./mvnw install -DskipITs` theo thứ tự parent → contracts → starter → devtools → gateway (IT của gateway dùng client trong devtools) |
 | `make infra-up` / `make infra-down` | Bật hoặc tắt Kafka + Redis (compose, nhóm mặc định) trên `localhost` cho local |
 | `make run-local` | `./mvnw -f gateway-service spring-boot:run -Dspring-boot.run.profiles=local` (tương đương chạy từ IDE) |

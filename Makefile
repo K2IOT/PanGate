@@ -28,7 +28,7 @@ DEVTOOLS_JAR := gateway-devtools/target/gateway-devtools-0.1.0-SNAPSHOT-exec.jar
 doctor:
 	@java -version 2>&1 | grep -q 'version "21' && echo "ok  JDK 21" || echo "ERR JDK 21 required"
 	@docker compose version >/dev/null 2>&1 && echo "ok  docker compose" || echo "WARN docker compose missing (needed for dev)"
-	@for p in 8443 8883 9090 8081; do \
+	@for p in 8443 8883 9090 8081 9443; do \
 	  if ss -ltn 2>/dev/null | grep -q ":$$p "; then echo "ERR port $$p in use"; else echo "ok  port $$p free"; fi; \
 	done
 	@for d in kafka:9092 redis:6379; do n=$${d%%:*}; p=$${d##*:}; \
