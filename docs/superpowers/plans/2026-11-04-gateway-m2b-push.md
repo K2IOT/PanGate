@@ -1002,7 +1002,7 @@ git commit -m "chore: M2b smoke push->ack, fake-pushapi in compose, docs and exi
 | Smoke | `SMOKE OK (connected, pong, upstream-ack, push-ack, resume)`; push → ACK → `DeliveryAck` 283 ms (lần đầu, JVM lạnh) | xanh |
 | Heap/session (10k idle, sau warm-up) | 4.870 B | < 5.120 B |
 | Lag p99 với 18k session idle | 0,36 ms | < 20 ms |
-| Test | gateway: 351 unit + 72 IT (`GatewayPushIT` 11, `GrpcServerLifecycleIT` 4); devtools 29; contracts 11 | xanh |
+| Test | gateway: 357 unit + 75 IT sau fix pass của final review (`GatewayPushIT` 11, `GrpcServerLifecycleIT` 4, `PushApiKickClientIT` 2); devtools 29; contracts 11 | xanh |
 
 Heap tăng khoảng 200 B so với lần đo cuối của M2a (4.663 B) do `Session` thêm `pending`, `topics` và bộ đếm overflow (đều null hoặc 0 khi idle), cộng với nhiễu đo. Vẫn dưới ngưỡng.
 
