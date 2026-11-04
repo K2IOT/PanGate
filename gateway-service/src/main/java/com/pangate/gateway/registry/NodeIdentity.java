@@ -88,6 +88,8 @@ public final class NodeIdentity implements SmartLifecycle {
       }
       redis.registry().zadd(RegistryKeys.NODES_LIVE, wallMillis.getAsLong(), nodeId).get(5, TimeUnit.SECONDS);
       acquired(e);
+      // A SIGKILLed incarnation with this fixed id may have left node:draining for up to 900 s (spec §7.5).
+      redis.registry().del(RegistryKeys.draining(nodeId)).get(5, TimeUnit.SECONDS);
     } catch (Exception ex) {
       throw new IllegalStateException("cannot take node lease for " + nodeId, ex);
     }
@@ -226,13 +228,17 @@ public final class NodeIdentity implements SmartLifecycle {
     try {
       RELEASE.run(redis.registry(), RegistryKeys.node(nodeId), Long.toString(epoch)).toCompletableFuture()
           .get(2, TimeUnit.SECONDS);
-      redis.registry().del(RegistryKeys.draining(nodeId)).get(2, TimeUnit.SECONDS);
       // Only drop the live marker if no newer incarnation holds the lease.
       if (redis.registry().get(RegistryKeys.node(nodeId)).get(2, TimeUnit.SECONDS) == null) {
         redis.registry().zrem(RegistryKeys.NODES_LIVE, nodeId).get(2, TimeUnit.SECONDS);
       }
     } catch (Exception e) {
       log.warn("node {} could not release its lease: {}", nodeId, e.toString());
+    }
+    try {
+      redis.registry().del(RegistryKeys.draining(nodeId)).get(2, TimeUnit.SECONDS);
+    } catch (Exception e) {
+      log.warn("node {} could not clear its draining mark: {}", nodeId, e.toString());
     }
     node.leaseAlive(false);
   }

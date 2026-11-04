@@ -91,6 +91,20 @@ class ChannelCloserTest {
   }
 
   @Test
+  void unwritableSlowConsumerIsClosedAtOnceWithoutQueueingACloseFrame() {
+    EmbeddedChannel ch = ready(ChannelAttrs.TransportKind.WS);
+    ch.config().setWriteBufferWaterMark(new io.netty.channel.WriteBufferWaterMark(8, 16));
+    ch.write(io.netty.buffer.Unpooled.wrappedBuffer(new byte[64]));  // backlog the client never reads
+    assertThat(ch.isWritable()).isFalse();
+
+    ChannelCloser.close(ch, CloseCode.SLOW_CONSUMER, "SHED", 0);
+
+    assertThat(ch.isOpen()).isFalse();
+    // The backlog is dropped with the channel; nothing (no backlog, no close frame) is left to flush to the client.
+    assertThat((Object) ch.readOutbound()).isNull();
+  }
+
+  @Test
   void closeCodesMatchSpec() {
     assertThat(CloseCode.BAD_FRAME.code()).isEqualTo(4000);
     assertThat(CloseCode.HELLO_TIMEOUT.code()).isEqualTo(4004);

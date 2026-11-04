@@ -159,6 +159,10 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
       return;
     }
     ResumeTicket t = valid.ticket();
+    if (com.pangate.gateway.auth.WarmUpTokens.isWarmUp(t.tenant())) {
+      fail(session, CloseCode.AUTH_FAILED, "auth_failed");  // warm-up sessions are never resumable (spec §7.6)
+      return;
+    }
     if (admitted(session, hello, t.cell(), t)) {
       activate(ctx, session, hello, t);
     }
@@ -197,7 +201,9 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
   }
 
   private void activate(ChannelHandlerContext ctx, Session session, Hello hello, ResumeTicket t) {
-    String ticket = tickets.issue(t);  // first: if this throws, no session state has been touched
+    // First: if this throws, no session state has been touched. Warm-up sessions get no ticket, so nothing issued to
+    // the loopback warm-up client can be replayed from elsewhere (spec §7.6).
+    String ticket = com.pangate.gateway.auth.WarmUpTokens.isWarmUp(t.tenant()) ? "" : tickets.issue(t);
     done = true;
     String connId = tracker.newConnId(session);
     session.activate(new Session.Identity(t.tenant(), t.principal(), t.device(), hello.getPlatform(),

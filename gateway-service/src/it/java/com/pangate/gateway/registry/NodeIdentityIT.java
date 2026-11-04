@@ -173,4 +173,13 @@ class NodeIdentityIT {
     id.stop();
     assertThat(fx.sync.exists("node:draining:{n1}")).isZero();
   }
+
+  @Test
+  void startClearsADrainingKeyLeftByAKilledIncarnation() {
+    fx.sync.setex("node:draining:{n1}", 900, "1");
+    NodeIdentity id = identity(new NodeState());
+    id.start();
+    assertThat(fx.sync.exists("node:draining:{n1}")).isZero();
+    id.stop();
+  }
 }

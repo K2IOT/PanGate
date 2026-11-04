@@ -60,7 +60,10 @@ class WarmUpHelloTest {
   }
 
   private Frame send(String jwt, String device) throws Exception {
-    Hello h = Hello.newBuilder().setJwt(jwt).setDeviceId(device).setSdkVersion("1.0").build();
+    return send(Hello.newBuilder().setJwt(jwt).setDeviceId(device).setSdkVersion("1.0").build());
+  }
+
+  private Frame send(Hello h) throws Exception {
     f.channel.writeInbound(Unpooled.wrappedBuffer(
         Frame.newBuilder().setType(FrameType.FRAME_TYPE_HELLO).setPayload(h.toByteString()).build().toByteArray()));
     f.channel.runPendingTasks();
@@ -110,5 +113,24 @@ class WarmUpHelloTest {
     connect("127.0.0.1");
     Frame out = send(auth.jwt("__warmup:x", "d1", f.wallNow()), "d1");
     assertThat(ErrorInfo.parseFrom(out.getPayload()).getCode()).isEqualTo(4001);
+  }
+
+  @Test
+  void warmUpSessionIsIssuedNoResumeTicket() throws Exception {
+    connect("127.0.0.1");
+    Frame out = send(auth.warmUp.mint(1, f.wallNow()), "warmup-1");
+    assertThat(out.getType()).isEqualTo(FrameType.FRAME_TYPE_CONNECTED);
+    assertThat(com.pangate.contracts.v1.Connected.parseFrom(out.getPayload()).getResumeTicket()).isEmpty();
+  }
+
+  @Test
+  void resumeTicketForWarmUpTenantIsRejected() throws Exception {
+    connect("127.0.0.1");
+    long now = f.wallNow();
+    String ticket = auth.tickets.issue(new com.pangate.gateway.auth.ResumeTicket("cell-1", WarmUpTokens.TENANT,
+        "__warmup:1", "warmup-1", now, now + 3600, 7L, java.util.List.of()));
+    Frame out = send(Hello.newBuilder().setResumeTicket(ticket).setDeviceId("warmup-1").setSdkVersion("1.0").build());
+    assertThat(ErrorInfo.parseFrom(out.getPayload()).getCode()).isEqualTo(4001);
+    assertThat(session.warmUp()).isFalse();
   }
 }

@@ -664,6 +664,7 @@ Khi Lua registry trả về entry cũ và tenant đặt `singleSession=true`:
 Nguồn tín hiệu:
 - Lag: `EventLoopLagProbe`, mỗi 100 ms lên lịch một no-op trên từng loop, đo độ trễ; lấy p99 trên cửa sổ trượt 10 s.
 - CPU: `OperatingSystemMXBean.getProcessCpuLoad()`, lấy trung bình trên cửa sổ trượt 10 s (100 mẫu, giống lag), để một đỉnh JIT hoặc GC không đẩy node lên L3 trong 60 s. Có thể tắt tín hiệu CPU bằng `gateway.shed.cpu=false`; profile `local` và `dev` tắt sẵn vì máy dev dùng chung CPU với IDE và test.
+- Trước khi warm-up xong (`warmedUp=false`), ladder bỏ qua tín hiệu CPU và xu hướng handshake: CPU lúc Spring khởi động, JIT và handshake TLS của warm-up là nhiễu khởi động, không được giữ node vừa ready ở L3. Tín hiệu bộ nhớ (budget, direct memory) luôn được tính.
 - Kafka: metric `buffer-available-bytes` / `buffer-total-bytes`.
 - Direct memory: `PlatformDependent.usedDirectMemory()`.
 

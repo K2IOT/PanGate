@@ -20,6 +20,11 @@ public final class ChannelCloser {
     if (!ChannelAttrs.isSet(ch, ChannelAttrs.PROTOCOL_READY) || !ch.isActive()) {
       return ch.close();
     }
+    // 4008 (slow consumer, L5 shed) on a channel that is not reading: a close frame would queue behind the backlog
+    // and hold it for FORCE_CLOSE_AFTER while the budget already counts it as freed. Drop it now (spec §7.2, §7.3).
+    if (code == CloseCode.SLOW_CONSUMER && !ch.isWritable()) {
+      return ch.close();
+    }
     ch.eventLoop().schedule(() -> {
       if (ch.isOpen()) {
         ch.close();

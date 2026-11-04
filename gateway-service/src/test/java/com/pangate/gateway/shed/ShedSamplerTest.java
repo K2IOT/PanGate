@@ -38,6 +38,7 @@ class ShedSamplerTest {
 
   @Test
   void handshakingCountFeedsTheTrend() {
+    f.node.warmedUp(true);
     for (int sec = 0; sec < 6; sec++) {
       f.tracker.admit(new EmbeddedChannel(), f.loop, InetAddress.getLoopbackAddress());  // never HELLOs
       for (int tick = 0; tick < 10; tick++) {
@@ -46,6 +47,21 @@ class ShedSamplerTest {
       }
     }
     assertThat(f.loop.handshaking()).isEqualTo(6);
+    assertThat(f.node.shedLevel()).isEqualTo(3);
+  }
+
+  @Test
+  void startUpCpuAndWarmUpHandshakesDoNotRaiseTheLevelBeforeWarmedUp() {
+    ShedSampler hot = new ShedSampler(new LoadShedLadder(ms::get), () -> 0, () -> 0, () -> .95, () -> 0, () -> 0,
+        f.loops, new HandshakeTrend(), f.node, relieved::incrementAndGet, ms::get, f.metrics);
+    for (int tick = 0; tick < 10; tick++) {
+      hot.sample();
+      ms.addAndGet(100);
+    }
+    assertThat(f.node.shedLevel()).isZero();
+
+    f.node.warmedUp(true);
+    hot.sample();
     assertThat(f.node.shedLevel()).isEqualTo(3);
   }
 }

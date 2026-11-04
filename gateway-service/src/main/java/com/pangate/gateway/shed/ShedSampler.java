@@ -51,8 +51,12 @@ public final class ShedSampler {
       handshaking += c.handshaking();
     }
     trend.record(now, handshaking);
+    // Until warm-up is done, CPU (Spring start, JIT, warm-up TLS) and the warm-up handshake ramp are start-up noise:
+    // counting them could hold a just-ready node at L3, 503-ing every upgrade for 60 s. Memory signals always count.
+    boolean warm = node.warmedUp();
     LoadShedLadder.Signals s = new LoadShedLadder.Signals(budgetRatio.getAsDouble(), lagP99.getAsDouble(),
-        Math.max(0, cpu.getAsDouble()), kafkaRatio.getAsDouble(), trend.rising(), directRatio.getAsDouble());
+        warm ? Math.max(0, cpu.getAsDouble()) : 0, kafkaRatio.getAsDouble(), warm && trend.rising(),
+        directRatio.getAsDouble());
     int level = ladder.evaluate(s);
     int before = node.shedLevel();
     if (level != before) {
