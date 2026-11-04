@@ -48,6 +48,7 @@ public final class SessionTracker {
     ch.attr(Session.KEY).set(s);
     loop.register(s);
     loop.incrementActive();
+    loop.addHandshaking(1);
     s.reschedule();
     ch.closeFuture().addListener(f -> onClosed(s));
     return s;
@@ -85,6 +86,9 @@ public final class SessionTracker {
     loop.topics().removeAll(s);
     loop.unregister(s);
     loop.decrementActive();
+    if (s.identity() == null) {
+      loop.addHandshaking(-1);  // never activated
+    }
     if (s.identity() != null) {
       principals.remove(s.identity().principalId(), new ConnRef(loop.index(), s.sessionKey()));
     }

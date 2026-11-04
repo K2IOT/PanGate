@@ -16,9 +16,17 @@ public final class AdmissionController {
   private final TokenBucket[] buckets;
   private volatile long readyAtNanos = Long.MIN_VALUE;
   private volatile int overrideRate;
+  private final java.util.function.IntSupplier shedLevel;
 
   public AdmissionController(GatewayProperties.Admission cfg, int loops, LongSupplier nanoClock) {
+    this(cfg, loops, nanoClock, () -> 0);
+  }
+
+  /** {@code shedLevel}: at 3 or more the rate is halved (spec §7.1, §7.3). */
+  public AdmissionController(GatewayProperties.Admission cfg, int loops, LongSupplier nanoClock,
+      java.util.function.IntSupplier shedLevel) {
     this.cfg = cfg;
+    this.shedLevel = shedLevel;
     this.loops = loops;
     this.nanoClock = nanoClock;
     this.buckets = new TokenBucket[loops];
@@ -33,20 +41,21 @@ public final class AdmissionController {
     readyAtNanos = nanoClock.getAsLong();
   }
 
-  /** Kill switch admission.ratePerNode (M3); 0 clears the override. */
-  public void overrideBaseRate(int rate) {
-    overrideRate = rate;
+  /** Kill switch {@code admission.ratePerNode} (fleet or cell scope, spec §7.8): replaces the base; 0 clears it. */
+  public void applyKillSwitch(int ratePerNode) {
+    overrideRate = ratePerNode;
   }
 
   public double effectiveRate() {
     double base = overrideRate > 0 ? overrideRate : cfg.rate();
     double from = Math.min(cfg.rampFrom(), base);
     long readyAt = readyAtNanos;
+    double shed = shedLevel.getAsInt() >= 3 ? 0.5 : 1.0;
     if (readyAt == Long.MIN_VALUE) {
-      return from;
+      return from * shed;
     }
     double fraction = (nanoClock.getAsLong() - readyAt) / (double) cfg.rampDuration().toNanos();
-    return fraction >= 1.0 ? base : from + (base - from) * Math.max(0.0, fraction);
+    return shed * (fraction >= 1.0 ? base : from + (base - from) * Math.max(0.0, fraction));
   }
 
   public boolean tryAdmit(int loopIdx) {

@@ -27,6 +27,7 @@ public final class LoopContext {
       new it.unimi.dsi.fastutil.objects.ObjectArrayList<>();
   private volatile long outboundBytes;
   private volatile int unwritable;  // written on the loop only
+  private volatile int handshaking;  // admitted, not yet activated; written on the loop only
   private static final java.lang.invoke.VarHandle PENDING;
 
   static {
@@ -143,6 +144,16 @@ public final class LoopContext {
     }
     dirty.size(keep);
     outboundBytes = sum;
+  }
+
+  /** Sessions still HANDSHAKING on this loop (spec §7.3, L3 trend); any thread. */
+  public int handshaking() {
+    return handshaking;
+  }
+
+  @SuppressWarnings("NonAtomicVolatileUpdate")
+  public void addHandshaking(int delta) {
+    handshaking += delta;
   }
 
   /** Channels of this loop currently unwritable; written on the loop, read anywhere. */

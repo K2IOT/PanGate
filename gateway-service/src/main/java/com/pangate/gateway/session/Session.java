@@ -115,6 +115,9 @@ public final class Session extends WheelNode implements Deadlined {
     this.authJtiHash = authJtiHash;
     this.topicPatterns = List.copyOf(topics);
     this.lastSeenSec = loop.nowSec();
+    if (state == SessionState.HANDSHAKING) {
+      loop.addHandshaking(-1);
+    }
     this.state = SessionState.ACTIVE;
     reschedule();
   }

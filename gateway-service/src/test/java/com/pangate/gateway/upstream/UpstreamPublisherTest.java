@@ -218,4 +218,13 @@ class UpstreamPublisherTest {
     assertThat(f.channel.isOpen()).isFalse();
     assertThat(session.closeCode().code()).isEqualTo(4009);
   }
+
+  @Test
+  void telemetryDroppedAtShedLevel2ButCmdStillProduced() {
+    f.node.shedLevel(2);
+    assertThat(send(upstream("telemetry", "m1"))).isEmpty();
+    assertThat(f.telemetry.history()).isEmpty();
+    send(upstream("cmd", "m2"));
+    assertThat(f.reliable.history()).hasSize(1);
+  }
 }

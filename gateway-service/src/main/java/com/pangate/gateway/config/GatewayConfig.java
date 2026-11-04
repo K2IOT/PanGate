@@ -86,8 +86,8 @@ public class GatewayConfig {
   }
 
   @Bean
-  AdmissionController admissionController(GatewayProperties p, LoopRegistry loops) {
-    return new AdmissionController(p.admission(), loops.size(), System::nanoTime);
+  AdmissionController admissionController(GatewayProperties p, LoopRegistry loops, NodeState node) {
+    return new AdmissionController(p.admission(), loops.size(), System::nanoTime, node::shedLevel);
   }
 
   @Bean

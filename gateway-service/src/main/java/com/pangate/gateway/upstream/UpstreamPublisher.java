@@ -93,7 +93,8 @@ public final class UpstreamPublisher {
       return;
     }
     boolean reliable = TopicNames.isReliable(type);
-    if (!reliable && !policy.telemetryEnabled()) {
+    // Telemetry is dropped by kill switch, or by the shed ladder from level 2 (spec §5.5 step 3, §7.3).
+    if (!reliable && (!policy.telemetryEnabled() || node.shedLevel() >= 2)) {
       count(type, 2);
       return;
     }

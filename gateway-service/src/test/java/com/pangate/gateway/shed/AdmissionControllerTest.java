@@ -58,8 +58,31 @@ class AdmissionControllerTest {
     a.markReady();
     clock.addAndGet(TimeUnit.MINUTES.toNanos(3));
 
-    a.overrideBaseRate(2000);
+    a.applyKillSwitch(2000);
 
     assertThat(a.effectiveRate()).isCloseTo(2000.0, within(1e-6));
+  }
+
+  @Test
+  void shedLevel3HalvesTheRate() {
+    java.util.concurrent.atomic.AtomicInteger shed = new java.util.concurrent.atomic.AtomicInteger();
+    AdmissionController a = new AdmissionController(cfg, 4, clock::get, shed::get);
+    a.markReady();
+    clock.addAndGet(TimeUnit.SECONDS.toNanos(600));
+    shed.set(2);
+    assertThat(a.effectiveRate()).isCloseTo(5000.0, within(1e-6));
+    shed.set(3);
+    assertThat(a.effectiveRate()).isCloseTo(2500.0, within(1e-6));
+  }
+
+  @Test
+  void killSwitchReplacesAndZeroRestoresBase() {
+    AdmissionController a = new AdmissionController(cfg, 4, clock::get, () -> 0);
+    a.markReady();
+    clock.addAndGet(TimeUnit.SECONDS.toNanos(600));
+    a.applyKillSwitch(800);
+    assertThat(a.effectiveRate()).isCloseTo(800.0, within(1e-6));
+    a.applyKillSwitch(0);
+    assertThat(a.effectiveRate()).isCloseTo(5000.0, within(1e-6));
   }
 }

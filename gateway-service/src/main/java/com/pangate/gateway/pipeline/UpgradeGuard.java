@@ -56,7 +56,7 @@ public final class UpgradeGuard extends ChannelInboundHandlerAdapter {
       reject(ctx, req, HttpResponseStatus.UPGRADE_REQUIRED, 0);
       return;
     }
-    if (node.draining() || loops.totalActive() >= limits.current().softCap()) {
+    if (node.draining() || loops.totalActive() >= limits.current().softCap() || node.shedLevel() >= 3) {
       reject(ctx, req, HttpResponseStatus.SERVICE_UNAVAILABLE, 5 + rnd.nextInt(26));
       return;
     }

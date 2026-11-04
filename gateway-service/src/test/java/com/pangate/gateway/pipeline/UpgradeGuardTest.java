@@ -147,4 +147,15 @@ class UpgradeGuardTest {
     assertThat(f.channel.pipeline().get(UpgradeGuard.class)).isNull();
     assertThat(session.origin()).isEqualTo("https://app.example");
   }
+
+  @Test
+  void shedLevel3Answers503WithRetryAfter() {
+    node.shedLevel(3);
+    guard(550_000);
+    f.channel.writeInbound(upgrade("/v1/ws", "pangate.v1"));
+    FullHttpResponse r = response();
+    assertThat(r.status().code()).isEqualTo(503);
+    assertThat(Integer.parseInt(r.headers().get("Retry-After"))).isBetween(5, 30);
+    r.release();
+  }
 }
