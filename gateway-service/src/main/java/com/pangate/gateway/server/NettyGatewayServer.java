@@ -85,12 +85,14 @@ public final class NettyGatewayServer implements SmartLifecycle {
       throw e;
     }
     node.listenersBound(true);
+    // The WS listeners are bound first; with ws.port=0 only the bound address knows the real port.
+    int boundWs = ((java.net.InetSocketAddress) listeners.get(0).localAddress()).getPort();
     // Spec §3.7, §7.6: bind → warm-up → ready → admission ramp.
-    warmUp.run();
+    warmUp.run(boundWs);
     node.warmedUp(true);
     admission.markReady();
     running = true;
-    log.info("gateway listening: wss :{}{} ({} acceptors), tcp :{}", ws, props.listeners().ws().path(),
+    log.info("gateway listening: wss :{}{} ({} acceptors), tcp :{}", boundWs, props.listeners().ws().path(),
         listeners.size() - (props.listeners().tcp().enabled() ? 1 : 0), props.listeners().tcp().port());
   }
 

@@ -76,14 +76,15 @@ class WarmUpRunnerTest {
     return ((InetSocketAddress) ch.localAddress()).getPort();
   }
 
-  private WarmUpRunner runner(int iterations, int port, Duration timeout) {
-    return new WarmUpRunner(new GatewayProperties.Warmup(iterations, 4, timeout), port, "/v1/ws", tokens,
-        () -> System.currentTimeMillis() / 1000);
+  /** The port is the listener's bound one, given at run time (ws.port=0 binds an ephemeral port). */
+  private WarmUpRunner.Result run(int iterations, int port, Duration timeout) {
+    return new WarmUpRunner(new GatewayProperties.Warmup(iterations, 4, timeout), "/v1/ws", tokens,
+        () -> System.currentTimeMillis() / 1000).run(port);
   }
 
   @Test
   void runsAllIterationsAgainstTheGateway() throws Exception {
-    WarmUpRunner.Result r = runner(20, fakeGateway(), Duration.ofSeconds(30)).run();
+    WarmUpRunner.Result r = run(20, fakeGateway(), Duration.ofSeconds(30));
     assertThat(r.ok()).isEqualTo(20);
     assertThat(r.failed()).isZero();
     assertThat(r.timedOut()).isFalse();
@@ -92,13 +93,13 @@ class WarmUpRunnerTest {
 
   @Test
   void zeroIterationsIsANoOp() {
-    assertThat(runner(0, 1, Duration.ofSeconds(1)).run()).isEqualTo(new WarmUpRunner.Result(0, 0, false));
+    assertThat(run(0, 1, Duration.ofSeconds(1))).isEqualTo(new WarmUpRunner.Result(0, 0, false));
   }
 
   @Test
   void unreachableGatewayFailsEveryIterationWithinTheTimeout() {
     long t0 = System.nanoTime();
-    WarmUpRunner.Result r = runner(10, 1, Duration.ofSeconds(1)).run();  // nothing listens on port 1
+    WarmUpRunner.Result r = run(10, 1, Duration.ofSeconds(1));  // nothing listens on port 1
     assertThat(r.ok()).isZero();
     assertThat(r.failed() + (r.timedOut() ? 1 : 0)).isPositive();
     assertThat(Duration.ofNanos(System.nanoTime() - t0)).isLessThan(Duration.ofSeconds(3));

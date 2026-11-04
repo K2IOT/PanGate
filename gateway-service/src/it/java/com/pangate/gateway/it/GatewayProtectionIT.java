@@ -231,6 +231,30 @@ class GatewayProtectionIT {
   }
 
   @Test
+  void shutdownAfterAdminDrainWaitsForThatSameDrain() throws Exception {
+    gw = Gw.start("--gateway.drain.interval=1s", "--gateway.drain.max-delay=0s", "--gateway.drain.max-duration=6s",
+        "--gateway.drain.listener-close-delay=0s");
+    GatewayClient straggler = client("t1");  // ignores RECONNECT: stays until the drain's max-duration
+    assertThat(gw.post("/admin/drain")).isEqualTo(202);
+    straggler.await(FrameType.FRAME_TYPE_RECONNECT, T);
+    Thread.sleep(3000);
+
+    long t0 = System.nanoTime();
+    gw.ctx().close();  // what SIGTERM does
+    long tookMs = (System.nanoTime() - t0) / 1_000_000;
+
+    // A fresh drain would take the full 6 s again; the shared one has only ~3 s left.
+    assertThat(tookMs).isBetween(1500L, 5500L);
+    assertThat(straggler.awaitClose(T).code()).isEqualTo(1001);
+    RedisClient redis = RedisClient.create(InfraContainers.redisUri());
+    try {
+      assertThat(redis.connect().sync().exists("node:draining:{" + gw.nodeId() + "}")).isZero();
+    } finally {
+      redis.shutdown();
+    }
+  }
+
+  @Test
   void slowConsumerIsClosedWith4008() throws Exception {
     gw = Gw.start("--gateway.limits.slow-consumer-timeout=3s", "--gateway.limits.pending-ack.timeout=30s");
     router = FakeRouter.connect(gw.grpc());

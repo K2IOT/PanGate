@@ -706,5 +706,6 @@ git commit -m "chore: M3a exit checks with drain and warm-up, docs and measureme
 | Dừng bằng SIGTERM khi có client mở (client bỏ qua RECONNECT) | 5,5 s (drain đóng 1001 ở mốc 5 s); `make local-check` → `LOCAL START OK` | ≤ 15 s (R3) |
 | Compose dev tới healthy / `docker compose stop gateway` | 28 s / 1,3 s; `SMOKE OK (connected, pong, upstream-ack, push-ack, resume)` | ≤ 90 s (R2) / ≤ 15 s |
 | Heap/session (10k idle, sau warm-up) | 4.777 B | < 5.120 B |
-| Lag p99 với 18k session idle | 0,27 ms (không đo `gw_shed_level` riêng; profile local tắt tín hiệu CPU, budget 256 MB, lag xa ngưỡng 50 ms) | < 20 ms |
+| Lag p99 với 18k session idle | 0,27 ms; đo lại sau review: 0,62 ms | < 20 ms |
+| `gw_shed_level` khi ổn định (đo bằng `make load-check`) | 0. Trong lúc ramp 2000 handshake/s, lag p99 lên 52–105 ms làm node vào L1, rồi tự về 0 sau khoảng 98 s (cửa sổ lag 10 s cộng 30 s yên ổn). Script giờ chờ level 0 tối đa 180 s rồi mới đo | 0 |
 | Test | gateway: 420 unit + 84 IT (`GatewayProtectionIT` 6); devtools 30 | xanh |

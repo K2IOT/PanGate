@@ -28,9 +28,16 @@ public final class AcceptGate extends ChannelInboundHandlerAdapter {
   private final AdmissionController admission;
   private final SessionTracker tracker;
   private final GatewayMetrics metrics;
+  private final boolean rejectWhenShedding;
 
   public AcceptGate(NodeState node, LoopRegistry loops, LimitsHolder limits, IpConnectionCounter ips,
       AdmissionController admission, SessionTracker tracker, GatewayMetrics metrics) {
+    this(node, loops, limits, ips, admission, tracker, metrics, false);
+  }
+
+  private AcceptGate(NodeState node, LoopRegistry loops, LimitsHolder limits, IpConnectionCounter ips,
+      AdmissionController admission, SessionTracker tracker, GatewayMetrics metrics, boolean rejectWhenShedding) {
+    this.rejectWhenShedding = rejectWhenShedding;
     this.node = node;
     this.loops = loops;
     this.limits = limits;
@@ -38,6 +45,14 @@ public final class AcceptGate extends ChannelInboundHandlerAdapter {
     this.admission = admission;
     this.tracker = tracker;
     this.metrics = metrics;
+  }
+
+  /**
+   * The TCP listener's gate: TCP has no HTTP upgrade to 503, so shed level ≥ 3 (spec §7.3) is enforced here, before
+   * TLS, as the equivalent early reject. WS keeps it in {@link UpgradeGuard} (503 + Retry-After).
+   */
+  public AcceptGate forTcp() {
+    return new AcceptGate(node, loops, limits, ips, admission, tracker, metrics, true);
   }
 
   @Override
@@ -48,6 +63,8 @@ public final class AcceptGate extends ChannelInboundHandlerAdapter {
     String reject = null;
     if (node.draining()) {
       reject = "draining";
+    } else if (rejectWhenShedding && node.shedLevel() >= 3) {
+      reject = "shed";
     } else if (loop.activeCount() >= perLoopCap) {
       reject = "hard_cap";
     } else if (!ips.tryIncrement(remote, limits.current().perIp())) {

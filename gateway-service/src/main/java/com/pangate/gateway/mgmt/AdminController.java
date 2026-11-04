@@ -18,7 +18,10 @@ public class AdminController {
     this.drain = drain;
   }
 
-  /** Used by the Kubernetes preStop hook. M1 stops the data plane; M3 replaces this with the staged drain. */
+  /**
+   * Loopback only; used by the Kubernetes preStop hook. Starts the staged drain (spec §7.5) and returns 202 at once;
+   * the following SIGTERM waits for this same drain instead of starting another.
+   */
   @PostMapping("/admin/drain")
   public ResponseEntity<Void> drain(HttpServletRequest request) {
     if (!isLoopback(request.getRemoteAddr())) {

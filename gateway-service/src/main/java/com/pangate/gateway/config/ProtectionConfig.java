@@ -48,7 +48,7 @@ public class ProtectionConfig {
       com.pangate.gateway.server.NodeState node, com.pangate.gateway.registry.NodeIdentity identity,
       TickScheduler tick, GatewayMetrics metrics) {
     return new com.pangate.gateway.lifecycle.DrainCoordinator(p.drain(), loops, node, identity::markDraining,
-        tick.executor(), metrics);
+        tick.executor(), metrics, bound -> java.util.concurrent.ThreadLocalRandom.current().nextLong(bound + 1));
   }
 
   /** Kernel counters on Linux, refreshed every 10 s on the offload executor (file reads stay off gw-tick). */

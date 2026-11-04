@@ -26,6 +26,8 @@ public final class ShedSampler {
   private final NodeState node;
   private final Runnable relieve;
   private final LongSupplier monoMillis;
+  private long lastLogMs = Long.MIN_VALUE / 2;
+  private int suppressed;
 
   public ShedSampler(LoadShedLadder ladder, DoubleSupplier budgetRatio, DoubleSupplier lagP99, DoubleSupplier cpu,
       DoubleSupplier kafkaRatio, DoubleSupplier directRatio, LoopRegistry loops, HandshakeTrend trend,
@@ -60,7 +62,16 @@ public final class ShedSampler {
     int level = ladder.evaluate(s);
     int before = node.shedLevel();
     if (level != before) {
-      log.info("shed level {} -> {} ({})", before, level, s);
+      // L4/L5 have no time hysteresis (spec §7.3): near budget 1.0 they can flip every sample. Log at most once a
+      // second; the gw.shed.level gauge still shows every change.
+      if (now - lastLogMs >= 1000) {
+        log.info("shed level {} -> {} ({}){}", before, level, s,
+            suppressed > 0 ? " [" + suppressed + " changes suppressed in the last second]" : "");
+        lastLogMs = now;
+        suppressed = 0;
+      } else {
+        suppressed++;
+      }
       node.shedLevel(level);
     }
     if (level == 5) {

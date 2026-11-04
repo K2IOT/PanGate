@@ -59,9 +59,13 @@ public final class KernelStatsReader {
   }
 
   public void bindTo(MeterRegistry r) {
-    Gauge.builder("gw.kernel.listen.overflows", this, k -> k.tcpExt("ListenOverflows")).register(r);
-    Gauge.builder("gw.kernel.listen.drops", this, k -> k.tcpExt("ListenDrops")).register(r);
-    Gauge.builder("gw.kernel.tcp.backlog.drop", this, k -> k.tcpExt("TCPBacklogDrop")).register(r);
+    // Monotonic kernel counters: FunctionCounter gives Prometheus *_total and correct rate() semantics.
+    io.micrometer.core.instrument.FunctionCounter.builder("gw.kernel.listen.overflows", this,
+        k -> k.tcpExt("ListenOverflows")).register(r);
+    io.micrometer.core.instrument.FunctionCounter.builder("gw.kernel.listen.drops", this,
+        k -> k.tcpExt("ListenDrops")).register(r);
+    io.micrometer.core.instrument.FunctionCounter.builder("gw.kernel.tcp.backlog.drop", this,
+        k -> k.tcpExt("TCPBacklogDrop")).register(r);
     Gauge.builder("gw.kernel.tcp.mem.pages", this, KernelStatsReader::tcpMemPages).register(r);
   }
 

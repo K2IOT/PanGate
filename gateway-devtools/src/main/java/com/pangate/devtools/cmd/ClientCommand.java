@@ -86,6 +86,10 @@ public final class ClientCommand implements Callable<Integer> {
   @Option(names = "--ping-interval", defaultValue = "PT30S")
   Duration pingInterval;
 
+  @Option(names = "--stop-reading",
+      description = "After the first PONG stop reading (and pinging) until the gateway closes: a stuck client.")
+  boolean stopReading;
+
   @Override
   public Integer call() throws Exception {
     ClientTls tls = trust.insecure ? ClientTls.insecure() : ClientTls.trust(trust.ca);
@@ -115,6 +119,14 @@ public final class ClientCommand implements Callable<Integer> {
       c.ping(T);
       System.out.println("PONG");
       if (once) {
+        return 0;
+      }
+      if (stopReading) {
+        c.pauseReading();
+        System.out.println("READING STOPPED");
+        while (c.isOpen()) {
+          Thread.sleep(200);
+        }
         return 0;
       }
       while (c.isOpen()) {

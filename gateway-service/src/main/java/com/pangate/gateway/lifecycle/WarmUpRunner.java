@@ -47,21 +47,19 @@ public final class WarmUpRunner {
   public record Result(int ok, int failed, boolean timedOut) {}
 
   private final GatewayProperties.Warmup cfg;
-  private final int port;
   private final String path;
   private final WarmUpTokens tokens;
   private final LongSupplier wallSec;
 
-  public WarmUpRunner(GatewayProperties.Warmup cfg, int wsPort, String wsPath, WarmUpTokens tokens,
-      LongSupplier wallSec) {
+  public WarmUpRunner(GatewayProperties.Warmup cfg, String wsPath, WarmUpTokens tokens, LongSupplier wallSec) {
     this.cfg = cfg;
-    this.port = wsPort;
     this.path = wsPath;
     this.tokens = tokens;
     this.wallSec = wallSec;
   }
 
-  public Result run() {
+  /** {@code port}: the WS listener's bound port (not the configured one, which may be 0). */
+  public Result run(int port) {
     if (cfg.iterations() <= 0) {
       return new Result(0, 0, false);
     }
@@ -81,7 +79,7 @@ public final class WarmUpRunner {
           timedOut = true;
           break;
         }
-        once(group, ssl, i).orTimeout(Math.max(1, left / 1_000_000), TimeUnit.MILLISECONDS)
+        once(group, ssl, port, i).orTimeout(Math.max(1, left / 1_000_000), TimeUnit.MILLISECONDS)
             .whenComplete((v, e) -> {
               (e == null ? ok : failed).incrementAndGet();
               if (e != null) {
@@ -114,7 +112,7 @@ public final class WarmUpRunner {
     return r;
   }
 
-  private CompletableFuture<Void> once(MultiThreadIoEventLoopGroup group, SslContext ssl, int i) {
+  private CompletableFuture<Void> once(MultiThreadIoEventLoopGroup group, SslContext ssl, int port, int i) {
     CompletableFuture<Void> done = new CompletableFuture<>();
     // Minted here, not on the client's event loop: the jti comes from SecureRandom (a blocking read).
     String jwt = tokens.mint(i, wallSec.getAsLong());

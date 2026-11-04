@@ -14,7 +14,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -39,16 +38,23 @@ public final class DrainCoordinator {
   private final Runnable markDrainingInRedis;
   private final ScheduledExecutorService scheduler;
   private final Counter reconnects;
+  private final java.util.function.LongUnaryOperator delayMs;
   private final AtomicReference<CompletableFuture<Void>> started = new AtomicReference<>();
 
+  /**
+   * @param delayMs maps {@code drain.max-delay} (ms) to one session's RECONNECT delay in [0, bound]; called on the
+   *     session's event loop, so it must be thread-safe (production: {@code ThreadLocalRandom}).
+   */
   public DrainCoordinator(GatewayProperties.Drain cfg, LoopRegistry loops, NodeState node,
-      Runnable markDrainingInRedis, ScheduledExecutorService scheduler, GatewayMetrics m) {
+      Runnable markDrainingInRedis, ScheduledExecutorService scheduler, GatewayMetrics m,
+      java.util.function.LongUnaryOperator delayMs) {
     this.cfg = cfg;
     this.loops = loops;
     this.node = node;
     this.markDrainingInRedis = markDrainingInRedis;
     this.scheduler = scheduler;
     this.reconnects = m.counter("gw.drain.reconnects");
+    this.delayMs = delayMs;
   }
 
   public CompletableFuture<Void> drain(Runnable closeListeners) {
@@ -120,7 +126,7 @@ public final class DrainCoordinator {
         }
       });
       for (Session s : picked) {
-        s.drain(ThreadLocalRandom.current().nextLong(cfg.maxDelay().toMillis() + 1), false);
+        s.drain(delayMs.applyAsLong(cfg.maxDelay().toMillis()), false);
         reconnects.increment();
       }
     }

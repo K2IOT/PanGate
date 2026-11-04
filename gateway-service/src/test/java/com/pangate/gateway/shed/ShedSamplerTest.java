@@ -64,4 +64,25 @@ class ShedSamplerTest {
     hot.sample();
     assertThat(f.node.shedLevel()).isEqualTo(3);
   }
+
+  @Test
+  void flappingBetween4And5LogsAtMostOncePerSecond() {
+    ch.qos.logback.classic.Logger log = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(ShedSampler.class);
+    ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> lines =
+        new ch.qos.logback.core.read.ListAppender<>();
+    lines.start();
+    log.addAppender(lines);
+    try {
+      budget = .95;
+      for (int tick = 0; tick < 20; tick++) {  // 2 s of samples, the level changes on every one
+        direct = tick % 2 == 0 ? .9 : 0;
+        sampler.sample();
+        ms.addAndGet(100);
+      }
+    } finally {
+      log.detachAppender(lines);
+    }
+    assertThat(lines.list).hasSizeBetween(1, 2);
+    assertThat(lines.list.get(lines.list.size() - 1).getFormattedMessage()).contains("suppressed");
+  }
 }

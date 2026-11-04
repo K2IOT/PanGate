@@ -30,6 +30,8 @@ public final class TickScheduler {
     Runnable guarded = () -> {
       try {
         task.run();
+      } catch (java.util.concurrent.RejectedExecutionException e) {
+        log.debug("gw-tick task {} rejected (event loops shutting down)", task);  // shutdown race, not a fault
       } catch (Throwable t) {
         long now = System.currentTimeMillis();
         if (now - lastLogMs[0] >= 60_000) {

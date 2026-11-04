@@ -48,6 +48,7 @@ public final class WsChannelInitializer extends ChannelInitializer<SocketChannel
     p.addLast("acceptGate", deps.acceptGate());
     p.addLast("tls", deps.tls().ws().newHandler(ch.alloc()));
     p.addLast("flush", new FlushConsolidationHandler(256, true));
+    p.addLast("writability", WritabilityTracker.INSTANCE);
     p.addLast("http", new HttpServerCodec());
     p.addLast("aggregator", new HttpObjectAggregator(8192));
     p.addLast("upgradeGuard", new UpgradeGuard(deps.props(), deps.limits(), deps.loops(), deps.node(), ThreadLocalRandom.current()));
@@ -56,7 +57,6 @@ public final class WsChannelInitializer extends ChannelInitializer<SocketChannel
     p.addLast("frameCodec", frameCodec);
     p.addLast("hello", deps.helloAuth());
     p.addLast("session", sessionHandler);
-    p.addLast("writability", WritabilityTracker.INSTANCE);
     p.addLast("errors", PipelineDeps.ERROR_TERMINATOR);
   }
 }

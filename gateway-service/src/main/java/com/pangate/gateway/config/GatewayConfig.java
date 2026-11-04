@@ -171,7 +171,7 @@ public class GatewayConfig {
       com.pangate.gateway.lifecycle.DrainCoordinator drain, com.pangate.gateway.auth.WarmUpTokens warmUpTokens) {
     return new NettyGatewayServer(p, io, loops, node, admission, lag, new WsChannelInitializer(deps),
         new TcpChannelInitializer(deps), drain, new com.pangate.gateway.lifecycle.WarmUpRunner(p.warmup(),
-            p.listeners().ws().port(), p.listeners().ws().path(), warmUpTokens, () -> System.currentTimeMillis() / 1000));
+            p.listeners().ws().path(), warmUpTokens, () -> System.currentTimeMillis() / 1000));
   }
 
   @Bean

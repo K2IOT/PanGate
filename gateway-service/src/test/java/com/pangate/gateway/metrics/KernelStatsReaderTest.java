@@ -38,14 +38,14 @@ class KernelStatsReaderTest {
   }
 
   @Test
-  void gaugesAreBound() {
+  void countersAndGaugeAreBound() {
     KernelStatsReader r = new KernelStatsReader(DIR.resolve("netstat"), DIR.resolve("sockstat"));
     r.refresh();
     SimpleMeterRegistry meters = new SimpleMeterRegistry();
     r.bindTo(meters);
-    assertThat(meters.get("gw.kernel.listen.overflows").gauge().value()).isEqualTo(17);
-    assertThat(meters.get("gw.kernel.listen.drops").gauge().value()).isEqualTo(23);
-    assertThat(meters.get("gw.kernel.tcp.backlog.drop").gauge().value()).isEqualTo(5);
+    assertThat(meters.get("gw.kernel.listen.overflows").functionCounter().count()).isEqualTo(17);
+    assertThat(meters.get("gw.kernel.listen.drops").functionCounter().count()).isEqualTo(23);
+    assertThat(meters.get("gw.kernel.tcp.backlog.drop").functionCounter().count()).isEqualTo(5);
     assertThat(meters.get("gw.kernel.tcp.mem.pages").gauge().value()).isEqualTo(412);
   }
 

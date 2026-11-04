@@ -41,10 +41,15 @@ class DrainCoordinatorTest {
     scheduler.shutdownNow();
   }
 
+  private final List<Long> delayBounds = new ArrayList<>();
+
   private DrainCoordinator coordinator(int batchPercent, Duration maxDuration, Duration listenerDelay) {
     return new DrainCoordinator(new GatewayProperties.Drain(batchPercent, Duration.ofSeconds(1),
         Duration.ofMillis(500), maxDuration, listenerDelay), f.loops, f.node, redisMarks::incrementAndGet, scheduler,
-        f.metrics);
+        f.metrics, bound -> {
+          delayBounds.add(bound);
+          return 0;
+        });
   }
 
   private void open(int n) {
@@ -135,5 +140,12 @@ class DrainCoordinatorTest {
   void emptyNodeCompletesImmediately() {
     CompletableFuture<Void> done = start(coordinator(2, Duration.ofMinutes(10), Duration.ZERO));
     assertThat(done).isCompleted();
+  }
+
+  @Test
+  void reconnectDelaysComeFromTheInjectedSourceBoundedByMaxDelay() {
+    open(3);
+    start(coordinator(100, Duration.ofMinutes(10), Duration.ZERO));
+    assertThat(delayBounds).containsExactly(500L, 500L, 500L);
   }
 }

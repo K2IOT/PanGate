@@ -657,7 +657,7 @@ Khi Lua registry trả về entry cũ và tenant đặt `singleSession=true`:
 |---|---|---|---|
 | 1 | budget > 70% · lag p99 > 50 ms · CPU > 70% | Drop EPHEMERAL tới channel unwritable; dừng pacer BULK | budget < 60% và lag < 30 ms và CPU < 60%, liên tục 30 s |
 | 2 | Buffer của một Kafka producer > 70% | Drop upstream telemetry | Buffer < 50% |
-| 3 | CPU > 80% · số session HANDSHAKING tăng liên tục 5 s | Admission × 0,5; tạm dừng recycling; `UpgradeGuard` trả 503 | CPU < 70% liên tục 60 s |
+| 3 | CPU > 80% · số session HANDSHAKING tăng liên tục 5 s | Admission × 0,5; tạm dừng recycling; `UpgradeGuard` trả 503 (WS); listener TCP đóng kết nối mới ngay ở `AcceptGate`, trước TLS | CPU < 70% liên tục 60 s |
 | 4 | budget > 90% | Ngừng `request(n)`; RELIABLE mới tới → `NACK_SHED` | budget < 80% |
 | 5 | budget ≥ 100% · direct memory > 85% `MaxDirectMemorySize` | Mỗi loop đóng 4008 các session có pending lớn nhất cho tới khi loop < 90% `budgetShare` | Tự hạ khi điều kiện hết |
 

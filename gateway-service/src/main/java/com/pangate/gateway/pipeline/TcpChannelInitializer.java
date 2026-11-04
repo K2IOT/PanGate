@@ -15,9 +15,11 @@ public final class TcpChannelInitializer extends ChannelInitializer<SocketChanne
   private final PipelineDeps deps;
   private final FrameCodec frameCodec;
   private final SessionHandler sessionHandler;
+  private final AcceptGate acceptGate;
 
   public TcpChannelInitializer(PipelineDeps deps) {
     this.deps = deps;
+    this.acceptGate = deps.acceptGate().forTcp();
     this.frameCodec = new FrameCodec(deps.limits());
     this.sessionHandler = deps.sessionHandler();
   }
@@ -26,15 +28,15 @@ public final class TcpChannelInitializer extends ChannelInitializer<SocketChanne
   protected void initChannel(SocketChannel ch) {
     ch.attr(ChannelAttrs.TRANSPORT).set(ChannelAttrs.TransportKind.TCP);
     ChannelPipeline p = ch.pipeline();
-    p.addLast("acceptGate", deps.acceptGate());
+    p.addLast("acceptGate", acceptGate);
     p.addLast("tls", deps.tls().tcp().newHandler(ch.alloc()));
     p.addLast("flush", new FlushConsolidationHandler(256, true));
+    p.addLast("writability", WritabilityTracker.INSTANCE);
     p.addLast("lengthDecoder", new LengthFieldBasedFrameDecoder(deps.limits().current().frameMax() + 1024, 0, 4, 0, 4));
     p.addLast("lengthPrepender", new LengthFieldPrepender(4));
     p.addLast("frameCodec", frameCodec);
     p.addLast("hello", deps.helloAuth());
     p.addLast("session", sessionHandler);
-    p.addLast("writability", WritabilityTracker.INSTANCE);
     p.addLast("errors", PipelineDeps.ERROR_TERMINATOR);
   }
 }
