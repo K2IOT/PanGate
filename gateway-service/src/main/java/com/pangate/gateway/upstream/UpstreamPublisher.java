@@ -100,22 +100,7 @@ public final class UpstreamPublisher {
     }
     s.addUpstreamBytes(f.getPayload().size(), s.loop().nowSec());
     Session.Identity id = s.identity();
-    UpstreamRecord.Builder rec = UpstreamRecord.newBuilder()
-        .setMsgId(f.getMsgId())
-        .setTenantId(id.tenantId())
-        .setPrincipalId(id.principalId())
-        .setDeviceId(id.deviceId())
-        .setConnId(s.connId())
-        .setNodeId(node.nodeId())
-        .setCellId(cell)
-        .setReceivedAtMs(wallMillis.getAsLong())
-        .putAllHeaders(f.getHeadersMap())
-        .setPayload(f.getPayload());
-    rec.removeHeaders("type");
-    ProducerRecord<String, byte[]> r = new ProducerRecord<>(topics.upstream(type), id.principalId(),
-        rec.build().toByteArray());
-    PangateHeaders.write(r.headers(), f.getHeadersOrDefault("traceparent", null), id.tenantId(), cell,
-        "UpstreamRecord");
+    ProducerRecord<String, byte[]> r = record(f, type, id.tenantId(), id.principalId(), id.deviceId(), s.connId());
     Producer<String, byte[]> producer = reliable ? kafka.reliable() : kafka.telemetry();
     String msgId = f.getMsgId();
     try {
@@ -131,6 +116,69 @@ public final class UpstreamPublisher {
         answer(ctx, msgId, false);
       }
     }
+  }
+
+  private ProducerRecord<String, byte[]> record(Frame f, String type, String tenant, String principal, String device,
+      String connId) {
+    UpstreamRecord.Builder rec = UpstreamRecord.newBuilder()
+        .setMsgId(f.getMsgId())
+        .setTenantId(tenant)
+        .setPrincipalId(principal)
+        .setDeviceId(device)
+        .setConnId(connId)
+        .setNodeId(node.nodeId())
+        .setCellId(cell)
+        .setReceivedAtMs(wallMillis.getAsLong())
+        .putAllHeaders(f.getHeadersMap())
+        .setPayload(f.getPayload());
+    rec.removeHeaders("type");
+    ProducerRecord<String, byte[]> r = new ProducerRecord<>(topics.upstream(type), principal, rec.build().toByteArray());
+    PangateHeaders.write(r.headers(), f.getHeadersOrDefault("traceparent", null), tenant, cell, "UpstreamRecord");
+    return r;
+  }
+
+  /** Outcome of {@code POST /v1/upstream} (spec §4.3), mapped to an HTTP status by the handler. */
+  public enum HttpOutcome { ACCEPTED, UNKNOWN_TYPE, MISSING_MSG_ID, UNAVAILABLE }
+
+  /**
+   * UPSTREAM over HTTP with a resume ticket (spec §4.3): same type, telemetry and shed rules as {@link #publish}, no
+   * session ({@code conn_id} empty, no per-session rate limit). Telemetry that is dropped still answers ACCEPTED;
+   * {@code cmd}/{@code cmd_result} complete when Kafka acknowledged them. Completes on a Kafka thread.
+   */
+  public java.util.concurrent.CompletionStage<HttpOutcome> publishHttp(com.pangate.gateway.auth.ResumeTicket t,
+      Frame f) {
+    String type = f.getHeadersOrDefault("type", "");
+    if (!topics.isUpstreamType(type)) {
+      count(UNKNOWN, 4);
+      return java.util.concurrent.CompletableFuture.completedFuture(HttpOutcome.UNKNOWN_TYPE);
+    }
+    if (f.getMsgId().isEmpty()) {
+      count(type, 4);
+      return java.util.concurrent.CompletableFuture.completedFuture(HttpOutcome.MISSING_MSG_ID);
+    }
+    boolean reliable = TopicNames.isReliable(type);
+    if (!reliable && (!tenants.policy(t.tenant()).telemetryEnabled() || node.shedLevel() >= 2)) {
+      count(type, 2);
+      return java.util.concurrent.CompletableFuture.completedFuture(HttpOutcome.ACCEPTED);
+    }
+    ProducerRecord<String, byte[]> r = record(f, type, t.tenant(), t.principal(), t.device(), "");
+    java.util.concurrent.CompletableFuture<HttpOutcome> done = new java.util.concurrent.CompletableFuture<>();
+    try {
+      (reliable ? kafka.reliable() : kafka.telemetry()).send(r, (md, ex) -> {
+        count(type, ex == null ? 0 : 1);
+        if (reliable) {
+          done.complete(ex == null ? HttpOutcome.ACCEPTED : HttpOutcome.UNAVAILABLE);
+        }
+      });
+    } catch (RuntimeException ex) {
+      count(type, 1);
+      return java.util.concurrent.CompletableFuture.completedFuture(reliable ? HttpOutcome.UNAVAILABLE
+          : HttpOutcome.ACCEPTED);
+    }
+    if (!reliable) {
+      done.complete(HttpOutcome.ACCEPTED);
+    }
+    return done;
   }
 
   private static void answer(ChannelHandlerContext ctx, String msgId, boolean ok) {

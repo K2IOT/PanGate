@@ -58,6 +58,24 @@ public final class HelloPolicy {
     return revocations.isRevoked(principal, device, jtiHash, wallMillis.getAsLong());
   }
 
+  /**
+   * Spec §4.6 checks c, d, e for a resume ticket used without a HELLO ({@code POST /v1/upstream}): cell, revocation,
+   * tenant blocked. There is no sdk_version or Origin to check.
+   */
+  public Optional<Rejection> checkTicketUse(ResumeTicket t) {
+    if (!cell.equals(t.cell()) || !cells.servesTenant(t.tenant())) {
+      return Optional.of(new Rejection(CloseCode.WRONG_CELL, CloseCode.WRONG_CELL.defaultRetryAfterMs(),
+          "wrong_cell"));
+    }
+    if (revocations.isRevoked(t.principal(), t.device(), t.authJtiHash(), wallMillis.getAsLong())) {
+      return Optional.of(new Rejection(CloseCode.REVOKED, 0, "revoked"));
+    }
+    if (tenants.policy(t.tenant()).blocked()) {
+      return Optional.of(new Rejection(CloseCode.RATE_LIMITED, BLOCKED_RETRY_AFTER_MS, "blocked"));
+    }
+    return Optional.empty();
+  }
+
   /** Checks c–g only (REAUTH applies the rate limit itself, before the ES256 verify it protects). */
   public Optional<Rejection> checkPolicy(Candidate c) {
     if (!cell.equals(c.ticketCell()) || !cells.servesTenant(c.tenant())) {

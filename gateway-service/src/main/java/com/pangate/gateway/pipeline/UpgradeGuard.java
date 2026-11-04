@@ -31,9 +31,18 @@ public final class UpgradeGuard extends ChannelInboundHandlerAdapter {
   private final LoopRegistry loops;
   private final NodeState node;
   private final RandomGenerator rnd;
+  // Non-WS paths (spec §4.3): path → the handler that replaces the WS part of the pipeline.
+  private final java.util.Map<String, java.util.function.Supplier<io.netty.channel.ChannelHandler>> routes;
 
   public UpgradeGuard(GatewayProperties props, com.pangate.gateway.config.LimitsHolder limits, LoopRegistry loops,
       NodeState node, RandomGenerator rnd) {
+    this(props, limits, loops, node, rnd, java.util.Map.of());
+  }
+
+  public UpgradeGuard(GatewayProperties props, com.pangate.gateway.config.LimitsHolder limits, LoopRegistry loops,
+      NodeState node, RandomGenerator rnd,
+      java.util.Map<String, java.util.function.Supplier<io.netty.channel.ChannelHandler>> routes) {
+    this.routes = routes;
     this.props = props;
     this.limits = limits;
     this.loops = loops;
@@ -47,8 +56,20 @@ public final class UpgradeGuard extends ChannelInboundHandlerAdapter {
       ctx.fireChannelRead(msg);
       return;
     }
-    if (!props.listeners().ws().path().equals(new QueryStringDecoder(req.uri()).path())) {
+    String path = new QueryStringDecoder(req.uri()).path();
+    java.util.function.Supplier<io.netty.channel.ChannelHandler> route = routes.get(path);
+    if (route == null && !props.listeners().ws().path().equals(path)) {
       reject(ctx, req, HttpResponseStatus.NOT_FOUND, 0);
+      return;
+    }
+    if (route != null) {
+      if (node.draining() || loops.totalActive() >= limits.current().softCap() || node.shedLevel() >= 3) {
+        reject(ctx, req, HttpResponseStatus.SERVICE_UNAVAILABLE, 5 + rnd.nextInt(26));
+        return;
+      }
+      rewire(ctx, path, route.get());
+      ctx.pipeline().remove(this);
+      ctx.fireChannelRead(req);
       return;
     }
     String protocols = req.headers().get(HttpHeaderNames.SEC_WEBSOCKET_PROTOCOL, "");
@@ -66,6 +87,16 @@ public final class UpgradeGuard extends ChannelInboundHandlerAdapter {
     }
     ctx.pipeline().remove(this);
     ctx.fireChannelRead(req);
+  }
+
+  /** Replaces the WS handlers (upgrade, adapter, codec, auth, session) with the route's handler. */
+  private static void rewire(ChannelHandlerContext ctx, String path, io.netty.channel.ChannelHandler handler) {
+    for (String name : new String[] {"ws", "wsBinary", "frameCodec", "hello", "session"}) {
+      if (ctx.pipeline().get(name) != null) {
+        ctx.pipeline().remove(name);
+      }
+    }
+    ctx.pipeline().addAfter(ctx.name(), path.equals("/v1/upstream") ? "httpUpstream" : "route", handler);
   }
 
   private static void reject(ChannelHandlerContext ctx, FullHttpRequest req, HttpResponseStatus status,

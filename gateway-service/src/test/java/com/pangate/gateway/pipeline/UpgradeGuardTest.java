@@ -158,4 +158,53 @@ class UpgradeGuardTest {
     assertThat(Integer.parseInt(r.headers().get("Retry-After"))).isBetween(5, 30);
     r.release();
   }
+
+  private void guardWithUpstream(int softCap) {
+    f.limits.set(new com.pangate.gateway.config.GatewayLimits(700_000, softCap, 200, 65_536, 8_192,
+        Duration.ofSeconds(5), Duration.ofSeconds(10), 20, Duration.ofSeconds(30), Duration.ofHours(24), 50, 100, 100, 32, 65_536, Duration.ofSeconds(5), 10_000, Duration.ofSeconds(30)));
+    f.channel.pipeline().addLast("upgradeGuard", new UpgradeGuard(props(softCap), f.limits, f.loops, node,
+        new SplittableRandom(1), java.util.Map.of("/v1/upstream",
+            () -> new io.netty.channel.ChannelInboundHandlerAdapter())));
+    f.channel.pipeline().addLast("ws", new io.netty.channel.ChannelInboundHandlerAdapter());
+    f.channel.pipeline().addLast("session", new io.netty.channel.ChannelInboundHandlerAdapter());
+  }
+
+  @Test
+  void upstreamPathNeedsNoSubprotocolAndRewiresThePipeline() {
+    guardWithUpstream(550_000);
+
+    FullHttpRequest r = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/v1/upstream");
+    f.channel.writeInbound(r);
+
+    assertThat(f.channel.pipeline().get("httpUpstream")).isNotNull();
+    assertThat(f.channel.pipeline().get("ws")).isNull();
+    assertThat(f.channel.pipeline().get("session")).isNull();
+    assertThat(f.channel.pipeline().get("upgradeGuard")).isNull();
+    Object passed = f.channel.readInbound();
+    assertThat(passed).isSameAs(r);
+    r.release();
+  }
+
+  @Test
+  void upstreamPathStill503WhenShedding() {
+    node.shedLevel(3);
+    guardWithUpstream(550_000);
+
+    f.channel.writeInbound(new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/v1/upstream"));
+
+    FullHttpResponse r = response();
+    assertThat(r.status().code()).isEqualTo(503);
+    r.release();
+  }
+
+  @Test
+  void ssePathIs404UntilRouted() {
+    guardWithUpstream(550_000);
+
+    f.channel.writeInbound(new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/v1/sse"));
+
+    FullHttpResponse r = response();
+    assertThat(r.status().code()).isEqualTo(404);
+    r.release();
+  }
 }

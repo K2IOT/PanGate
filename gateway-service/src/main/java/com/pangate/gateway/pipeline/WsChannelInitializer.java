@@ -24,6 +24,8 @@ public final class WsChannelInitializer extends ChannelInitializer<SocketChannel
   private final WsBinaryAdapter wsBinary = new WsBinaryAdapter();
   private final FrameCodec frameCodec;
   private final SessionHandler sessionHandler;
+  private final HttpUpstreamHandler httpUpstream;
+  private final java.util.Map<String, java.util.function.Supplier<io.netty.channel.ChannelHandler>> routes;
 
   public WsChannelInitializer(PipelineDeps deps) {
     this.deps = deps;
@@ -31,6 +33,9 @@ public final class WsChannelInitializer extends ChannelInitializer<SocketChannel
     this.proxyTrusted = proxy.enabled() ? com.pangate.gateway.net.CidrSet.parse(proxy.trustedCidrs()) : null;
     this.frameCodec = new FrameCodec(deps.limits());
     this.sessionHandler = deps.sessionHandler();
+    this.httpUpstream = new HttpUpstreamHandler(deps.tickets(), deps.policy(), deps.upstream(), deps.limits(),
+        deps.metrics(), () -> System.currentTimeMillis() / 1000);
+    this.routes = java.util.Map.of("/v1/upstream", () -> httpUpstream);
     this.wsConfig = WebSocketServerProtocolConfig.newBuilder()
         .websocketPath(deps.props().listeners().ws().path())
         .subprotocols(UpgradeGuard.SUBPROTOCOL)
@@ -58,8 +63,10 @@ public final class WsChannelInitializer extends ChannelInitializer<SocketChannel
     p.addLast("flush", new FlushConsolidationHandler(256, true));
     p.addLast("writability", WritabilityTracker.INSTANCE);
     p.addLast("http", new HttpServerCodec());
-    p.addLast("aggregator", new HttpObjectAggregator(8192));
-    p.addLast("upgradeGuard", new UpgradeGuard(deps.props(), deps.limits(), deps.loops(), deps.node(), ThreadLocalRandom.current()));
+    // Upgrades are tiny, but POST /v1/upstream carries a whole frame (spec §4.3): up to frame-max plus slack.
+    p.addLast("aggregator", new HttpObjectAggregator(Math.max(8192, deps.limits().current().frameMax() + 1024)));
+    p.addLast("upgradeGuard", new UpgradeGuard(deps.props(), deps.limits(), deps.loops(), deps.node(),
+        ThreadLocalRandom.current(), routes));
     p.addLast("ws", new WebSocketServerProtocolHandler(wsConfig));
     p.addLast("wsBinary", wsBinary);
     p.addLast("frameCodec", frameCodec);

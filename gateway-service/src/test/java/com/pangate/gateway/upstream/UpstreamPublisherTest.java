@@ -227,4 +227,20 @@ class UpstreamPublisherTest {
     send(upstream("cmd", "m2"));
     assertThat(f.reliable.history()).hasSize(1);
   }
+
+  @Test
+  void httpRecordHasTicketIdentityAndEmptyConnId() throws Exception {
+    com.pangate.gateway.auth.ResumeTicket t = new com.pangate.gateway.auth.ResumeTicket("cell-1", "t1", "t1:u2", "d2",
+        f.wallNow(), f.wallNow() + 3600, 1L, List.of());
+    var stage = f.upstream.publishHttp(t, upstream("telemetry", "m9"));
+
+    assertThat(stage.toCompletableFuture().get()).isEqualTo(UpstreamPublisher.HttpOutcome.ACCEPTED);
+    ProducerRecord<String, byte[]> r = f.telemetry.history().get(0);
+    assertThat(r.key()).isEqualTo("t1:u2");
+    com.pangate.contracts.v1.UpstreamRecord rec = com.pangate.contracts.v1.UpstreamRecord.parseFrom(r.value());
+    assertThat(rec.getPrincipalId()).isEqualTo("t1:u2");
+    assertThat(rec.getDeviceId()).isEqualTo("d2");
+    assertThat(rec.getConnId()).isEmpty();
+    assertThat(rec.getMsgId()).isEqualTo("m9");
+  }
 }
