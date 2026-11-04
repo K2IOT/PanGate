@@ -73,6 +73,12 @@ public final class SessionTracker {
     Integer clientCode = s.channel().attr(ChannelAttrs.CLIENT_CLOSE_CODE).get();
     s.markClosedBy(clientCode != null ? CloseCode.of(clientCode) : CloseCode.ABNORMAL);
     loop.wheel().remove(s);
+    if (s.unwritable()) {
+      loop.addUnwritable(-1);
+    }
+    if (s.closeCode() == CloseCode.SLOW_CONSUMER) {
+      metrics.slowConsumerClosed(s.closeReason());
+    }
     s.failPending(s.closeCode() == CloseCode.SLOW_CONSUMER
         ? com.pangate.contracts.v1.AckItem.Status.STATUS_NACK_SLOW_CONSUMER
         : com.pangate.contracts.v1.AckItem.Status.STATUS_NACK_CLOSED);

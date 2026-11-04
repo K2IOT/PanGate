@@ -34,6 +34,7 @@ public final class TcpChannelInitializer extends ChannelInitializer<SocketChanne
     p.addLast("frameCodec", frameCodec);
     p.addLast("hello", deps.helloAuth());
     p.addLast("session", sessionHandler);
+    p.addLast("writability", WritabilityTracker.INSTANCE);
     p.addLast("errors", PipelineDeps.ERROR_TERMINATOR);
   }
 }

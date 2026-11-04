@@ -26,6 +26,7 @@ public final class LoopContext {
   private final it.unimi.dsi.fastutil.objects.ObjectArrayList<Session> dirty =
       new it.unimi.dsi.fastutil.objects.ObjectArrayList<>();
   private volatile long outboundBytes;
+  private volatile int unwritable;  // written on the loop only
   private static final java.lang.invoke.VarHandle PENDING;
 
   static {
@@ -142,6 +143,16 @@ public final class LoopContext {
     }
     dirty.size(keep);
     outboundBytes = sum;
+  }
+
+  /** Channels of this loop currently unwritable; written on the loop, read anywhere. */
+  public int unwritable() {
+    return unwritable;
+  }
+
+  @SuppressWarnings("NonAtomicVolatileUpdate")
+  public void addUnwritable(int delta) {
+    unwritable += delta;
   }
 
   /** Last sampled outbound bytes of this loop; any thread. */

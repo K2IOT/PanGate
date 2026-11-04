@@ -56,6 +56,7 @@ public final class WsChannelInitializer extends ChannelInitializer<SocketChannel
     p.addLast("frameCodec", frameCodec);
     p.addLast("hello", deps.helloAuth());
     p.addLast("session", sessionHandler);
+    p.addLast("writability", WritabilityTracker.INSTANCE);
     p.addLast("errors", PipelineDeps.ERROR_TERMINATOR);
   }
 }

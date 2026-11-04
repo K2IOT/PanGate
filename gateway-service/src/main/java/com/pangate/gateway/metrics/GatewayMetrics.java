@@ -39,7 +39,15 @@ public final class GatewayMetrics {
         c -> Counter.builder("gw.closes").tag("code", Integer.toString(c.code())).register(registry)).increment();
   }
 
+  /** 4008 closes by cause: unwritable deadline, pending-ack overflow, or shed level 5 (spec §7.3, §7.4). */
+  public void slowConsumerClosed(String closeReason) {
+    String reason = "PENDING_OVERFLOW".equals(closeReason) ? "overflow" : "SHED".equals(closeReason) ? "shed" : "unwritable";
+    Counter.builder("gw.slow.consumer.closes").tag("reason", reason).register(registry).increment();
+  }
+
   public void bindLoops(LoopRegistry loops) {
+    Gauge.builder("gw.unwritable.channels", loops,
+        l -> l.all().stream().mapToInt(LoopContext::unwritable).sum()).register(registry);
     Gauge.builder("gw.pending.ack.inflight", loops,
         l -> l.all().stream().mapToInt(LoopContext::pendingInflight).sum()).register(registry);
     for (LoopContext c : loops.all()) {

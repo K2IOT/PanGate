@@ -77,6 +77,8 @@ public final class Session extends WheelNode implements Deadlined {
   private PendingAckWindow pending;
   // In the loop's dirty list (written since the last outbound sample, spec §7.2).
   private boolean dirty;
+  // Since when the channel is unwritable (spec §7.4); MAX while writable.
+  private long unwritableSinceSec = Long.MAX_VALUE;
   // Subscribed topics (TopicIndex mirror); null while none.
   private String[] topics;
   private int overflowNacks;
@@ -142,9 +144,9 @@ public final class Session extends WheelNode implements Deadlined {
     return switch (state) {
       case HANDSHAKING -> Math.min(acceptedAtSec + l.handshakeTimeout().toSeconds(), helloDeadlineSec);
       // Reads paused for Kafka back-pressure: PINGs cannot arrive, so no heartbeat timeout meanwhile (spec §0.2).
-      case ACTIVE -> Math.min(pendingDeadlineSec(l),
+      case ACTIVE -> Math.min(Math.min(pendingDeadlineSec(l), slowConsumerDeadlineSec(l)),
           upstreamPaused ? expMonoSec : Math.min(lastSeenSec + idleTimeoutSec(), expMonoSec));
-      case DRAINING -> Math.min(pendingDeadlineSec(l),
+      case DRAINING -> Math.min(Math.min(pendingDeadlineSec(l), slowConsumerDeadlineSec(l)),
           Math.min(Math.min(lastSeenSec + idleTimeoutSec(), expMonoSec), drainDeadlineSec));
       case CLOSED -> Long.MAX_VALUE;
     };
@@ -157,6 +159,10 @@ public final class Session extends WheelNode implements Deadlined {
       return;
     }
     expirePending(nowSec);
+    if (state != SessionState.HANDSHAKING && nowSec >= slowConsumerDeadlineSec(limits.current())) {
+      close(CloseCode.SLOW_CONSUMER, "SLOW_CONSUMER");
+      return;
+    }
     if (nowSec >= nextDeadlineSec()) {
       if (state == SessionState.HANDSHAKING) {
         close(CloseCode.HELLO_TIMEOUT, "HELLO_TIMEOUT");
@@ -170,6 +176,31 @@ public final class Session extends WheelNode implements Deadlined {
       return;
     }
     reschedule();
+  }
+
+  private long slowConsumerDeadlineSec(GatewayLimits l) {
+    return unwritableSinceSec == Long.MAX_VALUE ? Long.MAX_VALUE
+        : unwritableSinceSec + l.slowConsumerTimeout().toSeconds();
+  }
+
+  /** Netty writability changed: unwritable starts the slow-consumer deadline, writable clears it. */
+  public void writabilityChanged(boolean writable, long nowSec) {
+    checkLoop();
+    if (state == SessionState.CLOSED) {
+      return;
+    }
+    if (!writable && unwritableSinceSec == Long.MAX_VALUE) {
+      unwritableSinceSec = nowSec;
+      loop.addUnwritable(1);
+    } else if (writable && unwritableSinceSec != Long.MAX_VALUE) {
+      unwritableSinceSec = Long.MAX_VALUE;
+      loop.addUnwritable(-1);
+    }
+    reschedule();
+  }
+
+  public boolean unwritable() {
+    return unwritableSinceSec != Long.MAX_VALUE;
   }
 
   private long pendingDeadlineSec(GatewayLimits l) {
