@@ -81,7 +81,7 @@ class GatewayClusterIT {
       int tcp = freePort();
       int mgmt = freePort();
       List<String> args = new ArrayList<>(List.of("--gateway.dev.dir=" + devDir, "--gateway.listeners.ws.port=" + ws,
-          "--gateway.listeners.tcp.port=" + tcp, "--server.port=" + mgmt, "--gateway.io.threads=2",
+          "--gateway.listeners.tcp.port=" + tcp, "--server.port=" + mgmt, "--gateway.io.threads=2", "--gateway.grpc.port=0",
           "--gateway.node-id=" + nodeId));
       args.addAll(InfraContainers.gatewayArgs());
       args.addAll(List.of(extra));
@@ -421,7 +421,7 @@ class GatewayClusterIT {
   void startupFailsFastWithDiagnosticWhenKafkaMissing() {
     assertThatThrownBy(() -> new SpringApplicationBuilder(GatewayApplication.class).profiles("local").run(
         "--gateway.dev.dir=" + devDir, "--gateway.listeners.ws.port=" + freePort(),
-        "--gateway.listeners.tcp.port=" + freePort(), "--server.port=" + freePort(),
+        "--gateway.listeners.tcp.port=" + freePort(), "--server.port=" + freePort(), "--gateway.grpc.port=0",
         "--gateway.node-id=gw-it-nokafka", "--gateway.redis.registry-uri=" + InfraContainers.redisUri(),
         "--gateway.redis.state-uri=" + InfraContainers.redisUri(), "--gateway.kafka.bootstrap=localhost:1",
         "--gateway.startup.dependency-timeout=3s"))

@@ -73,6 +73,25 @@ public final class AckBatcher {
     size.set(0);
   }
 
+  /** Stops batching; with {@code complete}, ends the response stream after any flush in progress. */
+  public void close(boolean complete) {
+    stop();
+    exec.execute(() -> {
+      while (!flushing.compareAndSet(false, true)) {
+        Thread.onSpinWait();
+      }
+      try {
+        if (complete) {
+          out.onCompleted();
+        }
+      } catch (RuntimeException ignored) {
+        // already cancelled
+      } finally {
+        flushing.set(false);
+      }
+    });
+  }
+
   void flush() {
     if (!flushing.compareAndSet(false, true)) {
       return;
