@@ -27,6 +27,8 @@ public final class AuthFixture {
   public final List<ECKey> published = new ArrayList<>();
   public final JwksCache jwks;
   public final JwtVerifier verifier;
+  public final com.pangate.gateway.auth.WarmUpTokens warmUp =
+      new com.pangate.gateway.auth.WarmUpTokens("pangate-gw", "");
   public final JwtAuthFlow flow;
   public final ResumeTicketService tickets;
 
@@ -45,7 +47,7 @@ public final class AuthFixture {
           return t;
         }), Runnable::run, Duration.ofMinutes(5), () -> nowSec.getAsLong() * 1000);
     jwks.refresh().join();
-    verifier = new JwtVerifier(jwks, "pangate-gw", "", Duration.ofSeconds(30));
+    verifier = new JwtVerifier(jwks, "pangate-gw", "", Duration.ofSeconds(30), warmUp);
     flow = new JwtAuthFlow(verifier, jwks, Duration.ofSeconds(2));
     byte[] k = new byte[32];
     tickets = new ResumeTicketService(new TicketKeyRing(new TicketKey(1, k), new TicketKey(2, k), new TicketKey(3, k)));

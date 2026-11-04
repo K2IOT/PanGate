@@ -56,6 +56,9 @@ public final class SessionTracker {
 
   public void onActivated(Session s) {
     principals.add(s.identity().principalId(), new ConnRef(s.loop().index(), s.sessionKey()));
+    if (s.warmUp()) {
+      return;
+    }
     for (SessionListener l : listeners) {
       try {
         l.activated(s);
@@ -93,6 +96,9 @@ public final class SessionTracker {
       principals.remove(s.identity().principalId(), new ConnRef(loop.index(), s.sessionKey()));
     }
     ips.decrement(s.remoteAddress());
+    if (s.warmUp()) {
+      return;
+    }
     metrics.closed(s.closeCode());
     if (s.identity() != null) {
       for (SessionListener l : listeners) {

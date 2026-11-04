@@ -170,6 +170,11 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
       return;
     }
     ConnectClaims c = v.claims();
+    if (com.pangate.gateway.auth.WarmUpTokens.isWarmUp(c.tenant())
+        && (session.remoteAddress() == null || !session.remoteAddress().isLoopbackAddress())) {
+      fail(session, CloseCode.AUTH_FAILED, "auth_failed");  // warm-up tokens only from this host (spec §7.6)
+      return;
+    }
     long exp = now + limits.current().sessionTtl().toSeconds();
     ResumeTicket t = new ResumeTicket(cell, c.tenant(), c.principal(), c.device(), now, exp,
         ResumeTicketService.jtiHash(c.jti()), c.topics());
@@ -211,7 +216,8 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
     ctx.channel().config().setAutoRead(false);
     CompletionStage<OptionalLong> read;
     try {
-      read = seq.read(t.principal());
+      read = session.warmUp() ? java.util.concurrent.CompletableFuture.completedFuture(OptionalLong.empty())
+          : seq.read(t.principal());
     } catch (RuntimeException e) {
       read = java.util.concurrent.CompletableFuture.completedFuture(OptionalLong.empty());
     }
@@ -236,7 +242,7 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
         .setSeqEpoch(seq.seqEpoch(t.principal()))
         .setSeqUnknown(seqValue.isEmpty())
         .build()));
-    metrics.handshake("ok");
+    metrics.handshake(session.warmUp() ? "warmup" : "ok");
     while (!held.isEmpty()) {
       ctx.fireChannelRead(held.poll());
     }

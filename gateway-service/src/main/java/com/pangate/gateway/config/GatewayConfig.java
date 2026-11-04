@@ -122,8 +122,14 @@ public class GatewayConfig {
   }
 
   @Bean
-  JwtAuthFlow jwtAuthFlow(GatewayProperties p, JwksCache jwks) {
-    JwtVerifier verifier = new JwtVerifier(jwks, p.auth().audience(), p.auth().issuer(), p.auth().clockSkew());
+  com.pangate.gateway.auth.WarmUpTokens warmUpTokens(GatewayProperties p) {
+    return new com.pangate.gateway.auth.WarmUpTokens(p.auth().audience(), p.auth().issuer());
+  }
+
+  @Bean
+  JwtAuthFlow jwtAuthFlow(GatewayProperties p, JwksCache jwks, com.pangate.gateway.auth.WarmUpTokens warmUp) {
+    JwtVerifier verifier = new JwtVerifier(jwks, p.auth().audience(), p.auth().issuer(), p.auth().clockSkew(),
+        warmUp);
     return new JwtAuthFlow(verifier, jwks, Duration.ofSeconds(2));
   }
 

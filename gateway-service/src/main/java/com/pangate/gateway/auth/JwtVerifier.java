@@ -25,8 +25,16 @@ public final class JwtVerifier {
   private final String audience;
   private final String issuer;
   private final long skewSec;
+  private final WarmUpTokens warmUp;
 
   public JwtVerifier(JwksCache cache, String audience, String issuerOrEmpty, Duration clockSkew) {
+    this(cache, audience, issuerOrEmpty, clockSkew, null);
+  }
+
+  /** {@code warmUp}: tokens of this process's warm-up key are accepted; nobody else may claim its tenant. */
+  public JwtVerifier(JwksCache cache, String audience, String issuerOrEmpty, Duration clockSkew,
+      WarmUpTokens warmUp) {
+    this.warmUp = warmUp;
     this.cache = cache;
     this.audience = audience;
     this.issuer = issuerOrEmpty == null ? "" : issuerOrEmpty;
@@ -47,7 +55,8 @@ public final class JwtVerifier {
     if (kid == null || kid.isBlank()) {
       return new JwtResult.Rejected("missing kid");
     }
-    Optional<ECPublicKey> key = cache.key(kid);
+    boolean warmUpKey = warmUp != null && kid.equals(warmUp.kid());
+    Optional<ECPublicKey> key = warmUpKey ? Optional.of(warmUp.publicKey()) : cache.key(kid);
     if (key.isEmpty()) {
       return new JwtResult.UnknownKid(kid);
     }
@@ -55,7 +64,11 @@ public final class JwtVerifier {
       if (!parsed.verify(new ECDSAVerifier(key.get()))) {
         return new JwtResult.Rejected("bad signature");
       }
-      return checkClaims(parsed.getJWTClaimsSet(), nowSec);
+      JwtResult r = checkClaims(parsed.getJWTClaimsSet(), nowSec);
+      if (r instanceof JwtResult.Verified v && WarmUpTokens.isWarmUp(v.claims().tenant()) != warmUpKey) {
+        return new JwtResult.Rejected("reserved tenant");
+      }
+      return r;
     } catch (JOSEException | ParseException | RuntimeException e) {
       return new JwtResult.Rejected("invalid token: " + e.getMessage());
     }

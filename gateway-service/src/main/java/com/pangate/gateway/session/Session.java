@@ -120,7 +120,8 @@ public final class Session extends WheelNode implements Deadlined {
       loop.addHandshaking(-1);
     }
     this.state = SessionState.ACTIVE;
-    this.recycleAtSec = loop.recycler() == null ? Long.MAX_VALUE : loop.recycler().firstRecycleAtSec(loop.nowSec());
+    this.recycleAtSec = loop.recycler() == null || warmUp() ? Long.MAX_VALUE
+        : loop.recycler().firstRecycleAtSec(loop.nowSec());
     reschedule();
   }
 
@@ -423,6 +424,11 @@ public final class Session extends WheelNode implements Deadlined {
     if (state != SessionState.CLOSED) {
       loop.wheel().schedule(this, nextDeadlineSec());
     }
+  }
+
+  /** A warm-up session (spec §7.6): no registry, Kafka, recycling or business metrics. */
+  public boolean warmUp() {
+    return identity != null && com.pangate.gateway.auth.WarmUpTokens.isWarmUp(identity.tenantId());
   }
 
   public LoopContext loop() {
