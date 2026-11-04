@@ -51,6 +51,20 @@ public class ProtectionConfig {
         tick.executor(), metrics);
   }
 
+  /** Kernel counters on Linux, refreshed every 10 s on the offload executor (file reads stay off gw-tick). */
+  @Bean
+  java.util.Optional<com.pangate.gateway.metrics.KernelStatsReader> kernelStats(TickScheduler tick,
+      java.util.concurrent.ExecutorService offload, io.micrometer.core.instrument.MeterRegistry registry) {
+    java.util.Optional<com.pangate.gateway.metrics.KernelStatsReader> reader =
+        com.pangate.gateway.metrics.KernelStatsReader.forThisHost();
+    reader.ifPresent(r -> {
+      r.refresh();
+      r.bindTo(registry);
+      tick.scheduleAtFixedRate(() -> offload.execute(r::refresh), Duration.ofSeconds(10));
+    });
+    return reader;
+  }
+
   /** One recycler per loop (its random generator is loop-confined). */
   @Bean
   java.util.List<com.pangate.gateway.lifecycle.Recycler> recyclers(GatewayProperties p, LoopRegistry loops,
