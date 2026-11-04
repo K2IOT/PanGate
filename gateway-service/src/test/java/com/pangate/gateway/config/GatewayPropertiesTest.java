@@ -221,4 +221,13 @@ class GatewayPropertiesTest {
       assertThat(p.warmup().iterations()).isEqualTo(200);
     });
   }
+
+  @Test
+  void cpuShedSignalOnInProdOffInLocalAndDev() {
+    runner.run(ctx -> assertThat(ctx.getBean(GatewayProperties.class).shed().cpu()).isTrue());
+    runner.withPropertyValues("spring.profiles.active=local")
+        .run(ctx -> assertThat(ctx.getBean(GatewayProperties.class).shed().cpu()).isFalse());
+    runner.withPropertyValues("spring.profiles.active=dev")
+        .run(ctx -> assertThat(ctx.getBean(GatewayProperties.class).shed().cpu()).isFalse());
+  }
 }

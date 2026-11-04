@@ -48,7 +48,7 @@ class UpgradeGuardTest {
         new GatewayProperties.Recycling(Duration.ofMinutes(30), Duration.ofMinutes(90), Duration.ofSeconds(30)),
         new GatewayProperties.Drain(2, Duration.ofSeconds(5), Duration.ofSeconds(60), Duration.ofMinutes(10),
             Duration.ofSeconds(10)),
-        new GatewayProperties.Warmup(0, 32, Duration.ofSeconds(60)));
+        new GatewayProperties.Warmup(0, 32, Duration.ofSeconds(60)), new GatewayProperties.Shed(true));
   }
 
   @BeforeEach

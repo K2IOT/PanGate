@@ -22,20 +22,33 @@ public class ProtectionConfig {
   }
 
   @Bean
-  com.pangate.gateway.shed.ShedSampler shedSampler(OutboundBudget budget, LoopRegistry loops,
+  com.pangate.gateway.shed.ShedSampler shedSampler(GatewayProperties p, OutboundBudget budget, LoopRegistry loops,
       com.pangate.gateway.metrics.EventLoopLagProbe lag, com.pangate.gateway.lifecycle.KafkaClients kafka,
       com.pangate.gateway.server.NodeState node, TickScheduler tick, GatewayMetrics metrics) {
     com.sun.management.OperatingSystemMXBean os = (com.sun.management.OperatingSystemMXBean)
         java.lang.management.ManagementFactory.getOperatingSystemMXBean();
     long maxDirect = PlatformDependent.maxDirectMemory();
+    com.pangate.gateway.shed.CpuWindow cpu = new com.pangate.gateway.shed.CpuWindow(100);
+    java.util.function.DoubleSupplier cpuSignal = p.shed().cpu() ? () -> {
+      cpu.record(os.getProcessCpuLoad());
+      return cpu.average();
+    } : () -> 0;
     com.pangate.gateway.shed.ShedSampler sampler = new com.pangate.gateway.shed.ShedSampler(
         new com.pangate.gateway.shed.LoadShedLadder(() -> System.nanoTime() / 1_000_000), budget::ratio,
-        lag::maxP99Seconds, os::getProcessCpuLoad, kafka::maxBufferRatio,
+        lag::maxP99Seconds, cpuSignal, kafka::maxBufferRatio,
         () -> PlatformDependent.usedDirectMemory() / (double) maxDirect, loops,
         new com.pangate.gateway.shed.HandshakeTrend(), node, new com.pangate.gateway.shed.ShedEnforcer(loops, budget),
         () -> System.nanoTime() / 1_000_000, metrics);
     tick.scheduleAtFixedRate(sampler::sample, Duration.ofMillis(100));
     return sampler;
+  }
+
+  @Bean
+  com.pangate.gateway.lifecycle.DrainCoordinator drainCoordinator(GatewayProperties p, LoopRegistry loops,
+      com.pangate.gateway.server.NodeState node, com.pangate.gateway.registry.NodeIdentity identity,
+      TickScheduler tick, GatewayMetrics metrics) {
+    return new com.pangate.gateway.lifecycle.DrainCoordinator(p.drain(), loops, node, identity::markDraining,
+        tick.executor(), metrics);
   }
 
   /** One recycler per loop (its random generator is loop-confined). */

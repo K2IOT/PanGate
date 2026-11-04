@@ -16,6 +16,11 @@ public final class RegistryKeys {
     return "node:{" + nodeId + "}";
   }
 
+  /** Set while the node drains (spec §7.1, §7.5), so routers stop placing new work on it. */
+  public static String draining(String nodeId) {
+    return "node:draining:{" + nodeId + "}";
+  }
+
   public static String reg(String principalId) {
     return "reg:{" + principalId + "}";
   }

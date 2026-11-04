@@ -28,7 +28,8 @@ public record GatewayProperties(
     DataSize outboundBudget,
     Recycling recycling,
     Drain drain,
-    Warmup warmup) {
+    Warmup warmup,
+    Shed shed) {
 
   public record Listeners(Ws ws, Tcp tcp) {}
 
@@ -63,6 +64,12 @@ public record GatewayProperties(
   /** Staged drain (spec §7.5). */
   public record Drain(int batchPercent, Duration interval, Duration maxDelay, Duration maxDuration,
       Duration listenerCloseDelay) {}
+
+  /**
+   * Shed ladder inputs (spec §7.3). {@code cpu=false} drops the CPU signals (L1, L3): local and dev machines share
+   * their CPU with the IDE, tests and JIT, which would otherwise refuse new connections for a minute at a time.
+   */
+  public record Shed(boolean cpu) {}
 
   /** Warm-up before readiness (spec §7.6). */
   public record Warmup(int iterations, int concurrency, Duration timeout) {}

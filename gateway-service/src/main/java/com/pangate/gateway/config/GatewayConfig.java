@@ -161,9 +161,10 @@ public class GatewayConfig {
 
   @Bean
   NettyGatewayServer nettyGatewayServer(GatewayProperties p, IoGroups io, LoopRegistry loops, NodeState node,
-      AdmissionController admission, EventLoopLagProbe lag, PipelineDeps deps) {
+      AdmissionController admission, EventLoopLagProbe lag, PipelineDeps deps,
+      com.pangate.gateway.lifecycle.DrainCoordinator drain) {
     return new NettyGatewayServer(p, io, loops, node, admission, lag, new WsChannelInitializer(deps),
-        new TcpChannelInitializer(deps));
+        new TcpChannelInitializer(deps), drain);
   }
 
   @Bean
@@ -194,10 +195,7 @@ public class GatewayConfig {
 
   @Bean
   AdminController adminController(NettyGatewayServer server) {
-    return new AdminController(() -> {
-      if (server.isRunning()) {
-        server.stop();
-      }
-    });
+    // preStop: drain only; the SIGTERM that follows waits for the same drain in stop() (spec §7.5).
+    return new AdminController(server::drain);
   }
 }

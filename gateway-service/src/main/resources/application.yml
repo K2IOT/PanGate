@@ -49,6 +49,7 @@ gateway:
   recycling: { min: 30m, max: 90m, grace: 30s }
   drain: { batch-percent: 2, interval: 5s, max-delay: 60s, max-duration: 10m, listener-close-delay: 10s }
   warmup: { iterations: 2000, concurrency: 32, timeout: 60s }
+  shed: { cpu: true }
   grpc:
     port: 9090
     plaintext: false

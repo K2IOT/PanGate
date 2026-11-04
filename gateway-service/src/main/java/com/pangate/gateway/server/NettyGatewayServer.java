@@ -42,13 +42,15 @@ public final class NettyGatewayServer implements SmartLifecycle {
   private final EventLoopLagProbe lagProbe;
   private final ChannelInitializer<SocketChannel> wsInitializer;
   private final ChannelInitializer<SocketChannel> tcpInitializer;
+  private final com.pangate.gateway.lifecycle.DrainCoordinator drain;
   private final List<Channel> listeners = new ArrayList<>();
   private volatile boolean running;
   private final java.util.concurrent.atomic.AtomicBoolean stopping = new java.util.concurrent.atomic.AtomicBoolean();
 
   public NettyGatewayServer(GatewayProperties props, IoGroups io, LoopRegistry loops, NodeState node,
       AdmissionController admission, EventLoopLagProbe lagProbe, ChannelInitializer<SocketChannel> wsInitializer,
-      ChannelInitializer<SocketChannel> tcpInitializer) {
+      ChannelInitializer<SocketChannel> tcpInitializer, com.pangate.gateway.lifecycle.DrainCoordinator drain) {
+    this.drain = drain;
     this.props = props;
     this.io = io;
     this.loops = loops;
@@ -66,10 +68,10 @@ public final class NettyGatewayServer implements SmartLifecycle {
     int ws = props.listeners().ws().port();
     try {
       for (int i = 0; i < io.effectiveAcceptors(props.listeners().ws().acceptors()); i++) {
-        listeners.add(bind(wsInitializer, ws, "ws", "GATEWAY_LISTENERS_WS_PORT"));
+        addListener(bind(wsInitializer, ws, "ws", "GATEWAY_LISTENERS_WS_PORT"));
       }
       if (props.listeners().tcp().enabled()) {
-        listeners.add(bind(tcpInitializer, props.listeners().tcp().port(), "tcp", "GATEWAY_LISTENERS_TCP_PORT"));
+        addListener(bind(tcpInitializer, props.listeners().tcp().port(), "tcp", "GATEWAY_LISTENERS_TCP_PORT"));
       }
     } catch (RuntimeException e) {
       // Fail fast (spec §3.7): Spring will not call stop() on a lifecycle that never started, so release here —
@@ -84,6 +86,10 @@ public final class NettyGatewayServer implements SmartLifecycle {
     running = true;
     log.info("gateway listening: wss :{}{} ({} acceptors), tcp :{}", ws, props.listeners().ws().path(),
         listeners.size() - (props.listeners().tcp().enabled() ? 1 : 0), props.listeners().tcp().port());
+  }
+
+  private synchronized void addListener(Channel ch) {
+    listeners.add(ch);
   }
 
   private Channel bind(ChannelInitializer<SocketChannel> init, int port, String name, String envVar) {
@@ -105,34 +111,27 @@ public final class NettyGatewayServer implements SmartLifecycle {
     }
   }
 
+  /** Starts the staged drain (spec §7.5) without stopping the process; idempotent. */
+  public CompletableFuture<Void> drain() {
+    return drain.drain(this::closeListeners);
+  }
+
+  private synchronized void closeListeners() {
+    listeners.forEach(Channel::close);
+    listeners.clear();
+  }
+
   @Override
   public void stop(Runnable callback) {
-    // /admin/drain and Spring shutdown may both call stop(); only the first one tears down.
+    // /admin/drain may already have started the drain: stop waits for the same one, then shuts the loops down.
     if (!stopping.compareAndSet(false, true)) {
       callback.run();
       return;
     }
-    node.draining(true);
-    listeners.forEach(Channel::close);
-    listeners.clear();
-    List<CompletableFuture<Void>> closing = new ArrayList<>();
-    for (LoopContext c : loops.all()) {
-      CompletableFuture<Void> done = new CompletableFuture<>();
-      closing.add(done);
-      c.eventLoop().execute(() -> {
-        c.forEachSession(s -> s.close(CloseCode.GOING_AWAY, "SHUTDOWN"));
-        done.complete(null);
-      });
-    }
-    try {
-      CompletableFuture.allOf(closing.toArray(new CompletableFuture[0])).get(5, TimeUnit.SECONDS);
-    } catch (Exception e) {
-      log.warn("not every event loop closed its sessions within 5 s", e);
-    }
-    io.shutdown(Duration.ZERO, Duration.ofSeconds(5)).addListener(f -> {
+    drain().whenComplete((v, e) -> io.shutdown(Duration.ZERO, Duration.ofSeconds(5)).addListener(f -> {
       running = false;
       callback.run();
-    });
+    }));
   }
 
   @Override

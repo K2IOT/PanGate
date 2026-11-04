@@ -161,4 +161,16 @@ class NodeIdentityIT {
     assertThat(fx.sync.get("node:{n1}")).isEqualTo("2");
     assertThat(fx.sync.get("node:epoch:{n1}")).isEqualTo("2");
   }
+
+  @Test
+  void markDrainingSetsKeyForFifteenMinutesAndStopDeletesIt() {
+    NodeIdentity id = identity(new NodeState());
+    id.start();
+    id.markDraining();
+    org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(5))
+        .until(() -> "1".equals(fx.sync.get("node:draining:{n1}")));
+    assertThat(fx.sync.ttl("node:draining:{n1}")).isBetween(890L, 900L);
+    id.stop();
+    assertThat(fx.sync.exists("node:draining:{n1}")).isZero();
+  }
 }

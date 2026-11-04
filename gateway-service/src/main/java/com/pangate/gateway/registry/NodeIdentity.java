@@ -200,6 +200,20 @@ public final class NodeIdentity implements SmartLifecycle {
     return epoch;
   }
 
+  /** {@code SET node:draining:{id} 1 EX 900}, async; a failure is only logged (spec §7.5). */
+  public void markDraining() {
+    try {
+      redis.registry().set(RegistryKeys.draining(nodeId), "1", io.lettuce.core.SetArgs.Builder.ex(900))
+          .whenComplete((v, e) -> {
+            if (e != null) {
+              log.warn("node {} could not mark itself draining: {}", nodeId, e.toString());
+            }
+          });
+    } catch (RuntimeException e) {
+      log.warn("node {} could not mark itself draining: {}", nodeId, e.toString());
+    }
+  }
+
   @Override
   public void stop() {
     running = false;
@@ -212,6 +226,7 @@ public final class NodeIdentity implements SmartLifecycle {
     try {
       RELEASE.run(redis.registry(), RegistryKeys.node(nodeId), Long.toString(epoch)).toCompletableFuture()
           .get(2, TimeUnit.SECONDS);
+      redis.registry().del(RegistryKeys.draining(nodeId)).get(2, TimeUnit.SECONDS);
       // Only drop the live marker if no newer incarnation holds the lease.
       if (redis.registry().get(RegistryKeys.node(nodeId)).get(2, TimeUnit.SECONDS) == null) {
         redis.registry().zrem(RegistryKeys.NODES_LIVE, nodeId).get(2, TimeUnit.SECONDS);
