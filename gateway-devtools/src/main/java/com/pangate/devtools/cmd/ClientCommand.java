@@ -79,6 +79,10 @@ public final class ClientCommand implements Callable<Integer> {
   @Option(names = "--bind", split = ",", description = "Local addresses to spread --load connections over.")
   List<String> bind = new ArrayList<>();
 
+  @Option(names = "--subscribe", split = ",",
+      description = "Topics to SUBSCRIBE after CONNECTED (minted tokens get them as topic patterns).")
+  List<String> subscribe = List.of();
+
   @Option(names = "--ping-interval", defaultValue = "PT30S")
   Duration pingInterval;
 
@@ -90,10 +94,23 @@ public final class ClientCommand implements Callable<Integer> {
 
   private int runSingle(ClientTls tls) throws Exception {
     try (GatewayClient c = GatewayClient.connect(url, tls, T)) {
+      // Print every PUSH / RPC_REQ and ACK the reliable ones (spec §2.3).
+      c.onPush(f -> {
+        System.out.println(f.getType().name().substring("FRAME_TYPE_".length()) + " msg_id=" + f.getMsgId()
+            + " class=" + f.getClass_() + (f.getTopic().isEmpty() ? "" : " topic=" + f.getTopic())
+            + " bytes=" + f.getPayload().size());
+        if (f.getClass_() == com.pangate.contracts.v1.DeliveryClass.DELIVERY_CLASS_RELIABLE
+            || f.getClass_() == com.pangate.contracts.v1.DeliveryClass.DELIVERY_CLASS_ORDERED) {
+          c.ack(f.getMsgId());
+        }
+      });
       Connected connected = c.hello(singleHello(), T);
       System.out.println("CONNECTED conn_id=" + connected.getConnId() + " expires_at_ms=" + connected.getSessionExpiresAtMs());
       if (ticketFile != null) {
         Files.writeString(ticketFile, connected.getResumeTicket());
+      }
+      if (!subscribe.isEmpty()) {
+        c.subscribe(subscribe.toArray(String[]::new));
       }
       c.ping(T);
       System.out.println("PONG");
@@ -118,7 +135,7 @@ public final class ClientCommand implements Callable<Integer> {
     }
     if (key != null) {
       String p = principal != null ? principal : tenant + ":dev";
-      return Hellos.jwt(minter().mint(new TokenRequest(tenant, p, device, List.of(), Duration.ofMinutes(10)), Instant.now()), device);
+      return Hellos.jwt(minter().mint(new TokenRequest(tenant, p, device, subscribe, Duration.ofMinutes(10)), Instant.now()), device);
     }
     throw new IllegalArgumentException("one of --token, --ticket-file (existing) or --key is required");
   }

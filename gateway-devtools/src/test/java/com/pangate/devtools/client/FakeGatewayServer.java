@@ -87,10 +87,22 @@ final class FakeGatewayServer implements AutoCloseable {
     return ((InetSocketAddress) tcp.localAddress()).getPort();
   }
 
-  private static void handle(Channel ch, ByteBuf bytes, boolean websocket) throws InvalidProtocolBufferException {
+  /** Every frame the clients sent (newest last). */
+  final java.util.List<Frame> received = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+  private void handle(Channel ch, ByteBuf bytes, boolean websocket) throws InvalidProtocolBufferException {
     byte[] arr = new byte[bytes.readableBytes()];
     bytes.readBytes(arr);
     Frame in = Frame.parseFrom(arr);
+    received.add(in);
+    if (in.getType() == FrameType.FRAME_TYPE_SUBSCRIBE) {
+      // answer with a RELIABLE push on the first topic, so tests can await it and ACK
+      com.pangate.contracts.v1.Subscribe sub = com.pangate.contracts.v1.Subscribe.parseFrom(in.getPayload());
+      write(ch, Frame.newBuilder().setType(FrameType.FRAME_TYPE_PUSH).setMsgId("p1")
+          .setClass_(com.pangate.contracts.v1.DeliveryClass.DELIVERY_CLASS_RELIABLE).setTopic(sub.getTopics(0))
+          .build(), websocket);
+      return;
+    }
     if (in.getType() == FrameType.FRAME_TYPE_HELLO) {
       Hello hello = Hello.parseFrom(in.getPayload());
       if ("kick".equals(hello.getDeviceId())) {

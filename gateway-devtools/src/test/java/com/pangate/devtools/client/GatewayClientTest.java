@@ -100,4 +100,44 @@ class GatewayClientTest {
           .isEqualTo(com.pangate.contracts.v1.FrameType.FRAME_TYPE_ERROR);
     }
   }
+
+  @Test
+  void subscribeSendsSubscribePayload() throws Exception {
+    try (GatewayClient c = GatewayClient.connect(ws(), ClientTls.insecure(), T)) {
+      c.hello(Hellos.jwt("x", "d1"), T);
+      c.subscribe("t1:a", "t1:b");
+      com.pangate.contracts.v1.Frame push = c.awaitPush(T);
+      com.pangate.contracts.v1.Frame sub = server.received.stream()
+          .filter(f -> f.getType() == FrameType.FRAME_TYPE_SUBSCRIBE).reduce((a, b) -> b).orElseThrow();
+      assertThat(com.pangate.contracts.v1.Subscribe.parseFrom(sub.getPayload()).getTopicsList())
+          .containsExactly("t1:a", "t1:b");
+      assertThat(sub.getMsgId()).isNotEmpty();
+      assertThat(push.getTopic()).isEqualTo("t1:a");
+    }
+  }
+
+  @Test
+  void awaitPushAndAckSendsAckFrame() throws Exception {
+    try (GatewayClient c = GatewayClient.connect(ws(), ClientTls.insecure(), T)) {
+      c.hello(Hellos.jwt("x", "d1"), T);
+      c.subscribe("t1:x");
+      assertThat(c.awaitPush(T).getMsgId()).isEqualTo("p1");
+      c.ack("p1");
+      c.ping(T);  // ordered after the ACK on the same connection
+      com.pangate.contracts.v1.Frame ack = server.received.stream()
+          .filter(f -> f.getType() == FrameType.FRAME_TYPE_ACK).reduce((a, b) -> b).orElseThrow();
+      assertThat(com.pangate.contracts.v1.Ack.parseFrom(ack.getPayload()).getMsgIdsList()).containsExactly("p1");
+    }
+  }
+
+  @Test
+  void pushListenerReceivesPushesInsteadOfTheQueue() throws Exception {
+    java.util.List<com.pangate.contracts.v1.Frame> got = new java.util.concurrent.CopyOnWriteArrayList<>();
+    try (GatewayClient c = GatewayClient.connect(ws(), ClientTls.insecure(), T)) {
+      c.onPush(got::add);
+      c.hello(Hellos.jwt("x", "d1"), T);
+      c.subscribe("t1:x");
+      org.awaitility.Awaitility.await().atMost(T).until(() -> got.size() == 1);
+    }
+  }
 }

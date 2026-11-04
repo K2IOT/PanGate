@@ -145,6 +145,41 @@ public final class GatewayClient implements AutoCloseable {
         || f.getType() == FrameType.FRAME_TYPE_ERROR, "UPSTREAM_ACK or ERROR", timeout);
   }
 
+  /** Waits for the next PUSH or RPC_REQ, discarding other frames. */
+  public Frame awaitPush(Duration timeout) {
+    return awaitFirst(f -> f.getType() == FrameType.FRAME_TYPE_PUSH || f.getType() == FrameType.FRAME_TYPE_RPC_REQ,
+        "PUSH", timeout);
+  }
+
+  /** From now on PUSH and RPC_REQ frames go to {@code listener} (on the I/O thread) instead of the await queue. */
+  public void onPush(java.util.function.Consumer<Frame> listener) {
+    handler.pushListener = listener;
+  }
+
+  /** ACK for RELIABLE / ORDERED pushes (at most 32 ids per frame). */
+  public void ack(String... msgIds) {
+    send(Frame.newBuilder().setType(FrameType.FRAME_TYPE_ACK)
+        .setPayload(com.pangate.contracts.v1.Ack.newBuilder().addAllMsgIds(java.util.List.of(msgIds)).build()
+            .toByteString()).build());
+  }
+
+  /** SUBSCRIBE; the gateway answers only on rejection (ERROR 4000 with this frame's msg_id). Returns the msg_id. */
+  public String subscribe(String... topics) {
+    return topics(FrameType.FRAME_TYPE_SUBSCRIBE, topics);
+  }
+
+  public String unsubscribe(String... topics) {
+    return topics(FrameType.FRAME_TYPE_UNSUBSCRIBE, topics);
+  }
+
+  private String topics(FrameType type, String... topics) {
+    String id = UUID.randomUUID().toString();
+    send(Frame.newBuilder().setType(type).setMsgId(id)
+        .setPayload(com.pangate.contracts.v1.Subscribe.newBuilder().addAllTopics(java.util.List.of(topics)).build()
+            .toByteString()).build());
+    return id;
+  }
+
   /** Waits for the next frame of {@code type}, discarding other frames. */
   public Frame await(FrameType type, Duration timeout) {
     return awaitFirst(f -> f.getType() == type, type.name(), timeout);
@@ -226,6 +261,7 @@ public final class GatewayClient implements AutoCloseable {
     final CompletableFuture<Void> ready = new CompletableFuture<>();
     private final boolean websocket;
     private volatile CloseInfo closeInfo;
+    volatile java.util.function.Consumer<Frame> pushListener;
 
     Inbound(boolean websocket) {
       this.websocket = websocket;
@@ -269,6 +305,11 @@ public final class GatewayClient implements AutoCloseable {
         if (err.getFatal()) {
           closeInfo = new CloseInfo(err.getCode(), err.getMessage());
         }
+      }
+      java.util.function.Consumer<Frame> l = pushListener;
+      if (l != null && (f.getType() == FrameType.FRAME_TYPE_PUSH || f.getType() == FrameType.FRAME_TYPE_RPC_REQ)) {
+        l.accept(f);
+        return;
       }
       queue.add(f);
     }
