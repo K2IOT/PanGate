@@ -798,4 +798,11 @@ git commit -m "test(gateway): M3b edge IT, measurements and docs"
 
 ## Kết quả đo M3b
 
-(Điền ở Task 9.)
+| Kiểm tra | Kết quả | Ngưỡng |
+|---|---|---|
+| Test gateway | 503 unit + 96 IT xanh (gồm `GatewayEdgeIT` 6 kịch bản, `TenantCapBorrowerIT` 4) | — |
+| `make local-check` | LOCAL START OK; SIGTERM khi có client ngừng đọc: 5,4 s | ≤ 15 s |
+| Compose dev | healthy sau 23 s; `make smoke` OK (push → ack 231 ms); `docker compose stop gateway` 0,7 s | ≤ 90 s / ≤ 15 s |
+| Heap/session | 4794 B (thêm `tenantReserved`, `traced`) | < 5120 B |
+| `make load-check` 18k | lag p99 0,68 ms; shed level 0 ở trạng thái ổn định (L1 lúc ramp, về 0 sau ~97 s) | < 20 ms, level 0 |
+| Dependency mới | `netty-codec-haproxy` 4.2.20; OTel 1.49.0 (sender JDK, không okhttp) | — |

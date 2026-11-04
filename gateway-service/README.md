@@ -36,7 +36,7 @@ java -jar $DT fake-router --target localhost:9090 broadcast --tenant t1 --topic 
    *Active profiles* `local`.
    **VS Code:** Spring Boot Dashboard, or a `launch.json` entry with `"mainClass": "com.pangate.gateway.GatewayApplication"`
    and `"args": "--spring.profiles.active=local"`.
-3. First start generates dev secrets into `~/.pangate-dev` (CA, TLS cert, ES256 key + JWKS, ticket keys).
+3. First start generates dev secrets into `~/.pangate-dev` (CA, TLS cert, ES256 key + JWKS, resume ticket keys `ticket-keys/`, TLS session ticket keys `tls-ticket-keys/`, `principal-hash.key`). Missing files are added on the next start, so an older dev directory keeps working.
 
 From the shell: `make run-local`.
 
@@ -48,3 +48,11 @@ From the shell: `make run-local`.
   `GatewayPushIT` (push/ack, timeouts, broadcast across loops, control push, single-session kick across two
   gateways through `fake-pushapi`), `GatewayProtectionIT` (warm-up, drain, slow consumer, shed, recycling, admission
   kill switch) and component ITs.
+
+## Edge features (M3b)
+
+- **Certificate rotation:** replace `gateway.crt`/`gateway.key` on disk; new connections get the new certificate within `gateway.tls.reload-interval` (30 s). A broken pair is ignored (`gw_tls_reloads_total{result="failed"}`). TLS session ticket keys and resume ticket keys are re-read every 60 s.
+- **PROXY protocol:** `gateway.listeners.proxy-protocol.enabled=true` with `trusted-cidrs` (the LB subnets). Only those peers must send a PROXY v1/v2 header; loopback is always direct.
+- **SSE fallback and HTTP upstream:** `POST /v1/sse` (body `Hello`, tenant switch `sse.fallback.enabled`) and `POST /v1/upstream` (`Authorization: Ticket <resume>`, body `Frame(UPSTREAM)`), both `application/x-protobuf`.
+- **Tracing one principal:** produce `trace:<principal>` → `ControlEvent{issued_at_ms, trace: TracePrincipal{principal_id}}` on `gw.control`; the `pangate.trace` logger then logs that principal's sessions (hashed) for up to 15 minutes. A tombstone on the same key stops it.
+- **OTel spans:** set `gateway.tracing.otlp-endpoint` (OTLP/HTTP) to export `gw.push.handoff` / `gw.push.write` for sampled pushes.

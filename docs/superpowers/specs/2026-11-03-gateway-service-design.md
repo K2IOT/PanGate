@@ -287,8 +287,12 @@ Start lỗi ở bất kỳ phase nào thì process exit (fail fast) và pod sẽ
 
 ### 4.3 Pipeline SSE (M3, cùng port 8443)
 
-- `POST /v1/sse`: body là `Hello` (protobuf, `content-type: application/x-protobuf`). Chỉ cho phép khi tenant bật `sse.fallback.enabled`. Pipeline sau HTTP codec: `HttpObjectAggregator` bị gỡ, `SseHandler` gửi response chunked `text/event-stream`. Mỗi `PUSH` là một event `data:` chứa base64 của frame. Heartbeat là dòng comment `:` mỗi 30 s. Ngữ nghĩa downstream giống hệt WS.
-- `POST /v1/upstream`: header `Authorization: Ticket <resume>`, body là `Frame(UPSTREAM)`. Gateway verify ticket rồi produce vào Kafka và trả `202`, không tra cứu session.
+- `POST /v1/sse`: body là `Hello` (protobuf, `content-type: application/x-protobuf`). Chỉ cho phép khi tenant bật `sse.fallback.enabled`. Pipeline sau HTTP codec: `HttpObjectAggregator` bị gỡ, `SseAdapter` gửi response chunked `text/event-stream`. Mỗi frame gửi xuống (kể cả `CONNECTED`) là một event `data:` chứa base64 của frame. Heartbeat là dòng comment `:` mỗi 30 s; ghi thành công tính là dấu hiệu sống, vì client SSE không gửi PING được. Ngữ nghĩa downstream giống WS, trừ một điểm: client SSE không có kênh gửi ACK, nên push RELIABLE/ORDERED được trả `STATUS_WRITTEN` ngay khi ghi (như `delivery.downgradeReliable`); client phục hồi phần mất qua `seq`.
+  - Trước khi stream bắt đầu, lỗi được trả bằng mã HTTP: 4001/4002 → 401, 4003 → 403, 4009 → 429, 4011 → 421, 4013 → 503, còn lại → 400 (kèm `Retry-After` nếu có). Tenant chưa bật SSE → 401. Method sai → 405, content-type sai → 415, body > `hello-max` → 413.
+  - Khi đang stream: một event `Frame(ERROR, fatal=true)`, rồi chunk cuối, rồi đóng.
+- `POST /v1/upstream`: header `Authorization: Ticket <resume>`, body là `Frame(UPSTREAM)`. Gateway verify ticket, kiểm tra c–e của §4.6 (cell, revoke, blocked) rồi produce vào Kafka, không tra cứu session (`conn_id` rỗng). Luật type, telemetry và shed giống §5.5.
+  - Mã trả: `202` (với `cmd`/`cmd_result` chỉ sau khi Kafka ack); `400` body hỏng, frame không phải UPSTREAM, type lạ hoặc thiếu `msg_id`; `401` thiếu, sai hoặc hết hạn ticket; `403` revoked hoặc sai cell; `405`; `413` body > `frame-max`; `415`; `429` kèm `Retry-After: 300` khi tenant bị block; `503` Kafka không nhận.
+  - Mỗi kết nối một request (`Connection: close`). Kết nối vẫn qua `AcceptGate` và các luật 503 của `UpgradeGuard`.
 
 ### 4.4 FrameCodec
 
@@ -345,7 +349,7 @@ Các bổ sung so với tài liệu gốc, đều additive:
 | f | `sdk_version` < bản tối thiểu của tenant | 4010 |
 | g | `Origin` (chỉ WS từ trình duyệt) không thuộc allowlist của tenant; allowlist rỗng nghĩa là cho phép tất cả | 4001 |
 | h | Quá 20 handshake/phút/principal (đếm local trên node, cửa sổ trượt 60 s) | 4009 |
-| i | Tenant cap: node có quota local `ceil(maxConns × 1.1 / nodesInCell)`; vượt thì `INCR tenantconns:{t}` trên Redis state (async) để mượn thêm; Redis trả vượt `maxConns` | 4013 (`retry_after_ms` ngẫu nhiên 5–30 s) |
+| i | Tenant cap (khi `maxConns > 0`): node có quota local `ceil(maxConns × 1.1 / nodesInCell)` (`nodesInCell` = số node trong `nodes:live` 30 s gần nhất). Vượt thì mượn qua Redis state: hash `tenantconns:{t}`, field = node id, value `"<tổng>|<hết hạn ms>"`; Lua cộng tổng còn hạn của các node khác với tổng mới của node này, ≤ `maxConns` thì ghi và cho qua. Mỗi node ghi lại tổng của mình mỗi 10 s với hạn 30 s, nên entry của node chết tự hết hiệu lực. Vượt `maxConns`, Redis lỗi hoặc quá 200 ms → từ chối | 4013 (`retry_after_ms` ngẫu nhiên 5–30 s) |
 
 4. Kích hoạt session: sinh `connId`, state → `ACTIVE`, đưa vào `sessions` và `PrincipalIndex`, đặt deadline heartbeat, expiry và recycle (`random(min, max)`, chỉ khi tenant bật `recycle.enabled`), gỡ `HelloAuthHandler`.
 5. Ba việc async chạy song song:
@@ -474,7 +478,7 @@ Mọi đường đóng đều đi qua `Session.close(code, reason)`, idempotent,
 1. State → `CLOSED`; gửi close frame (WS) hoặc `ERROR fatal` (TCP) rồi `close()`. Riêng kết nối lạm dụng (fuzz hoặc flood) dùng `SO_LINGER=0`.
 2. Gỡ khỏi `sessions`, `PrincipalIndex`, `TopicIndex` và wheel; giảm `IpConnectionCounter`.
 3. NACK pending (§5.4).
-4. Async: `RegistryWriter.unregister` (`HDEL reg:{p} connId`); lifecycle `DISCONNECTED{close_code}` (hoặc `HEARTBEAT_TIMEOUT`, `KICKED`); `DECR tenantconns:{t}` nếu session đã mượn quota từ Redis.
+4. Async: `RegistryWriter.unregister` (`HDEL reg:{p} connId`); lifecycle `DISCONNECTED{close_code}` (hoặc `HEARTBEAT_TIMEOUT`, `KICKED`); trả slot tenant cap về bộ đếm local (Redis nhận tổng mới ở lần ghi 10 s kế tiếp, §4.6 i).
 
 `channelInactive` khi chưa gọi `close()` (client tự đóng hoặc RST) sẽ gọi `close(1006 nội bộ)`; code ghi vào lifecycle là 1006.
 
@@ -696,7 +700,8 @@ Profile `local` và `dev` đặt `drain.max-duration=5s`, `listener-close-delay=
 ### 7.7 TLS
 
 - `SslContextProvider` đọc `gateway.tls.cert-file` và `key-file` (PEM, ECDSA P-256), kiểm thay đổi mỗi 30 s; có thay đổi thì dựng `SslContext` mới (`SslProvider.OPENSSL_REFCNT`, TLS 1.3, cipher mặc định của BoringSSL) và swap qua `AtomicReference`. Context cũ được `release()` sau 60 s.
-- Session ticket key: `SecretSource` cung cấp `tls-ticket-keys/{prev,current,next}` (mỗi key 48 byte); nạp bằng `OpenSslSessionContext.setTicketKeys(...)`, reload mỗi 60 s.
+- Session ticket key: `SecretSource` cung cấp `tls-ticket-keys/{prev,current,next}`, mỗi file một dòng base64 của 48 byte (`name 16 | hmac 16 | aes 16`); nạp bằng `OpenSslSessionContext.setTicketKeys(current, next, prev)` vào mọi context (cả context dựng lại khi đổi cert), reload mỗi 60 s. Thiếu lúc khởi động thì fail-fast; profile local/dev tự sinh.
+- Resume ticket key (`ticket-keys/…`, §4.7) cũng được đọc lại mỗi 60 s. Đọc lỗi thì giữ key cũ và tăng `gw_secrets_reload_total{name,result=failed}`; cert hỏng thì giữ context cũ và tăng `gw_tls_reloads_total{result=failed}`.
 - mTLS cho gRPC: cert riêng (`gateway.grpc.tls.*`), trust bundle SPIFFE.
 
 ### 7.8 Kill switch
@@ -711,7 +716,7 @@ Profile `local` và `dev` đặt `drain.max-duration=5s`, `listener-close-delay=
 | `tenant.blocked` | tenant | HELLO → 4009; session đang mở → close 4013 với `retryAfter` 300 s |
 | `sse.fallback.enabled` | tenant | Bật hoặc tắt `/v1/sse` |
 | `recycle.enabled` | tenant | Bật hoặc tắt recycling (mặc định bật) |
-| `trace.principal` (TTL 15 phút) | fleet | Log DEBUG và trace 100% cho session của principal đó |
+| `trace.principal` (TTL 15 phút) | fleet | Control key `trace:<principal>` → `TracePrincipal{principal_id, expires_at_ms}`, hiệu lực tới `min(expires_at_ms, issued_at_ms + 15 phút)`; tombstone thì tắt. Logger `pangate.trace` (INFO) ghi activation, từng frame vào/ra (type, `msg_id`, số byte) và close của mọi session của principal đó; mọi push của nó có span |
 
 ### 7.9 Endpoint quản trị (:8081)
 
@@ -742,7 +747,7 @@ Profile `local` và `dev` đặt `drain.max-duration=5s`, `listener-close-delay=
 - `LifecycleLogSampler`: log connect lấy mẫu 1%; close với code ≥ 4000, trừ 4009/4013, ghi 100%; giới hạn 1k dòng/s mỗi node (token bucket), phần vượt bị bỏ nhưng counter vẫn chính xác.
 - `principalId` luôn được hash; payload và token không bao giờ xuất hiện trong log.
 
-**Trace.** OTel span `gw.push.handoff` và `gw.push.write` chỉ khi `frame.headers.traceparent` có cờ sampled, hoặc khi có lỗi. `trace.principal` bật 100% cho principal đó.
+**Trace.** OTel span `gw.push.handoff` (từ `enqueued_at_ms` của router tới lúc gateway ghi) và `gw.push.write` (từ lúc ghi tới khi flush xong) chỉ khi `frame.headers.traceparent` có cờ sampled, hoặc session đang bị `trace.principal`. Push bị NACK luôn có một span `gw.push.handoff` status ERROR (attribute `pangate.nack`). Attribute: `pangate.msg_id`, `pangate.delivery_class`, `pangate.tenant`, `pangate.principal_hash`. Export OTLP/HTTP tới `gateway.tracing.otlp-endpoint`; rỗng (mặc định) thì tắt.
 
 ---
 
@@ -765,6 +770,7 @@ gateway:
     proxy-protocol: { enabled: false, trusted-cidrs: [] }
   io: { threads: 0, transport: auto }                     # auto = epoll, fallback NIO
   tls: { cert-file: /etc/pangate/tls/gateway.crt, key-file: /etc/pangate/tls/gateway.key, reload-interval: 30s }
+  tracing: { otlp-endpoint: "" }                          # vd. http://otel-collector:4318/v1/traces
   limits:
     hard-cap: 700000
     soft-cap: 550000
@@ -979,6 +985,9 @@ Mỗi milestone là một implementation plan riêng (writing-plans). M2 đượ
 7. Môi trường local và dev (§9.1) cùng Redis standalone: tài liệu gốc chỉ mô tả prod; phần này phục vụ yêu cầu "code phải start được ở local và dev".
 8. Lease theo quy tắc "epoch lớn hơn thắng" (§6.1), thay cho "lease còn sống thì chặn", để restart nhanh không bị fence.
 9. Cổng quản trị dùng Spring MVC + Tomcat + Actuator thay vì WebFlux hoặc JDK HttpServer (§1). Tài liệu gốc §4 chỉ cấm Tomcat trên data path; WebFlux xung đột version Netty. Các phase lifecycle của gateway được dời lên `MAX − 1900…MAX − 100` để nằm trong vòng đời của web server (§3.7).
+
+10. SSE ack ngay khi ghi (§4.3): client SSE không có kênh gửi ACK, nên RELIABLE trên SSE được coi như `downgradeReliable`. Đã được xác nhận (plan M3b R1).
+11. `tenantconns:{t}` là hash tổng theo node có hạn 30 s thay cho `INCR`/`DECR` (§4.6 i): `INCR`/`DECR` để lại số đếm thừa vĩnh viễn khi một node bị kill. Đã được xác nhận (plan M3b R2).
 
 **Câu hỏi còn mở** (không chặn M1):
 1. **Contract `seqepochs` với Push API** (§6.7): key, định dạng và người ghi cần Push API xác nhận trước M2. Nếu bị từ chối, phương án dự phòng là gửi `seq_epoch=0` và để SDK dựa vào `seq_epoch` trên từng PUSH.
