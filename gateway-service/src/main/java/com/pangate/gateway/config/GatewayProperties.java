@@ -31,7 +31,25 @@ public record GatewayProperties(
     Warmup warmup,
     Shed shed) {
 
-  public record Listeners(Ws ws, Tcp tcp) {}
+  public record Listeners(Ws ws, Tcp tcp, ProxyProtocol proxyProtocol) {
+    public Listeners {
+      proxyProtocol = proxyProtocol == null ? new ProxyProtocol(false, List.of(), false) : proxyProtocol;
+    }
+  }
+
+  /**
+   * Spec §4.1, §9: peers in {@code trustedCidrs} must start with a PROXY header. {@code trustLoopback} is a test seam
+   * (not in the spec): by default loopback peers (warm-up, local health checks) always connect directly.
+   */
+  public record ProxyProtocol(boolean enabled, List<String> trustedCidrs, boolean trustLoopback) {
+    public ProxyProtocol {
+      trustedCidrs = trustedCidrs == null ? List.of() : List.copyOf(trustedCidrs);
+      if (enabled && trustedCidrs.isEmpty()) {
+        throw new IllegalArgumentException(
+            "gateway.listeners.proxy-protocol.enabled=true needs gateway.listeners.proxy-protocol.trusted-cidrs");
+      }
+    }
+  }
 
   public record Ws(int port, String path, int acceptors) {}
 

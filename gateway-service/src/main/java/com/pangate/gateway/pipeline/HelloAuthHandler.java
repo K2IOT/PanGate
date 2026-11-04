@@ -175,7 +175,7 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
     }
     ConnectClaims c = v.claims();
     if (com.pangate.gateway.auth.WarmUpTokens.isWarmUp(c.tenant())
-        && (session.remoteAddress() == null || !session.remoteAddress().isLoopbackAddress())) {
+        && !ChannelAttrs.socketPeer(ctx.channel()).isLoopbackAddress()) {  // the socket, never a PROXY claim
       fail(session, CloseCode.AUTH_FAILED, "auth_failed");  // warm-up tokens only from this host (spec §7.6)
       return;
     }

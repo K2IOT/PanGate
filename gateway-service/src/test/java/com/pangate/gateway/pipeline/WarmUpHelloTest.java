@@ -37,6 +37,11 @@ class WarmUpHelloTest {
   private Session session;
 
   private void connect(String remote) throws Exception {
+    connect(remote, remote);
+  }
+
+  /** {@code socketPeer}: the TCP peer; {@code client}: the address admission saw (e.g. from a PROXY header). */
+  private void connect(String socketPeer, String client) throws Exception {
     f.listeners.add(new SessionListener() {
       @Override public void activated(Session s) { events.add("activated"); }
       @Override public void closed(Session s) { events.add("closed"); }
@@ -53,7 +58,8 @@ class WarmUpHelloTest {
     };
     f.channel.attr(ChannelAttrs.TRANSPORT).set(ChannelAttrs.TransportKind.TCP);
     f.channel.attr(ChannelAttrs.PROTOCOL_READY).set(true);
-    session = f.tracker.admit(f.channel, f.loop, InetAddress.getByName(remote));
+    f.channel.attr(ChannelAttrs.SOCKET_PEER_OVERRIDE).set(InetAddress.getByName(socketPeer));
+    session = f.tracker.admit(f.channel, f.loop, InetAddress.getByName(client));
     f.channel.pipeline().addLast(new FrameCodec(f.limits),
         new HelloAuthHandler(auth.tickets, auth.flow, f.tracker, f.policy(limiter), f.tenants, f.limits, "cell-1",
             f.metrics, seq), new ErrorTerminator());
@@ -132,5 +138,12 @@ class WarmUpHelloTest {
     Frame out = send(Hello.newBuilder().setResumeTicket(ticket).setDeviceId("warmup-1").setSdkVersion("1.0").build());
     assertThat(ErrorInfo.parseFrom(out.getPayload()).getCode()).isEqualTo(4001);
     assertThat(session.warmUp()).isFalse();
+  }
+
+  @Test
+  void proxyClaimedLoopbackDoesNotUnlockWarmUp() throws Exception {
+    connect("10.0.0.9", "127.0.0.1");  // the LB forwarded a PROXY header claiming loopback
+    Frame out = send(auth.warmUp.mint(1, f.wallNow()), "warmup-1");
+    assertThat(ErrorInfo.parseFrom(out.getPayload()).getCode()).isEqualTo(4001);
   }
 }

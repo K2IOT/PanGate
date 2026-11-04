@@ -17,6 +17,7 @@ gateway:
   listeners:
     ws: { port: 8443, path: /v1/ws, acceptors: 4 }
     tcp: { port: 8883, enabled: true }
+    proxy-protocol: { enabled: false, trusted-cidrs: [] }
   io: { threads: 0, transport: auto }
   tls:
     cert-file: /etc/pangate/tls/gateway.crt

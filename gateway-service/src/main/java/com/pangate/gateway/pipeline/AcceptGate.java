@@ -12,7 +12,6 @@ import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import java.net.InetAddress;
-import java.net.InetSocketAddress;
 
 /**
  * First handler, before TLS (spec §4.1, §7.1): drops a connection as cheaply as possible when the node is draining,
@@ -84,8 +83,6 @@ public final class AcceptGate extends ChannelInboundHandlerAdapter {
   }
 
   private static InetAddress remote(ChannelHandlerContext ctx) {
-    return ctx.channel().remoteAddress() instanceof InetSocketAddress isa
-        ? isa.getAddress()
-        : InetAddress.getLoopbackAddress();
+    return com.pangate.gateway.protocol.ChannelAttrs.clientAddress(ctx.channel());
   }
 }

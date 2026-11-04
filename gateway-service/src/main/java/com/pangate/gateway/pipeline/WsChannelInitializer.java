@@ -1,5 +1,6 @@
 package com.pangate.gateway.pipeline;
 
+import com.pangate.gateway.config.GatewayProperties;
 import com.pangate.gateway.protocol.ChannelAttrs;
 import com.pangate.gateway.protocol.FrameCodec;
 import io.netty.channel.ChannelInitializer;
@@ -17,6 +18,7 @@ import java.util.concurrent.ThreadLocalRandom;
 public final class WsChannelInitializer extends ChannelInitializer<SocketChannel> {
 
   private final PipelineDeps deps;
+  private final com.pangate.gateway.net.CidrSet proxyTrusted;  // null = PROXY protocol off
   private final WebSocketServerProtocolConfig wsConfig;
   // Stateless handlers shared by every connection (fewer objects per idle session).
   private final WsBinaryAdapter wsBinary = new WsBinaryAdapter();
@@ -25,6 +27,8 @@ public final class WsChannelInitializer extends ChannelInitializer<SocketChannel
 
   public WsChannelInitializer(PipelineDeps deps) {
     this.deps = deps;
+    GatewayProperties.ProxyProtocol proxy = deps.props().listeners().proxyProtocol();
+    this.proxyTrusted = proxy.enabled() ? com.pangate.gateway.net.CidrSet.parse(proxy.trustedCidrs()) : null;
     this.frameCodec = new FrameCodec(deps.limits());
     this.sessionHandler = deps.sessionHandler();
     this.wsConfig = WebSocketServerProtocolConfig.newBuilder()
@@ -45,6 +49,10 @@ public final class WsChannelInitializer extends ChannelInitializer<SocketChannel
   protected void initChannel(SocketChannel ch) {
     ch.attr(ChannelAttrs.TRANSPORT).set(ChannelAttrs.TransportKind.WS);
     ChannelPipeline p = ch.pipeline();
+    if (proxyTrusted != null) {
+      p.addLast("proxy", new ProxyProtocolHandler(proxyTrusted, deps.props().listeners().proxyProtocol().trustLoopback(),
+          deps.limits().current().helloTimeout(), deps.metrics()));
+    }
     p.addLast("acceptGate", deps.acceptGate());
     p.addLast("tls", deps.tls().ws().newHandler(ch.alloc()));
     p.addLast("flush", new FlushConsolidationHandler(256, true));
