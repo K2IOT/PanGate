@@ -129,4 +129,21 @@ class AckBatcherTest {
     assertThat(meters.counter("gw.delivery.acks", "status", "acked").count()).isEqualTo(2);
     assertThat(meters.counter("gw.delivery.acks", "status", "nack_timeout").count()).isEqualTo(1);
   }
+
+  @Test
+  void stalledStreamDoesNotFloodTheExecutor() throws Exception {
+    java.util.concurrent.ScheduledThreadPoolExecutor counting = new java.util.concurrent.ScheduledThreadPoolExecutor(1);
+    AckBatcher b = new AckBatcher(out, counting, new GatewayMetrics(meters));
+    out.ready = false;  // the router stopped reading
+    for (int i = 0; i < 5_000; i++) {
+      b.offer(item(i));
+    }
+    Thread.sleep(100);
+    assertThat(counting.getTaskCount()).isLessThanOrEqualTo(2);
+    out.ready = true;
+    b.start();
+    await().atMost(Duration.ofSeconds(2)).until(() -> out.items() == 5_000);
+    b.stop();
+    counting.shutdownNow();
+  }
 }

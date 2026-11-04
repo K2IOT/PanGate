@@ -29,6 +29,9 @@ public final class AckBatcher {
   private final ConcurrentLinkedQueue<AckItem> queue = new ConcurrentLinkedQueue<>();
   private final AtomicInteger size = new AtomicInteger();
   private final AtomicBoolean flushing = new AtomicBoolean();
+  // A size-triggered flush is queued (or the stream is not ready and onReady/periodic flush will drain):
+  // at most one such task, however many acks arrive.
+  private final AtomicBoolean flushQueued = new AtomicBoolean();
   private final Map<AckItem.Status, Counter> counters = new EnumMap<>(AckItem.Status.class);
   private volatile ScheduledFuture<?> periodic;
   private volatile boolean stopped;
@@ -53,7 +56,7 @@ public final class AckBatcher {
       c.increment();
     }
     queue.add(item);
-    if (size.incrementAndGet() >= BATCH) {
+    if (size.incrementAndGet() >= BATCH && flushQueued.compareAndSet(false, true)) {
       exec.execute(this::flush);
     }
   }
@@ -113,6 +116,10 @@ public final class AckBatcher {
       stop();
     } finally {
       flushing.set(false);
+      // Not ready with a full batch waiting: keep the flag, the onReady handler / periodic flush drains it.
+      if (size.get() < BATCH || out.isReady() || stopped) {
+        flushQueued.set(false);
+      }
     }
   }
 }
