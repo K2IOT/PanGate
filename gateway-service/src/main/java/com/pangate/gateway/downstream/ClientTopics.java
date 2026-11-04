@@ -24,11 +24,13 @@ public final class ClientTopics {
   private final TenantLimitsStore tenants;
   private final Counter notAllowed;
   private final Counter limit;
+  private final Counter invalid;
 
   public ClientTopics(TenantLimitsStore tenants, GatewayMetrics m) {
     this.tenants = tenants;
     this.notAllowed = m.counter("gw.subscribe.rejected", "reason", "not_allowed");
     this.limit = m.counter("gw.subscribe.rejected", "reason", "limit");
+    this.invalid = m.counter("gw.subscribe.rejected", "reason", "invalid");
   }
 
   public void onFrame(ChannelHandlerContext ctx, Session s, Frame frame) {
@@ -45,6 +47,11 @@ public final class ClientTopics {
     }
     Set<String> fresh = new LinkedHashSet<>();
     for (String t : req.getTopicsList()) {
+      if (t.length() > TopicPatterns.MAX_TOPIC_LENGTH) {
+        invalid.increment();
+        reject(ctx, frame, "topic too long");
+        return;
+      }
       if (!TopicPatterns.inTenant(s.identity().tenantId(), t) || !TopicPatterns.allowed(s.topicPatterns(), t)) {
         notAllowed.increment();
         reject(ctx, frame, "topic not allowed: " + t);

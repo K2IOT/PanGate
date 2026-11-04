@@ -5,6 +5,9 @@ import java.util.List;
 /** Topic namespace and JWT topic-pattern checks (spec §5.7): {@code *} matches any run of characters, colons too. */
 public final class TopicPatterns {
 
+  /** Longest topic accepted, in characters: each subscription pins its name on the session and the loop index. */
+  public static final int MAX_TOPIC_LENGTH = 256;
+
   private TopicPatterns() {}
 
   public static boolean inTenant(String tenantId, String topic) {

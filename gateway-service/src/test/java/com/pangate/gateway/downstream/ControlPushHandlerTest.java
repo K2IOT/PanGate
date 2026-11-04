@@ -117,4 +117,11 @@ class ControlPushHandlerTest {
     assertThat(older.closeCode()).isEqualTo(CloseCode.DUPLICATE_SESSION);
     assertThat(kept.state()).isEqualTo(SessionState.ACTIVE);
   }
+
+  @Test
+  void controlSubscribeSkipsTopicsLongerThan256() {
+    Session a = session("t1:u1", 1);
+    handler.apply(f.loop, "t1:u1", subscribe("t1:" + "x".repeat(254), "t1:ok"));
+    assertThat(a.topics()).containsExactly("t1:ok");
+  }
 }

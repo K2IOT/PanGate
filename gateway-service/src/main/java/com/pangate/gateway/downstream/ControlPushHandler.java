@@ -44,7 +44,7 @@ public final class ControlPushHandler {
         for (Session s : sessions(loop, principal)) {
           int cap = tenants.policy(s.identity().tenantId()).topicsPerConn();
           for (String t : op.getSubscribe().getTopicsList()) {
-            if (!TopicPatterns.inTenant(s.identity().tenantId(), t)) {
+            if (t.length() > TopicPatterns.MAX_TOPIC_LENGTH || !TopicPatterns.inTenant(s.identity().tenantId(), t)) {
               rejected.increment();
             } else if (s.hasTopic(t) || (s.topics() == null ? 0 : s.topics().length) < cap) {
               loop.topics().add(s, t);

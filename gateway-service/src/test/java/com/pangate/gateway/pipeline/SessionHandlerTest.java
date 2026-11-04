@@ -188,6 +188,18 @@ class SessionHandlerTest {
   }
 
   @Test
+  void subscribeTopicLongerThan256IsRejected() throws Exception {
+    session.reauth(f.now(), f.now() + 3_600, 7, List.of("t1:*"));
+    Frame out = topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s1", "t1:" + "x".repeat(254));
+    ErrorInfo e = ErrorInfo.parseFrom(out.getPayload());
+    assertThat(e.getCode()).isEqualTo(4000);
+    assertThat(e.getMessage()).isEqualTo("topic too long");
+    assertThat(f.loop.topics().topicCount()).isZero();
+    assertThat(f.meters.counter("gw.subscribe.rejected", "reason", "invalid").count()).isEqualTo(1);
+    assertThat(topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s2", "t1:" + "x".repeat(253))).isNull();  // 256 is fine
+  }
+
+  @Test
   void unsubscribeRemovesAndUnknownIsIgnored() {
     topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s1", "t1:news.a");
     assertThat(topics(FrameType.FRAME_TYPE_UNSUBSCRIBE, "u1", "t1:news.a", "t1:never")).isNull();
