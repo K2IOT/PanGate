@@ -50,6 +50,10 @@ public final class PreEncodedFrame {
     buf.release();
   }
 
+  public int size() {
+    return buf.readableBytes();
+  }
+
   public int refCnt() {
     return buf.refCnt();
   }

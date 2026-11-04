@@ -147,6 +147,10 @@ public final class BroadcastPacer {
       if ((s.state() == SessionState.ACTIVE || s.state() == SessionState.DRAINING) && s.channel().isWritable()) {
         Channel ch = s.channel();
         ch.write(job.frame.retainedDuplicate(), ch.voidPromise());
+        if (s.traced()) {
+          com.pangate.gateway.trace.SessionTrace.frame(s, "out", com.pangate.contracts.v1.FrameType.FRAME_TYPE_PUSH, "",
+              job.frame.size());
+        }
         written.add(ch);
         loop.markDirty(s);
         job.counter.increment();

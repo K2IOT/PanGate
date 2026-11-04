@@ -95,10 +95,11 @@ public final class UpgradeGuard extends ChannelInboundHandlerAdapter {
 
   /** Replaces the WS handlers (upgrade, adapter, codec, auth, session) with the route's handler. */
   private static void rewire(ChannelHandlerContext ctx, String path, io.netty.channel.ChannelHandler handler) {
-    // WebSocketServerProtocolHandler installs its own (package-private) handshake handler next to itself.
+    // WebSocketServerProtocolHandler installs helpers of its own (e.g. the package-private handshake handler):
+    // drop every Netty WebSocket handler, whatever it is called.
     for (String name : new java.util.ArrayList<>(ctx.pipeline().names())) {
       io.netty.channel.ChannelHandler h = ctx.pipeline().get(name);
-      if (h != null && h.getClass().getSimpleName().equals("WebSocketServerProtocolHandshakeHandler")) {
+      if (h != null && h.getClass().getPackageName().startsWith("io.netty.handler.codec.http.websocketx")) {
         ctx.pipeline().remove(name);
       }
     }

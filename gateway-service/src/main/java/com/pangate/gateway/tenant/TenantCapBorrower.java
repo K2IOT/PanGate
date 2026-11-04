@@ -46,6 +46,8 @@ public final class TenantCapBorrower implements TenantCap.Borrower {
   private final RedisConnections redis;
   private final String nodeId;
   private final LongSupplier wallMillis;
+  // Tenants written by the last report: one missing now (count dropped to 0) gets its field deleted.
+  private java.util.Set<String> reported = java.util.Set.of();
 
   public TenantCapBorrower(RedisConnections redis, String nodeId, LongSupplier wallMillis) {
     this.redis = redis;
@@ -70,9 +72,15 @@ public final class TenantCapBorrower implements TenantCap.Borrower {
   }
 
   /** Writes this node's totals for every tenant with a cap; a total of 0 removes the field. */
-  public CompletionStage<Void> report(Map<String, Integer> totals, ToIntFunction<String> maxConns) {
+  public synchronized CompletionStage<Void> report(Map<String, Integer> totals, ToIntFunction<String> maxConns) {
     List<CompletableFuture<?>> writes = new ArrayList<>();
     long expires = wallMillis.getAsLong() + TTL.toMillis();
+    java.util.Set<String> now = new java.util.HashSet<>();
+    for (String gone : reported) {
+      if (totals.getOrDefault(gone, 0) <= 0) {
+        writes.add(redis.state().hdel(key(gone), nodeId).toCompletableFuture());
+      }
+    }
     totals.forEach((tenant, total) -> {
       if (maxConns.applyAsInt(tenant) <= 0) {
         return;
@@ -82,9 +90,11 @@ public final class TenantCapBorrower implements TenantCap.Borrower {
         writes.add(redis.state().hdel(k, nodeId).toCompletableFuture());
       } else {
         writes.add(redis.state().hset(k, nodeId, total + "|" + expires).toCompletableFuture());
+        now.add(tenant);
         writes.add(redis.state().pexpire(k, 2 * TTL.toMillis()).toCompletableFuture());
       }
     });
+    reported = now;
     return CompletableFuture.allOf(writes.toArray(CompletableFuture[]::new));
   }
 }

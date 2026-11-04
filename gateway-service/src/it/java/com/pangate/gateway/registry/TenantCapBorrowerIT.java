@@ -58,4 +58,11 @@ class TenantCapBorrowerIT {
     n1.report(Map.of("t9", 3), t -> 0).toCompletableFuture().get(2, TimeUnit.SECONDS);
     assertThat(fx.sync.exists("tenantconns:{t9}")).isZero();
   }
+
+  @Test
+  void aTenantThatDroppedToZeroIsRemovedAtTheNextReport() throws Exception {
+    n1.report(Map.of("t1", 3), t -> 10).toCompletableFuture().get(2, TimeUnit.SECONDS);
+    n1.report(Map.of(), t -> 10).toCompletableFuture().get(2, TimeUnit.SECONDS);  // the counter drops 0 entries
+    assertThat(fx.sync.hexists("tenantconns:{t1}", "n1")).isFalse();
+  }
 }

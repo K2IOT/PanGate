@@ -49,6 +49,17 @@ public final class GatewayTracing {
     this.tracer = tracer;
   }
 
+  private static volatile GatewayTracing current = new GatewayTracing(null);
+
+  /** The node's tracing, for NACKs raised where no PushDelivery is at hand (pending window timeout, close). */
+  public static void install(GatewayTracing t) {
+    current = t;
+  }
+
+  public static GatewayTracing current() {
+    return current;
+  }
+
   public static GatewayTracing noop() {
     return new GatewayTracing(null);
   }
@@ -115,6 +126,20 @@ public final class GatewayTracing {
 
   public Span write(Span handoff) {
     return tracer.spanBuilder("gw.push.write").setParent(Context.root().with(handoff)).startSpan();
+  }
+
+  /** A pushed entry NACKed from the pending window (timeout, close): an error span with what the session knows. */
+  public void nackPending(Session s, String msgId, AckItem.Status status) {
+    if (tracer == null || s.identity() == null) {
+      return;
+    }
+    Span span = tracer.spanBuilder("gw.push.handoff").setNoParent()
+        .setAttribute(MSG_ID, msgId)
+        .setAttribute(TENANT, s.identity().tenantId())
+        .setAttribute(PRINCIPAL, SessionTrace.hash(s.identity().principalId()))
+        .setAttribute(NACK, status.name()).startSpan();
+    span.setStatus(StatusCode.ERROR, status.name());
+    span.end();
   }
 
   /** A NACKed push: one finished error span, whether or not the caller sampled the trace. */

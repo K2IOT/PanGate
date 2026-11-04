@@ -23,6 +23,7 @@ import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -299,12 +300,14 @@ class PushDeliveryTest {
   private final io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter spans =
       io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter.create();
 
+  private com.pangate.gateway.trace.GatewayTracing lastTracing;
+
   private PushDelivery traced() {
     io.opentelemetry.sdk.trace.SdkTracerProvider provider = io.opentelemetry.sdk.trace.SdkTracerProvider.builder()
         .addSpanProcessor(io.opentelemetry.sdk.trace.export.SimpleSpanProcessor.create(spans)).build();
-    return new PushDelivery(f.tenants, f.limits, f.metrics, () -> f.wallNow() * 1000,
-        com.pangate.gateway.trace.GatewayTracing.create(io.opentelemetry.sdk.OpenTelemetrySdk.builder()
-            .setTracerProvider(provider).build()));
+    lastTracing = com.pangate.gateway.trace.GatewayTracing.create(io.opentelemetry.sdk.OpenTelemetrySdk.builder()
+        .setTracerProvider(provider).build());
+    return new PushDelivery(f.tenants, f.limits, f.metrics, () -> f.wallNow() * 1000, lastTracing);
   }
 
   private PushItem withTraceparent(PushItem i, String tp) {
@@ -381,5 +384,41 @@ class PushDeliveryTest {
     deliverWith(traced(), gone);
     assertThat(spans.getFinishedSpanItems()).singleElement()
         .satisfies(sd -> assertThat(sd.getLinks()).hasSize(1));  // linked to the caller's trace, not its child
+  }
+
+  @Test
+  void reliablePushToAnUnwritableSseChannelIsNackedNotWritten() {
+    f.channel.attr(com.pangate.gateway.protocol.ChannelAttrs.TRANSPORT)
+        .set(com.pangate.gateway.protocol.ChannelAttrs.TransportKind.SSE);
+    f.channel.config().setWriteBufferWaterMark(new io.netty.channel.WriteBufferWaterMark(8, 16));
+    f.channel.write(io.netty.buffer.Unpooled.wrappedBuffer(new byte[64]));
+    assertThat(f.channel.isWritable()).isFalse();
+
+    f.delivery.deliver(f.loop, item(1, DeliveryClass.DELIVERY_CLASS_RELIABLE, "m1", 10), stream);
+
+    assertThat(acks).containsExactly(ack(1, AckItem.Status.STATUS_NACK_SLOW_CONSUMER));
+  }
+
+  @AfterEach
+  void resetTracing() {
+    com.pangate.gateway.trace.GatewayTracing.install(com.pangate.gateway.trace.GatewayTracing.noop());
+  }
+
+  @Test
+  void pendingNackedOnCloseOrTimeoutGetsAnErrorSpan() {
+    PushDelivery d = traced();
+    com.pangate.gateway.trace.GatewayTracing.install(lastTracing);
+    deliverWith(d, item(1, DeliveryClass.DELIVERY_CLASS_RELIABLE, "m1", 4));
+    assertThat(spans.getFinishedSpanItems()).isEmpty();
+
+    session.failPending(AckItem.Status.STATUS_NACK_CLOSED);
+
+    assertThat(spans.getFinishedSpanItems()).singleElement().satisfies(sd -> {
+      assertThat(sd.getStatus().getStatusCode()).isEqualTo(io.opentelemetry.api.trace.StatusCode.ERROR);
+      assertThat(sd.getAttributes().get(io.opentelemetry.api.common.AttributeKey.stringKey("pangate.nack")))
+          .isEqualTo("STATUS_NACK_CLOSED");
+      assertThat(sd.getAttributes().get(io.opentelemetry.api.common.AttributeKey.stringKey("pangate.msg_id")))
+          .isEqualTo("m1");
+    });
   }
 }

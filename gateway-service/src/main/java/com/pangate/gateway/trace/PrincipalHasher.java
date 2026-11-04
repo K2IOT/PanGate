@@ -13,6 +13,8 @@ import javax.crypto.spec.SecretKeySpec;
 public final class PrincipalHasher {
 
   private final SecretKeySpec key;
+  // One Mac per thread (Mac is not thread-safe; getInstance per call is a provider lookup).
+  private final ThreadLocal<Mac> macs = ThreadLocal.withInitial(this::newMac);
 
   private PrincipalHasher(byte[] key) {
     this.key = new SecretKeySpec(key, "HmacSHA256");
@@ -34,14 +36,18 @@ public final class PrincipalHasher {
     return new PrincipalHasher(k);
   }
 
-  public String hash(String principal) {
+  private Mac newMac() {
     try {
       Mac mac = Mac.getInstance("HmacSHA256");
       mac.init(key);
-      byte[] h = mac.doFinal(principal.getBytes(StandardCharsets.UTF_8));
-      return HexFormat.of().formatHex(h, 0, 8);
+      return mac;
     } catch (GeneralSecurityException e) {
       throw new IllegalStateException(e);
     }
+  }
+
+  public String hash(String principal) {
+    byte[] h = macs.get().doFinal(principal.getBytes(StandardCharsets.UTF_8));  // doFinal resets the Mac
+    return HexFormat.of().formatHex(h, 0, 8);
   }
 }

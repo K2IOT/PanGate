@@ -148,4 +148,19 @@ class TenantCapHelloTest {
     assertThat(session.identity()).isNull();
     assertThat(counter.count("t1")).isEqualTo(3);
   }
+
+  @Test
+  void slotIsReleasedWhenActivationFailsBeforeTheSessionHasAnIdentity() throws Exception {
+    // A cell id too long for a resume ticket (> 1536 B): issuing throws during activation, after the reservation.
+    String longCell = "c".repeat(2000);
+    f.channel.pipeline().replace(HelloAuthHandler.class, "hello", new HelloAuthHandler(auth.tickets, auth.flow,
+        f.tracker, new com.pangate.gateway.auth.HelloPolicy(longCell, new com.pangate.gateway.control.CellMapView(longCell),
+            f.revocations, f.tenants, limiter, () -> f.wallNow() * 1000),
+        f.tenants, f.limits, longCell, f.metrics, seq, cap));
+
+    hello();
+
+    assertThat(session.identity()).isNull();
+    assertThat(counter.count("t1")).isZero();
+  }
 }

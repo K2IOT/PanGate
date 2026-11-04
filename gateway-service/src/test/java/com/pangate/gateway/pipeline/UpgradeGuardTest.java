@@ -266,4 +266,14 @@ class UpgradeGuardTest {
     res.release();
     assertThat(f.channel.isOpen()).isFalse();
   }
+
+  @Test
+  void rewireDropsEveryWebSocketHandlerNettyInstalled() {
+    guardWithUpstream(550_000);
+    f.channel.pipeline().addLast("validator", new io.netty.handler.codec.http.websocketx.Utf8FrameValidator());
+    FullHttpRequest r = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/v1/upstream");
+    f.channel.writeInbound(r);
+    assertThat(f.channel.pipeline().get("validator")).isNull();
+    ((FullHttpRequest) f.channel.readInbound()).release();
+  }
 }

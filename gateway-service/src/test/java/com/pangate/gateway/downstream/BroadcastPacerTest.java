@@ -229,4 +229,22 @@ class BroadcastPacerTest {
     assertThat(normal.get(1).refCnt()).isEqualTo(1);
     assertThat(f.meters.counter("gw.push.dropped", "reason", "broadcast_backlog").count()).isEqualTo(3);
   }
+
+  @Test
+  void broadcastToATracedSessionIsTraceLogged() {
+    subscribers(2, "t1:x");
+    sessions.get(0).traced(true);
+    ch.qos.logback.classic.Logger log = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger("pangate.trace");
+    ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> lines =
+        new ch.qos.logback.core.read.ListAppender<>();
+    lines.start();
+    log.addAppender(lines);
+    try {
+      pacer.submit("t1:x", Priority.PRIORITY_CRITICAL, frame("t1:x"));
+    } finally {
+      log.detachAppender(lines);
+    }
+    received();
+    assertThat(lines.list).singleElement().satisfies(l -> assertThat(l.getFormattedMessage()).contains("out PUSH"));
+  }
 }

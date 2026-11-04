@@ -38,9 +38,10 @@ public class EdgeConfig {
   /** Also a SessionListener: gives the slot back when a counted session closes. */
   @Bean
   com.pangate.gateway.tenant.TenantCap tenantCap(com.pangate.gateway.tenant.CellSize cells,
-      com.pangate.gateway.tenant.TenantCapBorrower borrower, GatewayMetrics metrics) {
+      com.pangate.gateway.tenant.TenantCapBorrower borrower, GatewayMetrics metrics,
+      com.pangate.gateway.loop.LoopRegistry loops, com.pangate.gateway.control.TenantLimitsStore tenants) {
     return new com.pangate.gateway.tenant.TenantCap(new com.pangate.gateway.tenant.TenantConnCounter(), cells,
-        borrower, metrics);
+        borrower, metrics, loops, tenants);
   }
 
   /** Every 10 s on offload: refresh the cell size and report this node's tenant totals (30 s expiry, ruling R2). */
@@ -68,20 +69,23 @@ public class EdgeConfig {
               io.opentelemetry.api.common.AttributeKey.stringKey("service.name"), "gateway",
               io.opentelemetry.api.common.AttributeKey.stringKey("service.instance.id"), p.nodeId())));
       builder.setTracerProvider(io.opentelemetry.sdk.trace.SdkTracerProvider.builder().setResource(resource)
-          .addSpanProcessor(io.opentelemetry.sdk.trace.export.BatchSpanProcessor.builder(
-              io.opentelemetry.exporter.otlp.http.trace.OtlpHttpSpanExporter.builder().setEndpoint(endpoint).build())
-              .build())
+          .addSpanProcessor(new com.pangate.gateway.trace.LoopSafeSpanProcessor(
+              io.opentelemetry.exporter.otlp.http.trace.OtlpHttpSpanExporter.builder().setEndpoint(endpoint).build(),
+              16_384, Duration.ofSeconds(1)))
           .build());
       log.info("OTel spans exported to {}", endpoint);
     }
+    io.opentelemetry.context.Context.current();  // set up context storage here, not on the first span on gw-io
     return builder.build();
   }
 
   @Bean
   com.pangate.gateway.trace.GatewayTracing gatewayTracing(io.opentelemetry.sdk.OpenTelemetrySdk otel,
       @org.springframework.beans.factory.annotation.Value("${gateway.tracing.otlp-endpoint:}") String endpoint) {
-    return endpoint.isBlank() ? com.pangate.gateway.trace.GatewayTracing.noop()
+    com.pangate.gateway.trace.GatewayTracing t = endpoint.isBlank() ? com.pangate.gateway.trace.GatewayTracing.noop()
         : com.pangate.gateway.trace.GatewayTracing.create(otel);
+    com.pangate.gateway.trace.GatewayTracing.install(t);  // for NACKs raised in Session (timeout, close)
+    return t;
   }
 
   /** Kill switch trace.principal (spec §7.8): a control handler and a session listener. */
@@ -133,6 +137,15 @@ public class EdgeConfig {
 
   static void reloadTlsTicketKeys(SecretSource secrets, SslContextProvider tls, AtomicReference<TlsTicketKeys> keys,
       GatewayMetrics metrics) {
+    // Same monitor as SslContextProvider.reloadIfChanged: a rotation and a context swap never interleave, so new
+    // contexts cannot keep the old keys.
+    synchronized (tls) {
+      rotateTlsTicketKeys(secrets, tls, keys, metrics);
+    }
+  }
+
+  private static void rotateTlsTicketKeys(SecretSource secrets, SslContextProvider tls,
+      AtomicReference<TlsTicketKeys> keys, GatewayMetrics metrics) {
     try {
       TlsTicketKeys next = TlsTicketKeys.load(secrets);
       if (!next.equals(keys.get())) {

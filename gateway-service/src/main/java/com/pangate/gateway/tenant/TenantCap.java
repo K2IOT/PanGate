@@ -12,7 +12,7 @@ import java.util.function.IntSupplier;
  * Tenant connection cap (spec §4.6 step i): a local quota {@code ceil(maxConns × 1.1 / nodesInCell)}, then slots
  * borrowed through Redis. Also the session listener that gives a reserved slot back when the session closes.
  */
-public final class TenantCap implements SessionListener {
+public final class TenantCap implements SessionListener, com.pangate.gateway.control.ControlEventHandler {
 
   /** Borrows one slot beyond the local quota; completes false when the cell-wide total would exceed maxConns. */
   @FunctionalInterface
@@ -34,6 +34,38 @@ public final class TenantCap implements SessionListener {
     this.borrowOk = m.counter("gw.tenant.borrow", "result", "ok");
     this.borrowDenied = m.counter("gw.tenant.borrow", "result", "denied");
     this.borrowError = m.counter("gw.tenant.borrow", "result", "error");
+  }
+
+  private com.pangate.gateway.loop.LoopRegistry loops;
+  private com.pangate.gateway.control.TenantLimitsStore tenants;
+
+  /** With loops and tenants: a cap switched on later also counts the sessions that are already open. */
+  public TenantCap(TenantConnCounter counter, IntSupplier nodes, Borrower borrower, GatewayMetrics m,
+      com.pangate.gateway.loop.LoopRegistry loops, com.pangate.gateway.control.TenantLimitsStore tenants) {
+    this(counter, nodes, borrower, m);
+    this.loops = loops;
+    this.tenants = tenants;
+  }
+
+  /**
+   * A tenant config changed (any scope): sessions of tenants that now have a cap but were opened uncounted are
+   * counted, on their owner loops. Counting can exceed the quota; new HELLOs then borrow or are refused.
+   */
+  @Override
+  public void onTenantCfg(com.pangate.contracts.v1.TenantCfg cfg) {
+    if (loops == null) {
+      return;
+    }
+    for (com.pangate.gateway.loop.LoopContext c : loops.all()) {
+      c.eventLoop().execute(() -> c.forEachSession(s -> {
+        if (s.identity() != null && !s.tenantReserved() && !s.warmUp()
+            && s.state() != com.pangate.gateway.session.SessionState.CLOSED
+            && tenants.policy(s.identity().tenantId()).maxConns() > 0) {
+          counter.reserveBorrowed(s.identity().tenantId());
+          s.tenantReserved(true);
+        }
+      }));
+    }
   }
 
   /** No Redis: only the local quota of a one-node cell (unit tests, pipelines built without the cap). */

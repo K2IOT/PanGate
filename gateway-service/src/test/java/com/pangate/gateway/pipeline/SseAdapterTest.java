@@ -212,6 +212,9 @@ class SseAdapterTest {
     assertThat(SseAdapter.httpStatus(CloseCode.WRONG_CELL).code()).isEqualTo(421);
     assertThat(SseAdapter.httpStatus(CloseCode.OVERLOADED).code()).isEqualTo(503);
     assertThat(SseAdapter.httpStatus(CloseCode.BAD_FRAME).code()).isEqualTo(400);
+    assertThat(SseAdapter.httpStatus(CloseCode.GOING_AWAY).code()).isEqualTo(503);  // drain: retry elsewhere
+    assertThat(SseAdapter.httpStatus(CloseCode.HELLO_TIMEOUT).code()).isEqualTo(503);
+    assertThat(SseAdapter.httpStatus(CloseCode.INTERNAL).code()).isEqualTo(503);
   }
 
   @Test
@@ -240,5 +243,18 @@ class SseAdapterTest {
     assertThat(head.headers().get(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN)).isEqualTo("https://app.example");
     assertThat(head.headers().get(HttpHeaderNames.VARY)).isEqualTo("Origin");
     out.forEach(ReferenceCountUtil::release);
+  }
+
+  @Test
+  void sseSocketsGetATcpUserTimeoutOnEpoll() throws Exception {
+    org.junit.jupiter.api.Assumptions.assumeTrue(io.netty.channel.epoll.Epoll.isAvailable());
+    io.netty.channel.epoll.EpollSocketChannel ch = new io.netty.channel.epoll.EpollSocketChannel();
+    try {
+      SseAdapter.applyUserTimeout(ch, Duration.ofSeconds(90));
+      assertThat(ch.config().getOption(io.netty.channel.epoll.EpollChannelOption.TCP_USER_TIMEOUT))
+          .isEqualTo(90_000);
+    } finally {
+      ch.unsafe().closeForcibly();
+    }
   }
 }

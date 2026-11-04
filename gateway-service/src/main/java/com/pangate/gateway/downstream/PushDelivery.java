@@ -86,7 +86,11 @@ public final class PushDelivery {
         droppedUnwritable.increment();
       }
       if (reliable) {
-        stream.ack(item.getDeliveryId(), AckItem.Status.STATUS_WRITTEN);
+        // Not written on SSE (no ACK channel, ruling R1): tell the router, which can retry or store it.
+        boolean sse = ch.attr(com.pangate.gateway.protocol.ChannelAttrs.TRANSPORT).get()
+            == com.pangate.gateway.protocol.ChannelAttrs.TransportKind.SSE;
+        stream.ack(item.getDeliveryId(), written || !sse ? AckItem.Status.STATUS_WRITTEN
+            : AckItem.Status.STATUS_NACK_SLOW_CONSUMER);
       }
       return written ? ch : null;
     }

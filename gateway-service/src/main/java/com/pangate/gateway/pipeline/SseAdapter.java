@@ -56,6 +56,16 @@ public final class SseAdapter extends ChannelDuplexHandler {
     this.streams = streams;
   }
 
+  /**
+   * A client gone without FIN: comments land in the socket buffer and "succeed", so only TCP notices. On epoll,
+   * TCP_USER_TIMEOUT bounds how long unacknowledged data may sit (Linux), instead of ~15 min of retransmissions.
+   */
+  static void applyUserTimeout(io.netty.channel.Channel ch, Duration timeout) {
+    if (ch instanceof io.netty.channel.epoll.EpollSocketChannel) {
+      ch.config().setOption(io.netty.channel.epoll.EpollChannelOption.TCP_USER_TIMEOUT, (int) timeout.toMillis());
+    }
+  }
+
   /** The status for a close before the stream started. */
   public static HttpResponseStatus httpStatus(CloseCode c) {
     return switch (c.code()) {
@@ -63,7 +73,7 @@ public final class SseAdapter extends ChannelDuplexHandler {
       case 4003 -> HttpResponseStatus.FORBIDDEN;
       case 4009 -> HttpResponseStatus.TOO_MANY_REQUESTS;
       case 4011 -> HttpResponseStatus.MISDIRECTED_REQUEST;
-      case 4013 -> HttpResponseStatus.SERVICE_UNAVAILABLE;
+      case 4013, 1001, 4004, 4500 -> HttpResponseStatus.SERVICE_UNAVAILABLE;  // drain, timeouts: retry later
       default -> HttpResponseStatus.BAD_REQUEST;
     };
   }
@@ -149,6 +159,7 @@ public final class SseAdapter extends ChannelDuplexHandler {
     long ms = s == null ? heartbeat.toMillis()
         : Math.max(1_000, Math.min(heartbeat.toMillis(), s.heartbeatSec() * 1000));
     beat = ctx.executor().scheduleAtFixedRate(() -> keepAlive(ctx), ms, ms, TimeUnit.MILLISECONDS);
+    applyUserTimeout(ctx.channel(), Duration.ofMillis(3 * ms));
   }
 
   private void keepAlive(ChannelHandlerContext ctx) {

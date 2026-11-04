@@ -210,7 +210,7 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
     }
     if (cap.tryReserve(t.tenant(), max)) {
       session.tenantReserved(true);
-      activate(ctx, session, hello, t);
+      activateReserved(ctx, session, hello, t);
       return;
     }
     verifying = true;  // frames the client pipelines meanwhile are held, like during JWKS refresh
@@ -233,8 +233,21 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
         return;
       }
       session.tenantReserved(true);
-      activate(ctx, session, hello, t);
+      activateReserved(ctx, session, hello, t);
     }));
+  }
+
+  /** The close listener only releases sessions that got an identity: release here if activation threw before. */
+  private void activateReserved(ChannelHandlerContext ctx, Session session, Hello hello, ResumeTicket t) {
+    try {
+      activate(ctx, session, hello, t);
+    } catch (RuntimeException e) {
+      if (session.identity() == null && session.tenantReserved()) {
+        session.tenantReserved(false);
+        cap.release(t.tenant());
+      }
+      throw e;
+    }
   }
 
   /** Spec §4.6 step 3 c–h; on rejection the session is closed with the check's code. */
