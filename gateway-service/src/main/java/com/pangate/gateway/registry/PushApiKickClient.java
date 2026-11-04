@@ -35,8 +35,6 @@ public final class PushApiKickClient implements KickClient, AutoCloseable {
   private final ScheduledExecutorService scheduler;
   private final Duration timeout;
   private final Counter failures;
-  private final Map<String, CompletableFuture<PushResponse>> pending = new ConcurrentHashMap<>();
-  private StreamObserver<PushRequest> requests;  // guarded by this
 
   public PushApiKickClient(ManagedChannel channel, ScheduledExecutorService scheduler, GatewayMetrics m,
       Duration timeout) {
@@ -83,15 +81,13 @@ public final class PushApiKickClient implements KickClient, AutoCloseable {
   private void attempt(String tenant, String principal, ControlOp op, int n, CompletableFuture<Boolean> result) {
     String id = UUID.randomUUID().toString();
     CompletableFuture<PushResponse> reply = new CompletableFuture<>();
-    pending.put(id, reply);
     try {
       send(PushRequest.newBuilder().setRequestId(id).setKind(PushRequest.Kind.KIND_CONTROL).setTenantId(tenant)
-          .setPrincipalId(principal).setControl(op).build());
+          .setPrincipalId(principal).setControl(op).build(), reply);
     } catch (RuntimeException e) {
       reply.completeExceptionally(e);
     }
     reply.orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS).whenComplete((r, e) -> {
-      pending.remove(id);
       if (e == null && r.getOk()) {
         result.complete(true);
       } else if (n < RETRY_DELAYS_MS.length) {
@@ -106,37 +102,53 @@ public final class PushApiKickClient implements KickClient, AutoCloseable {
     });
   }
 
-  private synchronized void send(PushRequest r) {
-    if (requests == null) {
-      requests = PushServiceGrpc.newStub(channel).sendStream(new StreamObserver<>() {
-        @Override
-        public void onNext(PushResponse v) {
-          CompletableFuture<PushResponse> f = pending.get(v.getRequestId());
-          if (f != null) {
-            f.complete(v);
-          }
-        }
+  /** One SendStream and the requests sent on it: when it ends, only those fail. */
+  private final class Call implements StreamObserver<PushResponse> {
+    final Map<String, CompletableFuture<PushResponse>> sent = new ConcurrentHashMap<>();
+    StreamObserver<PushRequest> requests;
 
-        @Override
-        public void onError(Throwable t) {
-          streamEnded(t);
-        }
-
-        @Override
-        public void onCompleted() {
-          streamEnded(new IllegalStateException("push-api closed the stream"));
-        }
-      });
+    @Override
+    public void onNext(PushResponse v) {
+      CompletableFuture<PushResponse> f = sent.remove(v.getRequestId());
+      if (f != null) {
+        f.complete(v);
+      }
     }
-    requests.onNext(r);
+
+    @Override
+    public void onError(Throwable t) {
+      ended(this, t);
+    }
+
+    @Override
+    public void onCompleted() {
+      ended(this, new IllegalStateException("push-api closed the stream"));
+    }
   }
 
-  /** The next kick opens a new stream; requests waiting on this one fail now (and are retried). */
-  private void streamEnded(Throwable t) {
-    synchronized (this) {
-      requests = null;
+  private Call call;  // guarded by this
+
+  private synchronized void send(PushRequest r, CompletableFuture<PushResponse> reply) {
+    if (call == null) {
+      Call c = new Call();
+      c.requests = PushServiceGrpc.newStub(channel).sendStream(c);
+      call = c;
     }
-    pending.values().forEach(f -> f.completeExceptionally(t));
+    Call c = call;
+    c.sent.put(r.getRequestId(), reply);
+    reply.whenComplete((v, e) -> c.sent.remove(r.getRequestId()));  // timed out or answered: forget it
+    c.requests.onNext(r);
+  }
+
+  /** The next kick opens a new stream; requests sent on the ended one fail now (and are retried). */
+  private void ended(Call c, Throwable t) {
+    synchronized (this) {
+      if (call == c) {
+        call = null;
+      }
+    }
+    c.sent.values().forEach(f -> f.completeExceptionally(t));
+    c.sent.clear();
   }
 
   @Override
