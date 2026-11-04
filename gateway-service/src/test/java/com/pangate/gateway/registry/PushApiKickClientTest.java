@@ -101,4 +101,22 @@ class PushApiKickClientTest {
     assertThat(client.kickAsync("t1", "t1:u1", "C", 2).toCompletableFuture().get()).isTrue();
     assertThat(streams.get()).isEqualTo(4);
   }
+
+  @Test
+  void kickReturnsAtOnceAndSendsFromTheScheduler() throws Exception {
+    start();
+    java.util.concurrent.CountDownLatch gate = new java.util.concurrent.CountDownLatch(1);
+    sched.execute(() -> {
+      try {
+        gate.await();  // the scheduler is busy: a kick that sends on the caller's thread would still go out
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+    });
+    client.kick("t1", "t1:u1", "C", 1);
+    Thread.sleep(200);
+    assertThat(received).isEmpty();
+    gate.countDown();
+    await().atMost(Duration.ofSeconds(3)).until(() -> received.size() == 1);
+  }
 }

@@ -73,7 +73,9 @@ public final class PushApiKickClient implements KickClient, AutoCloseable {
     CompletableFuture<Boolean> result = new CompletableFuture<>();
     ControlOp op = ControlOp.newBuilder()
         .setKick(Kick.newBuilder().setNewConnId(newConnId).setConnectedAtMs(connectedAtMs)).build();
-    attempt(tenant, principal, op, 0, result);
+    // Off the caller's thread (an event loop): UUID generation, the stream lock and the first call setup
+    // must never run on gw-io (spec §3.2).
+    scheduler.execute(() -> attempt(tenant, principal, op, 0, result));
     return result;
   }
 

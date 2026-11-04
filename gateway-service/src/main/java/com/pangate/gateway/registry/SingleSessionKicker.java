@@ -55,18 +55,20 @@ public final class SingleSessionKicker implements BiConsumer<Session, Map<String
       }
     }
     String principal = s.identity().principalId();
+    String connId = s.connId();
+    long connectedAtMs = s.connectedAtMs();
     if (local) {
       boolean[] seen = new boolean[loops.size()];
       for (ConnRef ref : principals.get(principal)) {
         if (ref.loopIdx() < seen.length && !seen[ref.loopIdx()]) {
           seen[ref.loopIdx()] = true;
           LoopContext loop = loops.get(ref.loopIdx());
-          loop.eventLoop().execute(() -> control.kick(loop, principal, s.connId(), s.connectedAtMs()));
+          loop.eventLoop().execute(() -> control.kick(loop, principal, connId, connectedAtMs));
         }
       }
     }
     if (remote) {
-      client.kick(s.identity().tenantId(), principal, s.connId(), s.connectedAtMs());
+      client.kick(s.identity().tenantId(), principal, connId, connectedAtMs);
     }
   }
 }
