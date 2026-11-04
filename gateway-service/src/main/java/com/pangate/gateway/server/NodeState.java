@@ -9,6 +9,7 @@ public final class NodeState {
   private volatile long epoch;
   private volatile boolean leaseAlive;
   private volatile boolean controlCaughtUp;
+  private volatile int shedLevel;
 
   public boolean draining() {
     return draining;
@@ -57,5 +58,14 @@ public final class NodeState {
 
   public void controlCaughtUp(boolean value) {
     controlCaughtUp = value;
+  }
+
+  /** Load-shedding level 0–6 (spec §7.3); written by the shed ladder (M3), read on the push path. */
+  public int shedLevel() {
+    return shedLevel;
+  }
+
+  public void shedLevel(int value) {
+    shedLevel = value;
   }
 }

@@ -16,12 +16,18 @@ public record GatewayLimits(
     Duration sessionTtl,
     int inboundRate,
     int inboundBurst,
-    int topicsPerConn) {
+    int topicsPerConn,
+    int pendingAckMsgs,
+    int pendingAckBytes,
+    Duration pendingAckTimeout,
+    int broadcastRatePerLoop) {
 
   public static GatewayLimits from(GatewayProperties p) {
     GatewayProperties.Limits l = p.limits();
     return new GatewayLimits(l.hardCap(), l.softCap(), l.perIp(), l.frameMax(), l.helloMax(), l.helloTimeout(),
-        l.handshakeTimeout(), l.handshakesPerPrincipalPerMin(), l.heartbeatInterval(), l.sessionTtl(), l.inboundRate(), l.inboundBurst(), l.topicsPerConn());
+        l.handshakeTimeout(), l.handshakesPerPrincipalPerMin(), l.heartbeatInterval(), l.sessionTtl(), l.inboundRate(), l.inboundBurst(), l.topicsPerConn(),
+        l.pendingAck().msgs(), (int) l.pendingAck().bytes().toBytes(), l.pendingAck().timeout(),
+        p.broadcast().ratePerLoop());
   }
 
   /** Idle timeout = three missed heartbeats. */

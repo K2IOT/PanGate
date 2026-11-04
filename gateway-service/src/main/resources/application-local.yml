@@ -5,6 +5,8 @@ pangate:
     dir: ${gateway.dev.dir}
 
 gateway:
+  grpc: { plaintext: true }
+  push-api: { enabled: false }
   node-id: gateway-local
   cell: cell-1
   dev:

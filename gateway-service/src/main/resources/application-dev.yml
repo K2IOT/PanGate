@@ -5,6 +5,8 @@ pangate:
     dir: ${gateway.dev.dir}
 
 gateway:
+  grpc: { plaintext: true }
+  push-api: { enabled: true, target: "dns:///fake-pushapi:9443", plaintext: true }
   node-id: gateway-dev-1
   dev:
     bootstrap-secrets: true

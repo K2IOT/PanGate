@@ -33,6 +33,7 @@ gateway:
     inbound-rate: 50
     inbound-burst: 100
     topics-per-conn: 100
+    pending-ack: { msgs: 32, bytes: 64KB, timeout: 5s }
   admission: { rate: 5000, burst: 10000, ramp-from: 500, ramp-duration: 2m }
   auth:
     jwks-uri: https://auth/.well-known/jwks.json
@@ -40,6 +41,16 @@ gateway:
     audience: pangate-gw
     issuer: ""
     clock-skew: 30s
+  broadcast: { rate-per-loop: 10000 }
+  grpc:
+    port: 9090
+    plaintext: false
+    allowed-spiffe: [spiffe://pangate/cell-1/push-router]
+    tls:
+      cert-file: /etc/pangate/grpc/gateway.crt
+      key-file: /etc/pangate/grpc/gateway.key
+      trust-file: /etc/pangate/grpc/spiffe-bundle.pem
+  push-api: { enabled: true, target: "dns:///push-api:9443", plaintext: false }
   dev: { bootstrap-secrets: false, dir: /etc/pangate/dev }
   startup: { dependency-timeout: 120s }
   redis:

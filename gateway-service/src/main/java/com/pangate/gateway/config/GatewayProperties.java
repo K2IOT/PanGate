@@ -21,7 +21,10 @@ public record GatewayProperties(
     Dev dev,
     Startup startup,
     Redis redis,
-    Kafka kafka) {
+    Kafka kafka,
+    Grpc grpc,
+    PushApi pushApi,
+    Broadcast broadcast) {
 
   public record Listeners(Ws ws, Tcp tcp) {}
 
@@ -46,7 +49,21 @@ public record GatewayProperties(
       Duration sessionTtl,
       int inboundRate,
       int inboundBurst,
-      int topicsPerConn) {}
+      int topicsPerConn,
+      PendingAck pendingAck) {}
+
+  /** Downstream pending-ack window per session (spec §5.3, §5.4). */
+  public record PendingAck(int msgs, DataSize bytes, Duration timeout) {}
+
+  /** PushStream server for the push router (spec §6.3); plaintext only in local and dev. */
+  public record Grpc(int port, boolean plaintext, List<String> allowedSpiffe, GrpcTls tls) {}
+
+  public record GrpcTls(Path certFile, Path keyFile, Path trustFile) {}
+
+  /** Push API target for single-session KICK (spec §6.6). */
+  public record PushApi(boolean enabled, String target, boolean plaintext) {}
+
+  public record Broadcast(int ratePerLoop) {}
 
   public record Admission(int rate, int burst, int rampFrom, Duration rampDuration) {}
 

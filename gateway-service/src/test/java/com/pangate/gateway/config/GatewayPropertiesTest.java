@@ -127,4 +127,47 @@ class GatewayPropertiesTest {
       assertThat(l.topicsPerConn()).isEqualTo(100);
     });
   }
+
+  @Test
+  void bindsPushSettings() {
+    runner.run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      assertThat(p.grpc().port()).isEqualTo(9090);
+      assertThat(p.grpc().plaintext()).isFalse();
+      assertThat(p.grpc().allowedSpiffe()).containsExactly("spiffe://pangate/cell-1/push-router");
+      assertThat(p.grpc().tls().trustFile()).isEqualTo(Path.of("/etc/pangate/grpc/spiffe-bundle.pem"));
+      assertThat(p.pushApi().enabled()).isTrue();
+      assertThat(p.pushApi().target()).isEqualTo("dns:///push-api:9443");
+      assertThat(p.pushApi().plaintext()).isFalse();
+      assertThat(p.broadcast().ratePerLoop()).isEqualTo(10_000);
+      assertThat(p.limits().pendingAck().msgs()).isEqualTo(32);
+      assertThat(p.limits().pendingAck().bytes()).isEqualTo(DataSize.ofKilobytes(64));
+      assertThat(p.limits().pendingAck().timeout()).isEqualTo(Duration.ofSeconds(5));
+      GatewayLimits l = GatewayLimits.from(p);
+      assertThat(l.pendingAckMsgs()).isEqualTo(32);
+      assertThat(l.pendingAckBytes()).isEqualTo(65_536);
+      assertThat(l.pendingAckTimeout()).isEqualTo(Duration.ofSeconds(5));
+      assertThat(l.broadcastRatePerLoop()).isEqualTo(10_000);
+    });
+  }
+
+  @Test
+  void localProfileUsesPlaintextAndNoPushApi() {
+    runner.withPropertyValues("spring.profiles.active=local").run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      assertThat(p.grpc().plaintext()).isTrue();
+      assertThat(p.pushApi().enabled()).isFalse();
+    });
+  }
+
+  @Test
+  void devProfileUsesFakePushApi() {
+    runner.withPropertyValues("spring.profiles.active=dev").run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      assertThat(p.grpc().plaintext()).isTrue();
+      assertThat(p.pushApi().enabled()).isTrue();
+      assertThat(p.pushApi().target()).isEqualTo("dns:///fake-pushapi:9443");
+      assertThat(p.pushApi().plaintext()).isTrue();
+    });
+  }
 }
