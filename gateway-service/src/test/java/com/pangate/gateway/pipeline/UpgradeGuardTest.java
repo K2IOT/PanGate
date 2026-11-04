@@ -207,4 +207,33 @@ class UpgradeGuardTest {
     assertThat(r.status().code()).isEqualTo(404);
     r.release();
   }
+
+  @Test
+  void routedPathAlsoDropsTheHandshakeHandlerNettyAddsForWebSocket() {
+    f.limits.set(new com.pangate.gateway.config.GatewayLimits(700_000, 550_000, 200, 65_536, 8_192,
+        Duration.ofSeconds(5), Duration.ofSeconds(10), 20, Duration.ofSeconds(30), Duration.ofHours(24), 50, 100, 100, 32, 65_536, Duration.ofSeconds(5), 10_000, Duration.ofSeconds(30)));
+    java.util.List<Object> seen = new java.util.ArrayList<>();
+    f.channel.pipeline().addLast("upgradeGuard", new UpgradeGuard(props(550_000), f.limits, f.loops, node,
+        new SplittableRandom(1), java.util.Map.of("/v1/sse", () -> new io.netty.channel.ChannelInboundHandlerAdapter() {
+          @Override
+          public void channelRead(io.netty.channel.ChannelHandlerContext ctx, Object msg) {
+            io.netty.util.ReferenceCountUtil.release(msg);
+            ctx.fireChannelRead(io.netty.buffer.Unpooled.wrappedBuffer(new byte[] {1}));  // like SseAdapter
+          }
+        })));
+    f.channel.pipeline().addLast("ws", new io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler(
+        "/v1/ws", "pangate.v1"));
+    f.channel.pipeline().addLast("tail", new io.netty.channel.ChannelInboundHandlerAdapter() {
+      @Override
+      public void channelRead(io.netty.channel.ChannelHandlerContext ctx, Object msg) {
+        seen.add(msg);
+      }
+    });
+
+    f.channel.writeInbound(new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/v1/sse"));
+
+    assertThat(f.channel.pipeline().names()).noneMatch(n -> n.contains("Handshake"));
+    assertThat(seen).singleElement().isInstanceOf(io.netty.buffer.ByteBuf.class);
+    ((io.netty.buffer.ByteBuf) seen.get(0)).release();
+  }
 }

@@ -71,6 +71,15 @@ public final class GatewayClient implements AutoCloseable {
   }
 
   public static GatewayClient connect(URI url, ClientTls tls, Duration timeout, InetSocketAddress localBind) {
+    return connect(url, tls, timeout, localBind, null);
+  }
+
+  /**
+   * {@code proxySource} non-null: send a PROXY protocol v1 header claiming that source before TLS, as a load balancer
+   * would (gateway spec §4.1); for tests of the gateway's PROXY support.
+   */
+  public static GatewayClient connect(URI url, ClientTls tls, Duration timeout, InetSocketAddress localBind,
+      InetSocketAddress proxySource) {
     boolean ws = switch (url.getScheme()) {
       case "wss" -> true;
       case "tcps" -> false;
@@ -87,6 +96,9 @@ public final class GatewayClient implements AutoCloseable {
           @Override
           protected void initChannel(SocketChannel ch) {
             SslHandler ssl = sslContext.newHandler(ch.alloc(), host, port);
+            if (proxySource != null) {
+              ch.pipeline().addLast(new ProxyHeaderWriter(proxySource));
+            }
             ch.pipeline().addLast(ssl);
             if (ws) {
               ch.pipeline().addLast(new HttpClientCodec(), new HttpObjectAggregator(8192),
@@ -112,6 +124,26 @@ public final class GatewayClient implements AutoCloseable {
       throw new IllegalStateException("cannot connect to " + url + ": " + cause, cause);
     }
     return new GatewayClient(ch, ws, handler);
+  }
+
+  /** Writes a PROXY v1 line on connect, before the TLS handshake starts, then steps aside. */
+  private static final class ProxyHeaderWriter extends io.netty.channel.ChannelInboundHandlerAdapter {
+    private final InetSocketAddress source;
+
+    ProxyHeaderWriter(InetSocketAddress source) {
+      this.source = source;
+    }
+
+    @Override
+    public void channelActive(io.netty.channel.ChannelHandlerContext ctx) {
+      InetSocketAddress dst = (InetSocketAddress) ctx.channel().remoteAddress();
+      String family = source.getAddress() instanceof java.net.Inet6Address ? "TCP6" : "TCP4";
+      String line = "PROXY " + family + " " + source.getAddress().getHostAddress() + " "
+          + dst.getAddress().getHostAddress() + " " + source.getPort() + " " + dst.getPort() + "\r\n";
+      ctx.writeAndFlush(io.netty.buffer.Unpooled.copiedBuffer(line, java.nio.charset.StandardCharsets.US_ASCII));
+      ctx.pipeline().remove(this);
+      ctx.fireChannelActive();
+    }
   }
 
   /** Sends a frame without waiting for anything. */

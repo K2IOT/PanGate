@@ -152,4 +152,27 @@ class GatewayClientTest {
       assertThat(c.awaitPush(T).getMsgId()).isEqualTo("p1");
     }
   }
+
+  @Test
+  void proxyHeaderIsSentBeforeTls() throws Exception {
+    java.util.concurrent.CompletableFuture<String> firstLine = new java.util.concurrent.CompletableFuture<>();
+    try (java.net.ServerSocket ss = new java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())) {
+      Thread acceptor = Thread.ofVirtual().start(() -> {
+        try (java.net.Socket s = ss.accept()) {
+          java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(s.getInputStream(),
+              java.nio.charset.StandardCharsets.US_ASCII));
+          firstLine.complete(r.readLine());
+        } catch (java.io.IOException e) {
+          firstLine.completeExceptionally(e);
+        }
+      });
+      URI url = URI.create("wss://localhost:" + ss.getLocalPort() + "/v1/ws");
+      assertThatThrownBy(() -> GatewayClient.connect(url, ClientTls.insecure(), Duration.ofSeconds(2), null,
+          new java.net.InetSocketAddress("203.0.113.7", 5555)))
+          .isInstanceOf(IllegalStateException.class);  // the fake peer never speaks TLS
+      assertThat(firstLine.get(5, java.util.concurrent.TimeUnit.SECONDS))
+          .isEqualTo("PROXY TCP4 203.0.113.7 127.0.0.1 5555 " + ss.getLocalPort());
+      acceptor.join();
+    }
+  }
 }
