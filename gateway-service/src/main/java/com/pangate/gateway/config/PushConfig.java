@@ -73,6 +73,7 @@ public class PushConfig {
     for (LoopContext loop : loops.all()) {
       loop.pacer(new BroadcastPacer(loop, node, tenants, limits, metrics));
     }
+    metrics.gauge("gw.broadcast.queued", loops, l -> l.all().stream().mapToInt(c -> c.pacer().queued()).sum());
     return new PushDispatcher(loops, principals, node, delivery, control, metrics);
   }
 

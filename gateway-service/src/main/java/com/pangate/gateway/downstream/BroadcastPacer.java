@@ -22,6 +22,11 @@ import java.util.concurrent.TimeUnit;
  */
 public final class BroadcastPacer {
 
+  /**
+   * Queued NORMAL + BULK jobs per loop. Each pins a direct buffer and a recipient snapshot: past the cap the oldest
+   * BULK, then the oldest NORMAL, is dropped ({@code gw.push.dropped{reason=broadcast_backlog}}).
+   */
+  public static final int MAX_QUEUED_JOBS = 256;
   private static final long TICK_MS = 10;
   private static final long SHED_RECHECK_MS = 100;
 
@@ -48,7 +53,9 @@ public final class BroadcastPacer {
   private final Counter normalCount;
   private final Counter bulkCount;
   private final Counter disabled;
+  private final Counter backlog;
   private boolean scheduled;
+  private volatile int queued;  // written on the loop only; read by the gw.broadcast.queued gauge
 
   public BroadcastPacer(LoopContext loop, NodeState node, TenantLimitsStore tenants, LimitsHolder limits,
       GatewayMetrics m) {
@@ -60,6 +67,7 @@ public final class BroadcastPacer {
     this.normalCount = m.counter("gw.broadcast.recipients", "priority", "normal");
     this.bulkCount = m.counter("gw.broadcast.recipients", "priority", "bulk");
     this.disabled = m.counter("gw.push.dropped", "reason", "broadcast_disabled");
+    this.backlog = m.counter("gw.push.dropped", "reason", "broadcast_backlog");
   }
 
   /** On the loop; takes ownership of exactly one share of {@code frame}. */
@@ -82,11 +90,17 @@ public final class BroadcastPacer {
       frame.releaseShare();
       return;
     }
+    if (normal.size() + bulk.size() >= MAX_QUEUED_JOBS) {
+      Job oldest = !bulk.isEmpty() ? bulk.poll() : normal.poll();
+      oldest.frame.releaseShare();
+      backlog.increment();
+    }
     if (p == Priority.PRIORITY_BULK) {
       bulk.add(new Job(frame, recipients, bulkCount));
     } else {
       normal.add(new Job(frame, recipients, normalCount));
     }
+    queued = normal.size() + bulk.size();
     schedule(TICK_MS);
   }
 
@@ -115,6 +129,7 @@ public final class BroadcastPacer {
       }
     }
     written.forEach(Channel::flush);
+    queued = normal.size() + bulk.size();
     if (!normal.isEmpty() || (!bulk.isEmpty() && !shedding)) {
       schedule(TICK_MS);
     } else if (!bulk.isEmpty()) {
@@ -139,8 +154,9 @@ public final class BroadcastPacer {
     return visited;
   }
 
+  /** Any thread. */
   public int queued() {
-    return normal.size() + bulk.size();
+    return queued;
   }
 
   boolean scheduled() {

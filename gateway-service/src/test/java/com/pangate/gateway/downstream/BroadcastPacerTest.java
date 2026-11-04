@@ -203,4 +203,30 @@ class BroadcastPacerTest {
     received();
     assertThat(pacer.scheduled()).isFalse();
   }
+
+  @Test
+  void backlogBeyondCapDropsOldestBulkThenOldestNormal() {
+    subscribers(1, "t1:x");
+    List<PreEncodedFrame> bulk = new ArrayList<>();
+    List<PreEncodedFrame> normal = new ArrayList<>();
+    for (int i = 0; i < 2; i++) {
+      PreEncodedFrame fr = frame("t1:x");
+      bulk.add(fr);
+      pacer.submit("t1:x", Priority.PRIORITY_BULK, fr);
+    }
+    for (int i = 0; i < BroadcastPacer.MAX_QUEUED_JOBS - 2; i++) {
+      PreEncodedFrame fr = frame("t1:x");
+      normal.add(fr);
+      pacer.submit("t1:x", Priority.PRIORITY_NORMAL, fr);
+    }
+    assertThat(pacer.queued()).isEqualTo(BroadcastPacer.MAX_QUEUED_JOBS);
+    pacer.submit("t1:x", Priority.PRIORITY_NORMAL, frame("t1:x"));   // drops the oldest BULK
+    pacer.submit("t1:x", Priority.PRIORITY_NORMAL, frame("t1:x"));   // drops the next BULK
+    pacer.submit("t1:x", Priority.PRIORITY_NORMAL, frame("t1:x"));   // no BULK left: drops the oldest NORMAL
+    assertThat(pacer.queued()).isEqualTo(BroadcastPacer.MAX_QUEUED_JOBS);
+    assertThat(bulk).allMatch(fr -> fr.refCnt() == 0);
+    assertThat(normal.get(0).refCnt()).isZero();
+    assertThat(normal.get(1).refCnt()).isEqualTo(1);
+    assertThat(f.meters.counter("gw.push.dropped", "reason", "broadcast_backlog").count()).isEqualTo(3);
+  }
 }
