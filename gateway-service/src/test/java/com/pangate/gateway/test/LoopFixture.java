@@ -55,6 +55,7 @@ public final class LoopFixture {
   public final MockProducer<String, byte[]> telemetry =
       new MockProducer<>(true, new StringSerializer(), new ByteArraySerializer());
   public final UpstreamPublisher upstream;
+  public final com.pangate.gateway.downstream.PushDelivery delivery;
 
   public LoopFixture() {
     channel = new EmbeddedChannel();
@@ -66,6 +67,7 @@ public final class LoopFixture {
     node.epoch(7);
     upstream = new UpstreamPublisher(TestKafka.of(reliable, telemetry), topics, node, "cell-1", tenants, metrics,
         () -> clockSec.get() * 1000);
+    delivery = new com.pangate.gateway.downstream.PushDelivery(tenants, limits, metrics, () -> wallNow() * 1000);
   }
 
   /** HELLO/REAUTH policy (spec §4.6 c–h) over this fixture's control stores and the given limiter. */

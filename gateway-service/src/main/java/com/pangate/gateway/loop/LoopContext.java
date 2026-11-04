@@ -21,6 +21,16 @@ public final class LoopContext {
   private final Long2ObjectOpenHashMap<Session> sessions = new Long2ObjectOpenHashMap<>();
   private long counter;
   private volatile int activeCount;
+  private int pendingInflight;
+  private static final java.lang.invoke.VarHandle PENDING;
+
+  static {
+    try {
+      PENDING = java.lang.invoke.MethodHandles.lookup().findVarHandle(LoopContext.class, "pendingInflight", int.class);
+    } catch (ReflectiveOperationException e) {
+      throw new ExceptionInInitializerError(e);
+    }
+  }
 
   /** Same clock for deadlines and wall time (tests). */
   public LoopContext(int index, EventLoop loop, int wheelSlots, LongSupplier epochSec) {
@@ -102,6 +112,15 @@ public final class LoopContext {
   @SuppressWarnings("NonAtomicVolatileUpdate")
   public void decrementActive() {
     activeCount--;
+  }
+
+  /** Pushes awaiting ACK on this loop: written on the loop, read anywhere (opaque, for the gauge). */
+  public int pendingInflight() {
+    return (int) PENDING.getOpaque(this);
+  }
+
+  public void addPendingInflight(int delta) {
+    PENDING.setOpaque(this, pendingInflight + delta);
   }
 
   public DeadlineWheel wheel() {

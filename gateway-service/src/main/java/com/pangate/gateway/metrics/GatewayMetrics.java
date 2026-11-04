@@ -40,6 +40,8 @@ public final class GatewayMetrics {
   }
 
   public void bindLoops(LoopRegistry loops) {
+    Gauge.builder("gw.pending.ack.inflight", loops,
+        l -> l.all().stream().mapToInt(LoopContext::pendingInflight).sum()).register(registry);
     for (LoopContext c : loops.all()) {
       Gauge.builder("gw.connections.active", c, LoopContext::activeCount)
           .tag("loop", Integer.toString(c.index())).register(registry);

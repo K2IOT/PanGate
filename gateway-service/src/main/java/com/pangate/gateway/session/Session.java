@@ -73,6 +73,10 @@ public final class Session extends WheelNode implements Deadlined {
   // The last registry register sent for this session (RegistryWriter); null once known to be done.
   private java.util.concurrent.CompletableFuture<?> registryWrite;
   private String closeReason;
+  // Downstream pushes awaiting ACK (spec §5.4); null while none, so idle sessions stay small.
+  private PendingAckWindow pending;
+  private int overflowNacks;
+  private long overflowWindowSec;
 
   public Session(LoopContext loop, Channel channel, long sessionKey, long acceptedAtSec, LimitsHolder limits,
       InetAddress remoteAddress, TenantLimitsStore tenants) {
@@ -134,8 +138,10 @@ public final class Session extends WheelNode implements Deadlined {
     return switch (state) {
       case HANDSHAKING -> Math.min(acceptedAtSec + l.handshakeTimeout().toSeconds(), helloDeadlineSec);
       // Reads paused for Kafka back-pressure: PINGs cannot arrive, so no heartbeat timeout meanwhile (spec §0.2).
-      case ACTIVE -> upstreamPaused ? expMonoSec : Math.min(lastSeenSec + idleTimeoutSec(), expMonoSec);
-      case DRAINING -> Math.min(Math.min(lastSeenSec + idleTimeoutSec(), expMonoSec), drainDeadlineSec);
+      case ACTIVE -> Math.min(pendingDeadlineSec(l),
+          upstreamPaused ? expMonoSec : Math.min(lastSeenSec + idleTimeoutSec(), expMonoSec));
+      case DRAINING -> Math.min(pendingDeadlineSec(l),
+          Math.min(Math.min(lastSeenSec + idleTimeoutSec(), expMonoSec), drainDeadlineSec));
       case CLOSED -> Long.MAX_VALUE;
     };
   }
@@ -146,6 +152,7 @@ public final class Session extends WheelNode implements Deadlined {
     if (state == SessionState.CLOSED) {
       return;
     }
+    expirePending(nowSec);
     if (nowSec >= nextDeadlineSec()) {
       if (state == SessionState.HANDSHAKING) {
         close(CloseCode.HELLO_TIMEOUT, "HELLO_TIMEOUT");
@@ -159,6 +166,82 @@ public final class Session extends WheelNode implements Deadlined {
       return;
     }
     reschedule();
+  }
+
+  private long pendingDeadlineSec(GatewayLimits l) {
+    return pending == null ? Long.MAX_VALUE : pending.oldestSentAtSec() + l.pendingAckTimeout().toSeconds();
+  }
+
+  /** Overdue pushes are NACK_TIMEOUT and forgotten; never re-sent on this connection (spec §5.4). */
+  private void expirePending(long nowSec) {
+    if (pending != null) {
+      int before = pending.size();
+      pending.expire(nowSec, limits.current().pendingAckTimeout().toSeconds(),
+          e -> e.stream().ack(e.deliveryId(), com.pangate.contracts.v1.AckItem.Status.STATUS_NACK_TIMEOUT));
+      loop.addPendingInflight(pending.size() - before);
+      releasePendingIfEmpty();
+    }
+  }
+
+  public PendingAckWindow pending() {
+    return pending;
+  }
+
+  public PendingAckWindow pendingOrCreate(GatewayLimits l) {
+    checkLoop();
+    if (pending == null) {
+      pending = new PendingAckWindow(l.pendingAckMsgs(), l.pendingAckBytes());
+    }
+    return pending;
+  }
+
+  public void releasePendingIfEmpty() {
+    if (pending != null && pending.size() == 0) {
+      pending = null;
+    }
+  }
+
+  /** Adds to the window (created if needed); the first entry puts the ack deadline on the wheel. */
+  public void addPending(PendingEntry e) {
+    checkLoop();
+    boolean first = pending == null || pending.size() == 0;
+    pendingOrCreate(limits.current()).add(e);
+    loop.addPendingInflight(1);
+    if (first) {
+      reschedule();
+    }
+  }
+
+  /** The client acknowledged {@code msgId}: the entry, or null if unknown (already acked or timed out). */
+  public PendingEntry ackPending(String msgId) {
+    checkLoop();
+    if (pending == null) {
+      return null;
+    }
+    PendingEntry e = pending.remove(msgId);
+    if (e != null) {
+      loop.addPendingInflight(-1);
+      releasePendingIfEmpty();
+    }
+    return e;
+  }
+
+  /** Every remaining entry is answered with {@code status} (close: NACK_CLOSED or NACK_SLOW_CONSUMER). */
+  public void failPending(com.pangate.contracts.v1.AckItem.Status status) {
+    if (pending != null) {
+      loop.addPendingInflight(-pending.size());
+      pending.drain(e -> e.stream().ack(e.deliveryId(), status));
+      pending = null;
+    }
+  }
+
+  /** One NACK_OVERFLOW; true once 64 happened within the current 30 s window (spec §5.3, §7.4). */
+  public boolean countOverflowNack(long nowSec) {
+    if (overflowNacks == 0 || nowSec - overflowWindowSec >= 30) {
+      overflowWindowSec = nowSec;
+      overflowNacks = 0;
+    }
+    return ++overflowNacks >= 64;
   }
 
   /** Recomputes the wheel slot now (a kill switch shortened the heartbeat; lazy rebucketing would be too late). */

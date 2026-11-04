@@ -8,11 +8,16 @@ import com.pangate.contracts.v1.AckItem;
  */
 public final class StreamRef {
 
-  private final AckBatcher acks;
+  private final java.util.function.Consumer<AckItem> acks;
   private volatile boolean alive = true;
 
   public StreamRef(AckBatcher acks) {
-    this.acks = acks;
+    this(acks::offer);
+  }
+
+  /** Acks go to {@code sink} (any thread) while the stream is alive. */
+  public StreamRef(java.util.function.Consumer<AckItem> sink) {
+    this.acks = sink;
   }
 
   public boolean alive() {
@@ -26,7 +31,7 @@ public final class StreamRef {
   /** Any thread; a no-op once the stream is dead. */
   public void ack(long deliveryId, AckItem.Status status) {
     if (alive) {
-      acks.offer(AckItem.newBuilder().setDeliveryId(deliveryId).setStatus(status).build());
+      acks.accept(AckItem.newBuilder().setDeliveryId(deliveryId).setStatus(status).build());
     }
   }
 }

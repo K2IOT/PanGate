@@ -37,7 +37,7 @@ class SessionHandlerTest {
     session = f.tracker.admit(f.channel, f.loop, InetAddress.getLoopbackAddress());
     session.activate(new Session.Identity("t1", "t1:u1", "d1", "ios", "1.0", Set.of()), "CONN", 0L,
         f.now() - 100, f.now() + 3_600, 7, List.of("t1:news.*"));
-    f.channel.pipeline().addLast(new SessionHandler(auth.tickets, auth.flow, limiter, f.policy(limiter), f.limits, "cell-1", f.upstream), new ErrorTerminator());
+    f.channel.pipeline().addLast(new SessionHandler(auth.tickets, auth.flow, limiter, f.policy(limiter), f.limits, "cell-1", f.upstream, f.delivery), new ErrorTerminator());
   }
 
   private Frame in(Frame frame) {
@@ -129,7 +129,7 @@ class SessionHandlerTest {
     com.pangate.gateway.auth.PrincipalHandshakeLimiter gl =
         new com.pangate.gateway.auth.PrincipalHandshakeLimiter(20, () -> g.now() * 1000);
     g.channel.pipeline().addLast(new SessionHandler(a.tickets, a.flow, gl, g.policy(gl), g.limits, "cell-1",
-        g.upstream),
+        g.upstream, g.delivery),
         new ErrorTerminator());
 
     g.channel.writeInbound(Frame.newBuilder().setType(FrameType.FRAME_TYPE_REAUTH)
@@ -154,9 +154,28 @@ class SessionHandlerTest {
   }
 
   @Test
-  void ackIsIgnored() {
-    assertThat(in(frame(FrameType.FRAME_TYPE_ACK))).isNull();
+  void ackFrameIsRoutedToDelivery() {
+    java.util.List<com.pangate.contracts.v1.AckItem> acks = new java.util.ArrayList<>();
+    var window = session.pendingOrCreate(f.limits.current());
+    session.addPending(new com.pangate.gateway.session.PendingEntry("m1", 5,
+        new com.pangate.gateway.downstream.StreamRef(acks::add), f.now(), 1));
+
+    assertThat(in(Frame.newBuilder().setType(FrameType.FRAME_TYPE_ACK).setPayload(
+        com.pangate.contracts.v1.Ack.newBuilder().addMsgIds("m1").build().toByteString()).build())).isNull();
+
+    assertThat(acks).extracting(com.pangate.contracts.v1.AckItem::getDeliveryId).containsExactly(5L);
+    assertThat(window.size()).isZero();
     assertThat(f.channel.isOpen()).isTrue();
+  }
+
+  @Test
+  void ackWithMoreThan32IdsClosesBadFrame() {
+    var b = com.pangate.contracts.v1.Ack.newBuilder();
+    for (int i = 0; i < 33; i++) {
+      b.addMsgIds("m" + i);
+    }
+    in(Frame.newBuilder().setType(FrameType.FRAME_TYPE_ACK).setPayload(b.build().toByteString()).build());
+    assertThat(f.channel.isOpen()).isFalse();
   }
 
   @Test

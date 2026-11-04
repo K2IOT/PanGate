@@ -30,9 +30,12 @@ public final class SessionHandler extends ChannelInboundHandlerAdapter {
   private final LimitsHolder limits;
   private final String cell;
   private final UpstreamPublisher upstream;
+  private final com.pangate.gateway.downstream.PushDelivery delivery;
 
   public SessionHandler(ResumeTicketService tickets, JwtAuthFlow jwt, PrincipalHandshakeLimiter limiter,
-      com.pangate.gateway.auth.HelloPolicy policy, LimitsHolder limits, String cell, UpstreamPublisher upstream) {
+      com.pangate.gateway.auth.HelloPolicy policy, LimitsHolder limits, String cell, UpstreamPublisher upstream,
+      com.pangate.gateway.downstream.PushDelivery delivery) {
+    this.delivery = delivery;
     this.tickets = tickets;
     this.jwt = jwt;
     this.limiter = limiter;
@@ -55,11 +58,21 @@ public final class SessionHandler extends ChannelInboundHandlerAdapter {
       case FRAME_TYPE_PING -> ctx.writeAndFlush(Frames.pong(frame.getMsgId()));
       case FRAME_TYPE_HELLO -> throw new ProtocolException(CloseCode.BAD_FRAME, "duplicate HELLO");
       case FRAME_TYPE_REAUTH -> reauth(ctx, session, frame, now);
-      case FRAME_TYPE_ACK -> { }
+      case FRAME_TYPE_ACK -> ack(session, frame);
       case FRAME_TYPE_UPSTREAM -> upstream.publish(ctx, session, frame, null);
       case FRAME_TYPE_RPC_RES -> upstream.publish(ctx, session, frame, "cmd_result");
       default -> ctx.writeAndFlush(Frames.error(CloseCode.INTERNAL.code(), "UNSUPPORTED", false, false));
     }
+  }
+
+  private void ack(Session session, Frame frame) {
+    com.pangate.contracts.v1.Ack ack;
+    try {
+      ack = com.pangate.contracts.v1.Ack.parseFrom(frame.getPayload());
+    } catch (InvalidProtocolBufferException e) {
+      throw new ProtocolException(CloseCode.BAD_FRAME, "malformed ACK");
+    }
+    delivery.onAck(session, ack);
   }
 
   private void reauth(ChannelHandlerContext ctx, Session session, Frame frame, long now) {
