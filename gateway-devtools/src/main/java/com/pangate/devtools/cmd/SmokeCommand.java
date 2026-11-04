@@ -17,7 +17,8 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 
 @Command(name = "smoke",
-    description = "End-to-end check: token -> HELLO -> PING -> UPSTREAM cmd -> close -> resume with ticket.")
+    description = "End-to-end check: token -> HELLO -> PING -> UPSTREAM cmd -> push via fake-router -> ACK -> "
+        + "DeliveryAck -> close -> resume with ticket.")
 public final class SmokeCommand implements Callable<Integer> {
 
   private static final Duration T = Duration.ofSeconds(10);
@@ -28,6 +29,9 @@ public final class SmokeCommand implements Callable<Integer> {
 
   @Option(names = "--issuer", required = true, description = "Issuer base URL, e.g. http://issuer:8090")
   URI issuer;
+
+  @Option(names = "--router", required = true, description = "Gateway gRPC address for the fake router, e.g. gateway:9090")
+  String router;
 
   @ArgGroup(exclusive = true, multiplicity = "1")
   ClientCommand.Trust trust;
@@ -52,6 +56,23 @@ public final class SmokeCommand implements Callable<Integer> {
           throw new IllegalStateException("expected UPSTREAM_ACK, got " + answer.getType() + " "
               + com.pangate.contracts.v1.ErrorInfo.parseFrom(answer.getPayload()));
         }
+        step = "push via fake-router -> ACK -> DeliveryAck";
+        try (com.pangate.devtools.router.FakeRouter r = com.pangate.devtools.router.FakeRouter.connect(router)) {
+          String pushId = java.util.UUID.randomUUID().toString();
+          long t0 = System.nanoTime();
+          long deliveryId = r.unicast(first.getConnId(), com.pangate.contracts.v1.DeliveryClass.DELIVERY_CLASS_RELIABLE,
+              pushId, "smoke-push".getBytes());
+          com.pangate.contracts.v1.Frame push = c.awaitPush(T);
+          if (!pushId.equals(push.getMsgId())) {
+            throw new IllegalStateException("expected PUSH " + pushId + ", got " + push.getMsgId());
+          }
+          c.ack(pushId);
+          com.pangate.contracts.v1.AckItem ack = r.awaitAck(deliveryId, T);
+          if (ack.getStatus() != com.pangate.contracts.v1.AckItem.Status.STATUS_ACKED) {
+            throw new IllegalStateException("expected ACKED, got " + ack.getStatus());
+          }
+          System.out.printf("push -> ack -> DeliveryAck in %.1f ms%n", (System.nanoTime() - t0) / 1e6);
+        }
       }
 
       step = "reconnect + HELLO (resume ticket)";
@@ -63,7 +84,7 @@ public final class SmokeCommand implements Callable<Integer> {
               + " -> " + second.getSessionExpiresAtMs());
         }
       }
-      System.out.println("SMOKE OK (connected, pong, upstream-ack, resume)");
+      System.out.println("SMOKE OK (connected, pong, upstream-ack, push-ack, resume)");
       return 0;
     } catch (Exception e) {
       System.out.println("SMOKE FAILED at step '" + step + "': " + e);

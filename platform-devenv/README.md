@@ -5,7 +5,7 @@ Local and dev environments for PanGate (spec §2.4, §9.1).
 | Environment | What runs where | Commands |
 |---|---|---|
 | **local** | Gateway in your IDE (profile `local`); infra (Kafka `localhost:9092`, Redis `localhost:6379`) on `localhost` | `make bootstrap infra-up`, then run `GatewayApplication` with profile `local` (or `make run-local`); `make infra-down` to stop |
-| **dev** | Everything in Docker | `make bootstrap images up smoke`, `make down` |
+| **dev** | Everything in Docker: Kafka, Redis, issuer, `fake-pushapi`, gateway | `make bootstrap images up smoke`, `make down` |
 
 Kafka and Redis can also be installed natively, as long as they listen on `localhost:9092` / `localhost:6379`
 (override with `GATEWAY_KAFKA_BOOTSTRAP`, `GATEWAY_REDIS_REGISTRY_URI`, `GATEWAY_REDIS_STATE_URI`). Topics are created by
@@ -21,6 +21,9 @@ TOKEN=$(java -jar gateway-devtools/target/gateway-devtools-0.1.0-SNAPSHOT-exec.j
 java -jar gateway-devtools/target/gateway-devtools-0.1.0-SNAPSHOT-exec.jar client \
   --url wss://localhost:8443/v1/ws --ca ~/.pangate-dev/ca.crt --token "$TOKEN" --device d1 --once
 ```
+
+`make smoke` runs the devtools `smoke` command in the `tools` profile: mint token → connect → `CONNECTED` → PING →
+upstream `cmd` → push through `fake-router` → ACK → `DeliveryAck` → disconnect → resume with the ticket.
 
 Checks: `scripts/local-start-check.sh <gateway-jar> <devtools-exec-jar>` and
 `scripts/idle-memory.sh <gateway-jar> <devtools-exec-jar> [N]`.

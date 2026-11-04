@@ -1,6 +1,6 @@
 # PanGate dev environment (spec §2.4, §9.1). One file, compose profiles:
 #   (default)  infrastructure (Kafka, Redis); `make infra-up` exposes it on localhost for the IDE (profile local)
-#   app        issuer + gateway, built with `make images`
+#   app        issuer + fake-pushapi + gateway, built with `make images`
 #   tools      devtools container for `make smoke`
 name: pangate
 
@@ -74,6 +74,19 @@ services:
       test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.devtools.Main", "health",
              "http://127.0.0.1:8090/.well-known/jwks.json"]
 
+  # Push API stand-in (spec §2.4, §6.6): receives the gateway's KICK and sends it back as a CONTROL item.
+  # It dials gateway:9090 only when a KICK arrives, so it can start before the gateway.
+  fake-pushapi:
+    profiles: ["app"]
+    image: pangate/gateway-devtools:dev
+    command: ["fake-pushapi", "--port", "9443", "--router", "gateway:9090"]
+    ports:
+      - "9443:9443"
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.devtools.Main", "health",
+             "--grpc", "localhost:9443"]
+
   gateway:
     profiles: ["app"]
     image: pangate/gateway-service:dev
@@ -90,6 +103,8 @@ services:
       - "8081:8081"
     depends_on:
       issuer:
+        condition: service_healthy
+      fake-pushapi:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully

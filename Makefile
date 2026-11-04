@@ -64,7 +64,7 @@ logs:
 
 smoke:
 	$(COMPOSE) --profile tools run --rm devtools smoke --url wss://gateway:8443/v1/ws \
-	  --issuer http://issuer:8090 --ca /dev-secrets/ca.crt
+	  --issuer http://issuer:8090 --ca /dev-secrets/ca.crt --router gateway:9090
 
 local-check: infra-up
 	platform-devenv/scripts/local-start-check.sh $(GATEWAY_JAR) $(DEVTOOLS_JAR)

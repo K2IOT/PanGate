@@ -989,3 +989,20 @@ git commit -m "chore: M2b smoke push->ack, fake-pushapi in compose, docs and exi
 - IT M2 xanh, gồm `GatewayPushIT`.
 - Heap/session < 5 KB; lag p99 < 20 ms với 18k session.
 - TODO 50k session (spec §14) vẫn mở.
+
+## Kết quả đo M2b
+
+Đo trong container phát triển (`ulimit -n` 20000), Docker 1 node Kafka 3.9.1 và Redis 7.4.2.
+
+| Chỉ số | Kết quả | Ngưỡng |
+|---|---|---|
+| Ready ở local (jar, profile `local`, infra trên `localhost`) | 5,5 s; log `gRPC PushStream listening on 9090 (plaintext)` | ≤ 30 s (R1) |
+| Dừng bằng SIGTERM | 0,1 s; `make local-check` → `LOCAL START OK` (restart ngay không lỗi port, không bị fence) | ≤ 15 s (R3) |
+| Compose dev (`make up`, có `fake-pushapi`) tới healthy | 23 s | ≤ 90 s (R2) |
+| Smoke | `SMOKE OK (connected, pong, upstream-ack, push-ack, resume)`; push → ACK → `DeliveryAck` 283 ms (lần đầu, JVM lạnh) | xanh |
+| Heap/session (10k idle, sau warm-up) | 4.870 B | < 5.120 B |
+| Lag p99 với 18k session idle | 0,36 ms | < 20 ms |
+| Test | gateway: 351 unit + 72 IT (`GatewayPushIT` 11, `GrpcServerLifecycleIT` 4); devtools 29; contracts 11 | xanh |
+
+Heap tăng khoảng 200 B so với lần đo cuối của M2a (4.663 B) do `Session` thêm `pending`, `topics` và bộ đếm overflow (đều null hoặc 0 khi idle), cộng với nhiễu đo. Vẫn dưới ngưỡng.
+

@@ -77,7 +77,7 @@ jobs:
       - run: make smoke
       - name: Gateway logs on failure
         if: failure()
-        run: docker compose -f platform-devenv/docker-compose.yml --profile app logs --tail 200 gateway kafka redis
+        run: docker compose -f platform-devenv/docker-compose.yml --profile app logs --tail 200 gateway fake-pushapi kafka redis
       - name: Tear down
         if: always()
         run: make down
