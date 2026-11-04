@@ -21,6 +21,7 @@ gateway:
   tls:
     cert-file: /etc/pangate/tls/gateway.crt
     key-file: /etc/pangate/tls/gateway.key
+    reload-interval: 30s
   limits:
     hard-cap: 700000
     soft-cap: 550000

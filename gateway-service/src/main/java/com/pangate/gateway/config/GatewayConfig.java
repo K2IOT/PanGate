@@ -142,8 +142,10 @@ public class GatewayConfig {
   }
 
   @Bean
-  SslContextProvider sslContextProvider(GatewayProperties p) {
-    return new SslContextProvider(p.tls());
+  SslContextProvider sslContextProvider(GatewayProperties p, com.pangate.gateway.server.TickScheduler tick,
+      GatewayMetrics metrics) {
+    // Replaced contexts are released after 60 s (spec §7.7): handshakes begun on them have finished by then.
+    return new SslContextProvider(p.tls(), tick.executor(), java.time.Duration.ofSeconds(60), metrics);
   }
 
   @Bean

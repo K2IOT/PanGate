@@ -30,7 +30,7 @@ class UpgradeGuardTest {
   static GatewayProperties props(int softCap) {
     return new GatewayProperties("n1", "cell-1",
         new GatewayProperties.Listeners(new GatewayProperties.Ws(8443, "/v1/ws", 4), new GatewayProperties.Tcp(8883, true)),
-        new GatewayProperties.Io(0, Transport.AUTO), new GatewayProperties.Tls(Path.of("c"), Path.of("k")),
+        new GatewayProperties.Io(0, Transport.AUTO), new GatewayProperties.Tls(Path.of("c"), Path.of("k"), java.time.Duration.ofSeconds(30)),
         new GatewayProperties.Limits(700_000, softCap, 200, 65_536, 8_192, Duration.ofSeconds(5),
             Duration.ofSeconds(10), 20, Duration.ofSeconds(30), Duration.ofHours(24), 50, 100, 100,
             new GatewayProperties.PendingAck(32, org.springframework.util.unit.DataSize.ofKilobytes(64),

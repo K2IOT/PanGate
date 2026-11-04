@@ -23,6 +23,12 @@ class GatewayPropertiesTest {
       .withUserConfiguration(Config.class);
 
   @Test
+  void tlsReloadIntervalDefaults30s() {
+    runner.run(ctx -> assertThat(ctx.getBean(GatewayProperties.class).tls().reloadInterval())
+        .isEqualTo(Duration.ofSeconds(30)));
+  }
+
+  @Test
   void prodDefaultsMatchSpec() {
     runner.run(ctx -> {
       GatewayProperties p = ctx.getBean(GatewayProperties.class);

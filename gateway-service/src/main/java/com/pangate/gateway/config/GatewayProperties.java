@@ -39,7 +39,12 @@ public record GatewayProperties(
 
   public record Io(int threads, Transport transport) {}
 
-  public record Tls(Path certFile, Path keyFile) {}
+  /** {@code reloadInterval}: how often cert and key files are checked for replacement (spec §7.7). */
+  public record Tls(Path certFile, Path keyFile, java.time.Duration reloadInterval) {
+    public Tls {
+      reloadInterval = reloadInterval == null ? java.time.Duration.ofSeconds(30) : reloadInterval;
+    }
+  }
 
   public record Limits(
       int hardCap,
