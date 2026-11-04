@@ -783,7 +783,7 @@ git commit -m "test(gateway): M3b edge IT, measurements and docs"
 
 ---
 
-## Rulings của plan (cần xác nhận khi review)
+## Rulings của plan (đã được xác nhận ngày 2026-11-04)
 
 - **R1 — RELIABLE trên SSE được ack ngay khi ghi (`STATUS_WRITTEN`).**
   - Spec §4.3 nói "ngữ nghĩa downstream giống hệt WS", nhưng client SSE không có kênh để gửi ACK: `/v1/upstream` chỉ nhận `UPSTREAM`, và POST có thể rơi vào node khác với node giữ session.
