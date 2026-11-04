@@ -32,11 +32,21 @@ public final class RegistryWriter implements SessionListener {
   private final NodeState node;
   private final RetryQueue retry;
   private final Counter redisErrors;
+  private final com.pangate.gateway.control.TenantLimitsStore tenants;
+  private final java.util.function.BiConsumer<Session, Map<String, String>> onReplaced;
 
-  public RegistryWriter(RedisConnections redis, NodeState node, RetryQueue retry, GatewayMetrics metrics) {
+  /**
+   * @param onReplaced single-session mode: called on the session's loop with the entries a successful register
+   *     replaced (its own connId removed), when there are any (spec §6.6)
+   */
+  public RegistryWriter(RedisConnections redis, NodeState node, RetryQueue retry, GatewayMetrics metrics,
+      com.pangate.gateway.control.TenantLimitsStore tenants,
+      java.util.function.BiConsumer<Session, Map<String, String>> onReplaced) {
     this.redis = redis;
     this.node = node;
     this.retry = retry;
+    this.tenants = tenants;
+    this.onReplaced = onReplaced;
     this.redisErrors = metrics.counter("gw.registry.write.errors", "reason", "redis");
   }
 
@@ -67,6 +77,15 @@ public final class RegistryWriter implements SessionListener {
   private CompletableFuture<Map<String, String>> send(Session s, boolean single) {
     CompletableFuture<Map<String, String>> cf = registerOnce(s, single).toCompletableFuture();
     s.registryWrite(cf);
+    if (single) {
+      cf.thenAccept(prev -> {
+        Map<String, String> others = new HashMap<>(prev);
+        others.remove(s.connId());
+        if (!others.isEmpty()) {
+          s.loop().eventLoop().execute(() -> onReplaced.accept(s, others));
+        }
+      });
+    }
     // Forget it once done (on the loop): an idle session must not keep the future and its result.
     cf.whenComplete((v, e) -> s.loop().eventLoop().execute(() -> {
       if (s.registryWrite() == cf) {
@@ -136,7 +155,7 @@ public final class RegistryWriter implements SessionListener {
 
   @Override
   public void activated(Session s) {
-    register(s, false);
+    register(s, tenants.policy(s.identity().tenantId()).singleSession());
   }
 
   /**

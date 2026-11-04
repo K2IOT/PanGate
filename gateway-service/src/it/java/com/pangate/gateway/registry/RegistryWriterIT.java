@@ -26,6 +26,9 @@ class RegistryWriterIT {
   private final ScheduledExecutorService sched = Executors.newSingleThreadScheduledExecutor();
   private RetryQueue retry;
   private RegistryWriter writer;
+  private final com.pangate.gateway.control.TenantLimitsStore tenants =
+      new com.pangate.gateway.control.TenantLimitsStore("cell-1", com.pangate.gateway.test.TestLimits::defaults);
+  private final java.util.List<Map<String, String>> replaced = new java.util.concurrent.CopyOnWriteArrayList<>();
 
   @BeforeEach
   void setUp() {
@@ -35,7 +38,7 @@ class RegistryWriterIT {
     node.epoch(7);
     GatewayMetrics metrics = new GatewayMetrics(new SimpleMeterRegistry());
     retry = new RetryQueue((r, d) -> sched.schedule(r, d, TimeUnit.MILLISECONDS), 10_000, metrics);
-    writer = new RegistryWriter(fx.redis, node, retry, metrics);
+    writer = new RegistryWriter(fx.redis, node, retry, metrics, tenants, (sess, prev) -> replaced.add(prev));
   }
 
   @AfterEach
@@ -128,7 +131,7 @@ class RegistryWriterIT {
       node.epoch(7);
       GatewayMetrics metrics = new GatewayMetrics(new SimpleMeterRegistry());
       RegistryWriter w = new RegistryWriter(slow.redis, node,
-          new RetryQueue((r, d) -> sched.schedule(r, d, TimeUnit.MILLISECONDS), 10, metrics), metrics);
+          new RetryQueue((r, d) -> sched.schedule(r, d, TimeUnit.MILLISECONDS), 10, metrics), metrics, tenants, (x, y) -> { });
       slow.sync.scriptFlush();
       Session s = session("t1:u5", "C1", 1);
 
@@ -147,5 +150,36 @@ class RegistryWriterIT {
     } finally {
       slow.close();
     }
+  }
+
+  @Test
+  void singleSessionTenantReplacesEntriesAndReportsPrevious() throws Exception {
+    tenants.apply(com.pangate.contracts.v1.TenantCfg.newBuilder()
+        .setScope(com.pangate.contracts.v1.Scope.SCOPE_TENANT).setScopeId("t1")
+        .setLimits(com.pangate.contracts.v1.TenantLimits.newBuilder().setSingleSession(true)).build());
+    Session first = session("t1:ss", "C1", 1);
+    writer.activated(first);
+    await().atMost(Duration.ofSeconds(5)).until(() -> fx.sync.hexists("reg:{t1:ss}", "C1"));
+    ((io.netty.channel.embedded.EmbeddedChannel) first.channel()).runPendingTasks();
+    assertThat(replaced).isEmpty();  // nothing replaced: no callback
+
+    Session second = session("t1:ss", "C2", 2);
+    writer.activated(second);
+    await().atMost(Duration.ofSeconds(5)).until(() -> {
+      ((io.netty.channel.embedded.EmbeddedChannel) second.channel()).runPendingTasks();
+      return !replaced.isEmpty();
+    });
+    assertThat(replaced).containsExactly(Map.of("C1", "n1|7|1|android"));
+    assertThat(fx.sync.hgetall("reg:{t1:ss}")).containsOnlyKeys("C2");
+  }
+
+  @Test
+  void multiSessionTenantKeepsEntriesAndReportsNothing() throws Exception {
+    writer.activated(session("t1:ms", "C1", 1));
+    Session second = session("t1:ms", "C2", 2);
+    writer.activated(second);
+    await().atMost(Duration.ofSeconds(5)).until(() -> fx.sync.hlen("reg:{t1:ms}") == 2);
+    ((io.netty.channel.embedded.EmbeddedChannel) second.channel()).runPendingTasks();
+    assertThat(replaced).isEmpty();
   }
 }

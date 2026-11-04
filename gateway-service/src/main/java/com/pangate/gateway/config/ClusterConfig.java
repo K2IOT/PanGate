@@ -127,8 +127,9 @@ public class ClusterConfig {
   }
 
   @Bean
-  RegistryWriter registryWriter(RedisConnections redis, NodeState node, RetryQueue retry, GatewayMetrics metrics) {
-    return new RegistryWriter(redis, node, retry, metrics);
+  RegistryWriter registryWriter(RedisConnections redis, NodeState node, RetryQueue retry, GatewayMetrics metrics,
+      TenantLimitsStore tenants, com.pangate.gateway.registry.SingleSessionKicker kicker) {
+    return new RegistryWriter(redis, node, retry, metrics, tenants, kicker);
   }
 
   @Bean

@@ -84,6 +84,20 @@ public class PushConfig {
     return svc;
   }
 
+  /** KICK through the Push API, or only a WARN when it is disabled (local: one node, spec §6.6). */
+  @Bean  // PushApiKickClient is AutoCloseable: Spring closes its channel on shutdown
+  com.pangate.gateway.registry.KickClient kickClient(GatewayProperties p, TickScheduler tick, GatewayMetrics metrics) {
+    return p.pushApi().enabled()
+        ? com.pangate.gateway.registry.PushApiKickClient.create(p.pushApi(), p.grpc().tls(), tick.executor(), metrics)
+        : com.pangate.gateway.registry.KickClient.disabled();
+  }
+
+  @Bean
+  com.pangate.gateway.registry.SingleSessionKicker singleSessionKicker(PrincipalIndex principals, LoopRegistry loops,
+      NodeState node, ControlPushHandler control, com.pangate.gateway.registry.KickClient kickClient) {
+    return new com.pangate.gateway.registry.SingleSessionKicker(principals, loops, node, control, kickClient);
+  }
+
   @Bean
   GrpcServerLifecycle grpcServerLifecycle(GatewayProperties p, PushStreamService svc,
       GrpcExecutor grpcExecutor) {
