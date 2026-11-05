@@ -142,7 +142,7 @@ class UpstreamPublisherTest {
     };
     LoopFixture g = f;
     UpstreamPublisher p = new UpstreamPublisher(TestKafka.of(throwing, g.telemetry), g.topics, g.node, "cell-1",
-        g.tenants, g.metrics, () -> 0L);
+        g.tenants, g.metrics, () -> 0L, () -> 0L);
     f.channel.pipeline().addLast(new SessionHandler(auth.tickets, auth.flow,
         limiter, f.policy(limiter), f.limits, "cell-1", p, f.delivery, f.clientTopics),
         ErrorTerminatorAccess.create());
@@ -197,6 +197,18 @@ class UpstreamPublisherTest {
 
     assertThat(f.reliable.history()).singleElement()
         .satisfies(r -> assertThat(r.topic()).isEqualTo("c1.gw.upstream.cmd_result"));
+  }
+
+  @Test
+  void rateBucketRefillsOnTheInjectedClockNotWallTime() throws Exception {
+    for (int i = 0; i < 100; i++) {
+      assertThat(send(upstream("telemetry", "m" + i))).isEmpty();
+    }
+    f.clockSec.addAndGet(1);  // 1 s at 50/s: 50 tokens back
+    for (int i = 0; i < 50; i++) {
+      assertThat(send(upstream("telemetry", "r" + i))).as("send %d after refill", i).isEmpty();
+    }
+    assertThat(error(send(upstream("telemetry", "over")).get(0)).getCode()).isEqualTo(4009);
   }
 
   @Test

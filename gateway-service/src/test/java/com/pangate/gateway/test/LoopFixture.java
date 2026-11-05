@@ -67,7 +67,7 @@ public final class LoopFixture {
     node.nodeId("n1");
     node.epoch(7);
     upstream = new UpstreamPublisher(TestKafka.of(reliable, telemetry), topics, node, "cell-1", tenants, metrics,
-        () -> clockSec.get() * 1000);
+        () -> clockSec.get() * 1000, () -> clockSec.get() * 1_000_000_000L);
     clientTopics = new com.pangate.gateway.downstream.ClientTopics(tenants, metrics);
     delivery = new com.pangate.gateway.downstream.PushDelivery(tenants, limits, metrics, () -> wallNow() * 1000);
   }

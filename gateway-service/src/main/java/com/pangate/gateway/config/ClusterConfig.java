@@ -151,7 +151,8 @@ public class ClusterConfig {
   @Bean
   UpstreamPublisher upstreamPublisher(GatewayProperties p, KafkaClients kafka, TopicNames topics, NodeState node,
       TenantLimitsStore tenants, GatewayMetrics metrics) {
-    return new UpstreamPublisher(kafka, topics, node, p.cell(), tenants, metrics, System::currentTimeMillis);
+    return new UpstreamPublisher(kafka, topics, node, p.cell(), tenants, metrics, System::currentTimeMillis,
+        System::nanoTime);
   }
 
   @Bean

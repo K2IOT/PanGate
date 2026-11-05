@@ -37,16 +37,18 @@ public final class UpstreamPublisher {
   private final String cell;
   private final TenantLimitsStore tenants;
   private final LongSupplier wallMillis;
+  private final LongSupplier nanos;
   private final Map<String, Counter[]> counters = new HashMap<>();
 
   public UpstreamPublisher(KafkaClients kafka, TopicNames topics, NodeState node, String cell,
-      TenantLimitsStore tenants, GatewayMetrics metrics, LongSupplier wallMillis) {
+      TenantLimitsStore tenants, GatewayMetrics metrics, LongSupplier wallMillis, LongSupplier nanos) {
     this.kafka = kafka;
     this.topics = topics;
     this.node = node;
     this.cell = cell;
     this.tenants = tenants;
     this.wallMillis = wallMillis;
+    this.nanos = nanos;
     for (String type : topics.upstreamTypes()) {
       counters.put(type, counters(metrics, type));
     }
@@ -69,7 +71,7 @@ public final class UpstreamPublisher {
   public void publish(ChannelHandlerContext ctx, Session s, Frame f, String forcedType) {
     TenantPolicy policy = tenants.policy(s.identity().tenantId());
     String type = forcedType != null ? forcedType : f.getHeadersOrDefault("type", "");
-    switch (SessionRateLimiter.check(s, policy, System.nanoTime(), s.loop().nowSec())) {
+    switch (SessionRateLimiter.check(s, policy, nanos.getAsLong(), s.loop().nowSec())) {
       case LIMITED -> {
         count(type, 3);
         ctx.writeAndFlush(Frames.error(CloseCode.RATE_LIMITED.code(), "RATE_LIMITED", true, false));
