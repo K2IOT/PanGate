@@ -35,6 +35,8 @@ jobs:
           breaking: false
           format: false
           push: false
+          # The workflow token is read-only; on pull_request the action would otherwise fail posting its summary comment.
+          pr_comment: false
 
   local-start:
     needs: build
