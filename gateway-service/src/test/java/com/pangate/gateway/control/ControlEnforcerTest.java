@@ -22,12 +22,6 @@ class ControlEnforcerTest {
 
   private final LoopFixture f = new LoopFixture();
   private final List<EmbeddedChannel> channels = new ArrayList<>();
-
-  @AfterEach
-  void releaseOutbound() {  // close frames written to the sessions' channels
-    channels.forEach(EmbeddedChannel::finishAndReleaseAll);
-    f.channel.finishAndReleaseAll();
-  }
   private final List<String> migrations = new ArrayList<>();
   private final TenantMigrator migrator = new TenantMigrator(f.loops, f.cells, () -> 0L) {
     @Override
@@ -66,6 +60,12 @@ class ControlEnforcerTest {
     EmbeddedChannel ch = (EmbeddedChannel) s.channel();
     ch.runPendingTasks();
     return ch.readOutbound();
+  }
+
+  @AfterEach
+  void releaseOutbound() {  // close frames written to the sessions' channels
+    channels.forEach(EmbeddedChannel::finishAndReleaseAll);
+    f.channel.finishAndReleaseAll();
   }
 
   @Test

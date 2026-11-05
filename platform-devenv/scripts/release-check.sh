@@ -35,8 +35,10 @@ for adr in docs/adr/0*.md; do
 done
 [ "$n" -gt 0 ] || err "no ADR in docs/adr"
 # and the other way: every ADR the index links to exists
-for link in $(grep -o '([0-9][0-9][0-9][0-9]-[^)]*\.md)' docs/adr/README.md 2>/dev/null | tr -d '()'); do
-  [ -f "docs/adr/$link" ] || err "docs/adr/README.md links to missing $link"
+# (bare, ./ or docs/adr/ relative links all name a file in docs/adr)
+for link in $(grep -oE '\(([^()]*/)?[0-9]{4}-[^()/]*\.md\)' docs/adr/README.md 2>/dev/null | tr -d '()'); do
+  name=$(basename "$link")
+  [ -f "docs/adr/$name" ] || err "docs/adr/README.md links to missing $link"
 done
 
 [ "$fail" -eq 0 ] && echo "release-check OK $expected"

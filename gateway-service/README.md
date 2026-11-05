@@ -72,7 +72,10 @@ deployment sets the rest in `JAVA_TOOL_OPTIONS`:
 The container must have a memory limit: `AlwaysPreTouch` touches half of whatever memory the JVM sees.
 On `OutOfMemoryError` the JVM writes a heap dump to `/tmp` before exiting; the dump is about as large as the heap
 (half the container). Mount `/tmp` as an `emptyDir` with a `sizeLimit` of at least the heap size: on the container's
-writable layer the dump eats ephemeral storage (the pod can be evicted), and with `readOnlyRootFilesystem` it fails. Netty leak
+writable layer the dump eats ephemeral storage (the pod can be evicted), and with `readOnlyRootFilesystem` it fails.
+Use a disk-backed `emptyDir` (not `medium: Memory`, which counts against the container's memory limit). The dump is
+always `/tmp/java_pid1.hprof` and the JVM never overwrites it: the `emptyDir` outlives container restarts, so collect
+and delete the dump after an OOM, or the next OOM writes none. Netty leak
 detection follows `gateway.netty.leak-detection` (prod `disabled`, local/dev `simple`; tests run `paranoid`). The
 start-up log prints the result, e.g. `jvm gc=ZGC Minor Cycles,... heapMax=1024MiB directMax=1024MiB leak=simple`.
 
@@ -98,7 +101,9 @@ the run in `@AfterAll` without saving a reproducer input; re-run in regression m
 ## Benchmarks
 
 JMH benchmarks (spec §11) live in `src/jmh/java` and run with the `jmh` profile: `make bench` (results in
-`gateway-service/target/jmh.json`; pass `JMH_ARGS=...` for other JMH options, e.g. `JMH_ARGS=-l` to list).
+`gateway-service/target/jmh.json`; pass `JMH_ARGS=...` for other JMH options, e.g. `JMH_ARGS=-l` to list). Forks
+inherit `-Dio.netty.leakDetection.level=disabled` from the host JVM; an explicit `-jvmArgs` replaces it, so use
+`-jvmArgsAppend` for extra fork options.
 
 Baseline, 2026-11-05 (cloud dev container, 1 fork, 3 warm-up + 5 measured iterations of 10 s; Netty leak detection
 `disabled` as in prod):

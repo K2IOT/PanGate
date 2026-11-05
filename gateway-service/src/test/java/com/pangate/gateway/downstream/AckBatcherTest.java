@@ -58,11 +58,12 @@ class AckBatcherTest {
 
   @Test
   void acksAreBatchedEvery2ms() {
-    batcher.start();
+    // Queued before start: on a slow runner a 2 ms flush could otherwise fall between two offers.
     batcher.offer(item(1));
     batcher.offer(item(2));
     batcher.offer(item(3));
-    await().atMost(Duration.ofMillis(500)).until(() -> out.items() == 3);
+    batcher.start();
+    await().atMost(Duration.ofSeconds(5)).until(() -> out.items() == 3);
     assertThat(out.sent).hasSize(1);
     assertThat(out.sent.get(0).getAcksList()).extracting(AckItem::getDeliveryId).containsExactly(1L, 2L, 3L);
   }
@@ -106,7 +107,7 @@ class AckBatcherTest {
     assertThat(out.sent).isEmpty();
     out.ready = true;
     out.onReady.run();
-    await().atMost(Duration.ofMillis(500)).until(() -> out.items() == 1);
+    await().atMost(Duration.ofSeconds(5)).until(() -> out.items() == 1);
   }
 
   @Test

@@ -13,4 +13,13 @@ class JvmConfigFailureAnalyzerTest {
     assertThat(a.getDescription()).contains("-XX:SomeFlag is not set");
     assertThat(a.getAction()).contains("-XX:SomeFlag");
   }
+
+  @Test
+  void directMemoryExplainsTheRiskAndGivesTheProdSetting() {
+    FailureAnalysis a = new JvmConfigFailureAnalyzer().analyze(new JvmConfigException("MaxDirectMemorySize"));
+    assertThat(a.getDescription()).startsWith("-XX:MaxDirectMemorySize is not set")
+        .contains("heap plus direct memory");
+    assertThat(a.getAction()).contains("profile prod", "25% of container memory",
+        "JAVA_TOOL_OPTIONS=-XX:MaxDirectMemorySize=2g");
+  }
 }

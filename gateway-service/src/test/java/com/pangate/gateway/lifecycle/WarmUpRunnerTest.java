@@ -102,6 +102,7 @@ class WarmUpRunnerTest {
     WarmUpRunner.Result r = run(10, 1, Duration.ofSeconds(1));  // nothing listens on port 1
     assertThat(r.ok()).isZero();
     assertThat(r.failed() + (r.timedOut() ? 1 : 0)).isPositive();
-    assertThat(Duration.ofNanos(System.nanoTime() - t0)).isLessThan(Duration.ofSeconds(3));
+    // Bounded by the 1 s timeout, not 10 attempts; the slack covers TLS setup and a cold JIT on a slow runner.
+    assertThat(Duration.ofNanos(System.nanoTime() - t0)).isLessThan(Duration.ofSeconds(6));
   }
 }

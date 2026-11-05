@@ -359,7 +359,9 @@
             <groupId>org.codehaus.mojo</groupId>
             <artifactId>exec-maven-plugin</artifactId>
             <configuration>
-              <!-- The JDK Maven runs on; leak detection off as in prod (JMH copies the host JVM's options to forks). -->
+              <!-- The JDK Maven runs on; leak detection off as in prod (JMH copies the host JVM's options to forks).
+                   An explicit -jvmArgs replaces those options: add -Dio.netty.leakDetection.level=disabled to it, or
+                   use -jvmArgsAppend instead. -->
               <executable>${java.home}/bin/java</executable>
               <classpathScope>test</classpathScope>
               <commandlineArgs>-Dio.netty.leakDetection.level=disabled -cp %classpath org.openjdk.jmh.Main ${jmh.args}</commandlineArgs>

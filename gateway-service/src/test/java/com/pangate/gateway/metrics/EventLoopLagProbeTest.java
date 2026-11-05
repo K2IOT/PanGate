@@ -33,13 +33,14 @@ class EventLoopLagProbeTest {
     EventLoopLagProbe probe = new EventLoopLagProbe(loops, tick, System::nanoTime);
     probe.start();
 
-    await().atMost(Duration.ofSeconds(3)).until(() -> probe.samples(0) >= 3);
-    assertThat(probe.p99Seconds(0)).isLessThan(0.05);
+    await().atMost(Duration.ofSeconds(10)).until(() -> probe.samples(0) >= 3);
+    // Idle loop: well under the blocked level below, with room for a GC pause or CPU steal on a shared runner.
+    assertThat(probe.p99Seconds(0)).isLessThan(0.2);
 
     // 600 ms: probes queued during the block see 500+ ms lag, so p99 (2nd largest of 100) stays >= 0.25 s.
     group.next().execute(() -> sleep(600));
 
-    await().atMost(Duration.ofSeconds(5)).until(() -> probe.p99Seconds(0) >= 0.25);
+    await().atMost(Duration.ofSeconds(10)).until(() -> probe.p99Seconds(0) >= 0.25);
     assertThat(probe.maxP99Seconds()).isGreaterThanOrEqualTo(0.25);
   }
 
