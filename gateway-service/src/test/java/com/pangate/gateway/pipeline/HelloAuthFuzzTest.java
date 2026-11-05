@@ -9,6 +9,7 @@ import com.pangate.contracts.v1.FrameType;
 import com.pangate.contracts.v1.Hello;
 import com.pangate.gateway.auth.PrincipalHandshakeLimiter;
 import com.pangate.gateway.protocol.ChannelAttrs;
+import com.pangate.gateway.protocol.CloseCode;
 import com.pangate.gateway.protocol.FrameCodec;
 import com.pangate.gateway.registry.SeqReader;
 import com.pangate.gateway.session.Session;
@@ -18,7 +19,6 @@ import com.pangate.gateway.test.LeakWatch;
 import com.pangate.gateway.test.LoopFixture;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
-import io.netty.buffer.Unpooled;
 import io.netty.util.ResourceLeakDetector;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
@@ -85,15 +85,21 @@ class HelloAuthFuzzTest {
             f.delivery, f.clientTopics),
         new ErrorTerminator());
     try {
-      f.channel.writeInbound(Unpooled.wrappedBuffer(input(data)));
+      byte[] bytes = input(data);
+      f.channel.writeInbound(f.channel.alloc().buffer(bytes.length).writeBytes(bytes));
       f.channel.runPendingTasks();
       f.channel.checkException();
       int connected = 0;
       for (Object o; (o = f.channel.readOutbound()) != null; ) {
         ByteBuf b = (ByteBuf) o;
         try {
-          if (Frame.parseFrom(ByteBufUtil.getBytes(b)).getType() == FrameType.FRAME_TYPE_CONNECTED) {
+          Frame out = Frame.parseFrom(ByteBufUtil.getBytes(b));
+          if (out.getType() == FrameType.FRAME_TYPE_CONNECTED) {
             connected++;
+          } else if (out.getType() == FrameType.FRAME_TYPE_ERROR) {
+            // ErrorTerminator turns any unexpected exception into INTERNAL: that is a crash, not a refusal.
+            assertThat(com.pangate.contracts.v1.ErrorInfo.parseFrom(out.getPayload()).getCode())
+                .as("close code (4500 = exception in the pipeline)").isNotEqualTo(CloseCode.INTERNAL.code());
           }
         } catch (com.google.protobuf.InvalidProtocolBufferException e) {
           throw new AssertionError("gateway wrote an unparsable frame", e);

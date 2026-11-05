@@ -62,7 +62,8 @@ JVM flags that do not depend on the environment (spec §9.1, §10):
 | `--add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED -Dio.netty.tryReflectionSetAccessible=true` | Netty's direct-memory fast paths |
 | `-Djava.security.egd=file:/dev/urandom -Dfile.encoding=UTF-8` | SecureRandom never blocks at start |
 
-The deployment sets the rest in `JAVA_TOOL_OPTIONS`:
+The image runs with `SPRING_PROFILES_ACTIVE=prod` unless the deployment overrides it (compose sets `dev`). The
+deployment sets the rest in `JAVA_TOOL_OPTIONS`:
 - **prod:** `-XX:MaxDirectMemorySize=<25% of container memory>`. Without it the gateway refuses to start with
   profile `prod` (the JVM default equals the max heap, so heap plus direct memory would fill the container). The
   outbound budget is 35% of this value.
@@ -76,8 +77,11 @@ start-up log prints the result, e.g. `jvm gc=ZGC Minor Cycles,... heapMax=1024Mi
 
 Two Jazzer fuzz tests (spec §11): `FrameCodecFuzzTest` (random bytes into `FrameCodec.decode`, before and after
 auth) and `HelloAuthFuzzTest` (random bytes, random JWTs, a valid JWT with one byte changed, random resume tickets
-through `FrameCodec → HelloAuthHandler → SessionHandler`). Both fail on any unexpected exception or on a `ByteBuf`
-leak at leak level `paranoid`.
+through `FrameCodec → HelloAuthHandler → SessionHandler`). Both fail on any unexpected exception (in the HELLO
+harness: any close with 4500 INTERNAL, which is what `ErrorTerminator` turns an exception into) or on a `ByteBuf` leak
+at leak level `paranoid` (inputs are pooled buffers, so the detector tracks them). The `FrameCodec` harness uses small
+limits (HELLO 256 B, frames 1 KiB) so inputs of up to 4 KiB cross both size checks. A leak found while fuzzing fails
+the run in `@AfterAll` without saving a reproducer input; re-run in regression mode to narrow it down.
 
 - Every `make verify` runs them in regression mode: only the inputs under
   `src/test/resources/**/<Class>Inputs/` (seeds plus any past findings).

@@ -285,6 +285,11 @@
             <mainClass>${start-class}</mainClass>
             <!-- Production JVM flags (spec §9.1, §10). Environment-specific values (-Xmx in dev, MaxDirectMemorySize =
                  25% of container memory in prod) come from JAVA_TOOL_OPTIONS, which flags here would override. -->
+            <!-- The image is the production image: profile prod unless the deployment says otherwise (compose sets dev).
+                 Without it application.yml's prod defaults would run while the prod-only checks are skipped. -->
+            <environment>
+              <SPRING_PROFILES_ACTIVE>prod</SPRING_PROFILES_ACTIVE>
+            </environment>
             <jvmFlags>
               <jvmFlag>-XX:+UseZGC</jvmFlag>
               <jvmFlag>-XX:+ZGenerational</jvmFlag>

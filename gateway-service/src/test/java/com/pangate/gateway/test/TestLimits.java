@@ -22,6 +22,15 @@ public final class TestLimits {
         d.pendingAckTimeout(), perLoop, d.slowConsumerTimeout());
   }
 
+  /** Defaults with other frame size limits (fuzz harnesses use small ones so inputs reach both). */
+  public static GatewayLimits withFrameLimits(int frameMax, int helloMax) {
+    GatewayLimits d = defaults();
+    return new GatewayLimits(d.hardCap(), d.softCap(), d.perIp(), frameMax, helloMax, d.helloTimeout(),
+        d.handshakeTimeout(), d.handshakesPerPrincipalPerMin(), d.heartbeatInterval(), d.sessionTtl(),
+        d.inboundRate(), d.inboundBurst(), d.topicsPerConn(), d.pendingAckMsgs(), d.pendingAckBytes(),
+        d.pendingAckTimeout(), d.broadcastRatePerLoop(), d.slowConsumerTimeout());
+  }
+
   public static LimitsHolder holder() {
     return new LimitsHolder(defaults());
   }
