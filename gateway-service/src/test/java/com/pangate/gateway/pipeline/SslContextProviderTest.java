@@ -91,6 +91,27 @@ class SslContextProviderTest {
   }
 
   @Test
+  void closeReleasesCurrentAndPendingContexts(@TempDir Path d) throws Exception {
+    DevSecretsGenerator.ensure(d);
+    java.util.concurrent.ScheduledExecutorService never = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+    SslContextProvider p = new SslContextProvider(new GatewayProperties.Tls(d.resolve("gateway.crt"),
+        d.resolve("gateway.key"), java.time.Duration.ofSeconds(30)), never, java.time.Duration.ofHours(1),
+        new com.pangate.gateway.metrics.GatewayMetrics(meters));
+    io.netty.util.ReferenceCounted oldWs = (io.netty.util.ReferenceCounted) p.ws();
+    bumpMtime(d);
+    assertThat(p.reloadIfChanged()).isTrue();
+    io.netty.util.ReferenceCounted ws = (io.netty.util.ReferenceCounted) p.ws();
+    io.netty.util.ReferenceCounted tcp = (io.netty.util.ReferenceCounted) p.tcp();
+
+    p.close();
+    never.shutdownNow();
+
+    assertThat(ws.refCnt()).isZero();
+    assertThat(tcp.refCnt()).isZero();
+    assertThat(oldWs.refCnt()).as("replaced context still waiting for its delayed release").isZero();
+  }
+
+  @Test
   void loadsDevCertificateWithTls13Only(@TempDir Path d) {
     DevSecretsGenerator.ensure(d);
     SslContextProvider p = provider(d);

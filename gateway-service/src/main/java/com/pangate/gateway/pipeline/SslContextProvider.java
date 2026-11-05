@@ -32,7 +32,7 @@ import org.slf4j.LoggerFactory;
  * replacement keeps the current contexts. Replaced contexts are released after {@code releaseDelay}, by which time
  * handshakes that started on them are over.
  */
-public final class SslContextProvider {
+public final class SslContextProvider implements AutoCloseable {
 
   private static final Logger log = LoggerFactory.getLogger(SslContextProvider.class);
 
@@ -43,6 +43,8 @@ public final class SslContextProvider {
   private final ScheduledExecutorService releaser;
   private final Duration releaseDelay;
   private final AtomicReference<Contexts> current = new AtomicReference<>();
+  /** Replaced contexts waiting for their delayed release; released at once by {@link #close()}. */
+  private final java.util.Set<Contexts> retiring = java.util.concurrent.ConcurrentHashMap.newKeySet();
   private final List<Consumer<SslContext>> hooks = new CopyOnWriteArrayList<>();
   private final Counter reloadOk;
   private final Counter reloadFailed;
@@ -165,6 +167,9 @@ public final class SslContextProvider {
    */
   public synchronized boolean reloadIfChanged() {
     Contexts old = current.get();
+    if (old == null) {
+      return false;  // closed (shutdown)
+    }
     long[] st;
     try {
       st = stat();
@@ -192,11 +197,29 @@ public final class SslContextProvider {
     current.set(next);
     reloadOk.increment();
     log.info("TLS certificate reloaded from {}", tls.certFile());
-    releaser.schedule(() -> {
-      ReferenceCountUtil.release(old.ws());
-      ReferenceCountUtil.release(old.tcp());
-    }, releaseDelay.toMillis(), TimeUnit.MILLISECONDS);
+    retiring.add(old);
+    releaser.schedule(() -> release(old), releaseDelay.toMillis(), TimeUnit.MILLISECONDS);
     return true;
+  }
+
+  private void release(Contexts c) {
+    if (retiring.remove(c)) {
+      ReferenceCountUtil.release(c.ws());
+      ReferenceCountUtil.release(c.tcp());
+    }
+  }
+
+  /** Shutdown: releases the native contexts, including replaced ones whose delayed release has not run yet. */
+  @Override
+  public synchronized void close() {
+    for (Contexts c : List.copyOf(retiring)) {
+      release(c);
+    }
+    Contexts c = current.getAndSet(null);
+    if (c != null) {
+      ReferenceCountUtil.release(c.ws());
+      ReferenceCountUtil.release(c.tcp());
+    }
   }
 
   public SslContext ws() {

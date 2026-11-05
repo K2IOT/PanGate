@@ -227,6 +227,7 @@
           <argLine>${blockhound.argLine}</argLine>
           <systemPropertyVariables>
             <pangate.assertLoop>true</pangate.assertLoop>
+            <io.netty.leakDetection.level>paranoid</io.netty.leakDetection.level>
           </systemPropertyVariables>
           <excludes>
             <exclude>**/*IT.java</exclude>
@@ -240,6 +241,7 @@
           <argLine>${blockhound.argLine}</argLine>
           <systemPropertyVariables>
             <pangate.assertLoop>true</pangate.assertLoop>
+            <io.netty.leakDetection.level>paranoid</io.netty.leakDetection.level>
           </systemPropertyVariables>
           <includes>
             <include>**/*IT.java</include>

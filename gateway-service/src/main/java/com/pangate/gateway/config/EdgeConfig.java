@@ -23,6 +23,15 @@ public class EdgeConfig {
   private static final Logger log = LoggerFactory.getLogger(EdgeConfig.class);
   static final Duration KEY_RELOAD = Duration.ofSeconds(60);
 
+  /** Spec §9.1, §10: log GC, heap and direct-memory limits; profile prod needs an explicit MaxDirectMemorySize. */
+  @Bean
+  com.pangate.gateway.diagnostics.JvmSettings jvmSettingsCheck(org.springframework.core.env.Environment env) {
+    com.pangate.gateway.diagnostics.JvmSettings s = com.pangate.gateway.diagnostics.JvmSettings.read();
+    s.check(java.util.Set.of(env.getActiveProfiles()));
+    log.info(s.describe());
+    return s;
+  }
+
   /** Spec §4.6 step i: live nodes of the cell, for the local quota. */
   @Bean
   com.pangate.gateway.tenant.CellSize cellSize(com.pangate.gateway.lifecycle.RedisConnections redis) {

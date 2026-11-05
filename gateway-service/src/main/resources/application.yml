@@ -13,6 +13,7 @@ pangate:
 
 gateway:
   node-id: ${HOSTNAME:gateway-local}
+  netty: { leak-detection: disabled }   # spec §9.1; -Dio.netty.leakDetection.level wins
   cell: cell-1
   listeners:
     ws: { port: 8443, path: /v1/ws, acceptors: 4 }

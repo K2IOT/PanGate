@@ -1,8 +1,10 @@
 org.springframework.boot.env.EnvironmentPostProcessor=\
-com.pangate.gateway.dev.DevSecretsEnvironmentPostProcessor
+com.pangate.gateway.dev.DevSecretsEnvironmentPostProcessor,\
+com.pangate.gateway.config.NettyLeakDetectionPostProcessor
 org.springframework.boot.diagnostics.FailureAnalyzer=\
 com.pangate.gateway.diagnostics.ListenerBindFailureAnalyzer,\
 com.pangate.gateway.diagnostics.SecretNotFoundFailureAnalyzer,\
 com.pangate.gateway.diagnostics.JwksConfigFailureAnalyzer,\
 com.pangate.gateway.diagnostics.DependencyFailureAnalyzer,\
-com.pangate.gateway.diagnostics.MissingTopicsFailureAnalyzer
+com.pangate.gateway.diagnostics.MissingTopicsFailureAnalyzer,\
+com.pangate.gateway.diagnostics.JvmConfigFailureAnalyzer

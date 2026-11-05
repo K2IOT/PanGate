@@ -5,6 +5,7 @@ pangate:
     dir: ${gateway.dev.dir}
 
 gateway:
+  netty: { leak-detection: simple }
   outbound-budget: 256MB
   warmup: { iterations: 50 }
   # R3: SIGTERM → exit in ≤ 15 s even with clients connected (spec §9.1)
