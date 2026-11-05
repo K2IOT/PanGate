@@ -206,14 +206,30 @@ public final class ClientCommand implements Callable<Integer> {
     inFlight.acquire(512);
     System.out.println("connected=" + connected.get() + " failed=" + failed.get());
     Frame ping = Frame.newBuilder().setType(FrameType.FRAME_TYPE_PING).build();
+    // Each client pings once per interval, spread evenly over it: real clients connect at different times, and one
+    // burst of N pings would stall the gateway's loops every interval (and hold the shed ladder at L1).
+    long round = System.nanoTime() + pingInterval.toNanos();
     while (true) {
-      Thread.sleep(pingInterval.toMillis());
+      TimeUnit.NANOSECONDS.sleep(Math.max(0, round - System.nanoTime()));
       clients.removeIf(c -> !c.isOpen());
-      clients.forEach(c -> c.send(ping));
+      List<GatewayClient> batch = List.copyOf(clients);
+      for (int i = 0; i < batch.size(); i++) {
+        long wait = round + pingOffsetNanos(i, batch.size(), pingInterval) - System.nanoTime();
+        if (wait > 0) {
+          TimeUnit.NANOSECONDS.sleep(wait);
+        }
+        batch.get(i).send(ping);
+      }
+      round += pingInterval.toNanos();
       connected.set(clients.size());
       if (reporter.isInterrupted()) {
         return 0;
       }
     }
+  }
+
+  /** When, from the start of a ping round, client {@code i} of {@code n} sends its PING. */
+  static long pingOffsetNanos(int i, int n, Duration interval) {
+    return interval.toNanos() / n * i;
   }
 }
