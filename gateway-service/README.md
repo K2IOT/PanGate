@@ -21,7 +21,7 @@ at most 5 s). Kernel listen-queue metrics `gw_kernel_*` on Linux.
 Push by hand while a client is connected (`client` prints PUSH and ACKs reliable ones):
 
 ```bash
-DT=gateway-devtools/target/gateway-devtools-0.1.0-SNAPSHOT-exec.jar
+DT=gateway-devtools/target/gateway-devtools-0.1.0-exec.jar
 java -jar $DT client --url wss://localhost:8443/v1/ws --ca ~/.pangate-dev/ca.crt \
   --key ~/.pangate-dev/es256.pem --tenant t1 --principal t1:me --subscribe t1:news
 java -jar $DT fake-router --target localhost:9090 unicast --conn-id <conn_id from CONNECTED> --class reliable

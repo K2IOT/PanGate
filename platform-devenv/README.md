@@ -16,9 +16,9 @@ Dev secrets (TLS CA and cert, ES256 signing key, ticket keys) are generated on f
 browser, or use `--ca`/`--insecure` with the devtools client.
 
 ```bash
-TOKEN=$(java -jar gateway-devtools/target/gateway-devtools-0.1.0-SNAPSHOT-exec.jar token \
+TOKEN=$(java -jar gateway-devtools/target/gateway-devtools-0.1.0-exec.jar token \
   --key ~/.pangate-dev/es256.pem --tenant t1 --principal t1:me --device d1)
-java -jar gateway-devtools/target/gateway-devtools-0.1.0-SNAPSHOT-exec.jar client \
+java -jar gateway-devtools/target/gateway-devtools-0.1.0-exec.jar client \
   --url wss://localhost:8443/v1/ws --ca ~/.pangate-dev/ca.crt --token "$TOKEN" --device d1 --once
 ```
 

@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-VERSION := 0.1.0-SNAPSHOT
+VERSION := 0.1.0
 MVNW := $(CURDIR)/mvnw
 MODULES := platform-parent platform-contracts platform-spring-starter gateway-devtools gateway-service
 
@@ -88,7 +88,7 @@ fuzz:
 ## Release check (spec §2, §13): module versions, no pre-release versions in build/run files, ADR index.
 .PHONY: release-check
 release-check:
-	platform-devenv/scripts/release-check.sh $(VERSION:-SNAPSHOT=)
+	platform-devenv/scripts/release-check.sh $(VERSION)
 
 ## JMH benchmarks (spec §11): FrameCodec, PrincipalIndex, DeadlineWheel. Results in gateway-service/target/jmh.json.
 JMH_ARGS ?= -f 1 -wi 3 -i 5 -rf json -rff target/jmh.json

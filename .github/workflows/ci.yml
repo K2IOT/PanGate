@@ -18,6 +18,8 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+      - name: Release check (versions, ADR index)
+        run: make release-check
       - name: Build and test every module (unit + integration)
         run: make verify
 
