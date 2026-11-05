@@ -154,6 +154,12 @@
       <artifactId>blockhound</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- Fuzz tests (spec §11): regression mode in every build, `make fuzz` fuzzes for real -->
+    <dependency>
+      <groupId>com.code-intelligence</groupId>
+      <artifactId>jazzer-junit</artifactId>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>org.testcontainers</groupId>
       <artifactId>junit-jupiter</artifactId>

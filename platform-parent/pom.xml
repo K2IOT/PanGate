@@ -32,6 +32,7 @@
     <fastutil.version>8.5.19</fastutil.version>
     <picocli.version>4.7.7</picocli.version>
     <blockhound.version>1.0.18.RELEASE</blockhound.version>
+    <jazzer.version>0.24.0</jazzer.version>
     <jib-maven-plugin.version>3.5.2</jib-maven-plugin.version>
     <jib.base.image>gcr.io/distroless/java21-debian12:nonroot</jib.base.image>
   </properties>
@@ -84,6 +85,11 @@
         <groupId>io.projectreactor.tools</groupId>
         <artifactId>blockhound</artifactId>
         <version>${blockhound.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.code-intelligence</groupId>
+        <artifactId>jazzer-junit</artifactId>
+        <version>${jazzer.version}</version>
       </dependency>
       <dependency>
         <groupId>com.pangate</groupId>
