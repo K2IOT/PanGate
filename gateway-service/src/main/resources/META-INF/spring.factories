@@ -1,4 +1,5 @@
 org.springframework.boot.env.EnvironmentPostProcessor=\
+com.pangate.gateway.diagnostics.JvmSettingsEnvironmentPostProcessor,\
 com.pangate.gateway.dev.DevSecretsEnvironmentPostProcessor,\
 com.pangate.gateway.config.NettyLeakDetectionPostProcessor
 org.springframework.boot.diagnostics.FailureAnalyzer=\

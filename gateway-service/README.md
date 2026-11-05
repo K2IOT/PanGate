@@ -49,6 +49,29 @@ From the shell: `make run-local`.
   gateways through `fake-pushapi`), `GatewayProtectionIT` (warm-up, drain, slow consumer, shed, recycling, admission
   kill switch) and component ITs.
 
+## Production image
+
+`make images` builds `pangate/gateway-service:dev` and `:<version>` with Jib (distroless Java 21). The image sets the
+JVM flags that do not depend on the environment (spec §9.1, §10):
+
+| Flags | Why |
+|---|---|
+| `-XX:+UseZGC -XX:+ZGenerational` | Sub-millisecond pauses; GC does not add event-loop lag |
+| `-XX:InitialRAMPercentage=50 -XX:MaxRAMPercentage=50 -XX:+AlwaysPreTouch` | Fixed heap at half the container memory, touched at start so it never grows under load |
+| `-XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp` | The pod restarts instead of limping on |
+| `--add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED -Dio.netty.tryReflectionSetAccessible=true` | Netty's direct-memory fast paths |
+| `-Djava.security.egd=file:/dev/urandom -Dfile.encoding=UTF-8` | SecureRandom never blocks at start |
+
+The deployment sets the rest in `JAVA_TOOL_OPTIONS`:
+- **prod:** `-XX:MaxDirectMemorySize=<25% of container memory>`. Without it the gateway refuses to start with
+  profile `prod` (the JVM default equals the max heap, so heap plus direct memory would fill the container). The
+  outbound budget is 35% of this value.
+- **dev compose:** `-Xmx1g -XX:MaxDirectMemorySize=1g` (an explicit `-Xmx` wins over `MaxRAMPercentage`).
+
+The container must have a memory limit: `AlwaysPreTouch` touches half of whatever memory the JVM sees. Netty leak
+detection follows `gateway.netty.leak-detection` (prod `disabled`, local/dev `simple`; tests run `paranoid`). The
+start-up log prints the result, e.g. `jvm gc=ZGC Minor Cycles,... heapMax=1024MiB directMax=1024MiB leak=simple`.
+
 ## Edge features (M3b)
 
 - **Certificate rotation:** replace `gateway.crt`/`gateway.key` on disk; new connections get the new certificate within `gateway.tls.reload-interval` (30 s). A broken pair is ignored (`gw_tls_reloads_total{result="failed"}`). TLS session ticket keys and resume ticket keys are re-read every 60 s.

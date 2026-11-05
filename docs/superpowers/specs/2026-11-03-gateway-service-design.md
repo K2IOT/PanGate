@@ -871,7 +871,7 @@ Topic Kafka: profile `local` và `dev` đặt `gateway.kafka.create-topics=true`
 | Push API | Tắt | `fake-pushapi` | Push API |
 | Giới hạn | hard-cap 100k, soft-cap 80k, per-IP 100k (để load test từ loopback), budget 256 MB, warm-up 50 vòng | hard-cap 200k, budget 1 GB, warm-up 200 vòng | Như §9 |
 | Leak detection | `simple` | `simple` | `disabled` |
-| JVM | Mặc định của IDE | `-Xmx1g -XX:MaxDirectMemorySize=1g` | Flags §4.1 tài liệu gốc (chỉ đặt trong image và Helm prod) |
+| JVM | Mặc định của IDE | Flags của image + `JAVA_TOOL_OPTIONS="-Xmx1g -XX:MaxDirectMemorySize=1g"` | Flags của image (ZGC generational, heap 50% bộ nhớ container, `AlwaysPreTouch`, `ExitOnOutOfMemoryError`, xem README gateway) + `JAVA_TOOL_OPTIONS=-XX:MaxDirectMemorySize=<25% bộ nhớ container>`; thiếu flag này thì không start |
 
 Đường dẫn secret ở local nằm trong thư mục home (`~/.pangate-dev`), nên dù IDE đặt working directory ở đâu, gateway vẫn tìm thấy cùng một bộ key và resume ticket vẫn hợp lệ qua các lần chạy.
 
@@ -925,7 +925,7 @@ Cấu hình IDE: chạy `com.pangate.gateway.GatewayApplication`, đặt active 
 | `gw.control` consumer lỗi sau khi đã catch-up | Giữ state hiện tại, alert | Không ảnh hưởng |
 | `gw.control` chưa catch-up được lúc boot | Chưa ready, retry; quá 5 phút → exit | — |
 | Exception trong handler | `exceptionCaught` → `close(4500)`, tăng metric, log mẫu | Chỉ kết nối đó |
-| `OutOfMemoryError` | `-XX:+ExitOnOutOfMemoryError` | Process restart |
+| `OutOfMemoryError` | `-XX:+ExitOnOutOfMemoryError` (heap dump vào `/tmp`), đặt trong image | Process restart |
 | Lease bị process khác giữ (cùng nodeId) | Fence, exit (§6.1) | Process exit |
 
 ---

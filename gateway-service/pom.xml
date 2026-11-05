@@ -273,9 +273,27 @@
         <configuration>
           <to>
             <image>pangate/gateway-service:dev</image>
+            <tags><tag>${project.version}</tag></tags>
           </to>
           <container>
             <mainClass>${start-class}</mainClass>
+            <!-- Production JVM flags (spec §9.1, §10). Environment-specific values (-Xmx in dev, MaxDirectMemorySize =
+                 25% of container memory in prod) come from JAVA_TOOL_OPTIONS, which flags here would override. -->
+            <jvmFlags>
+              <jvmFlag>-XX:+UseZGC</jvmFlag>
+              <jvmFlag>-XX:+ZGenerational</jvmFlag>
+              <jvmFlag>-XX:InitialRAMPercentage=50</jvmFlag>
+              <jvmFlag>-XX:MaxRAMPercentage=50</jvmFlag>
+              <jvmFlag>-XX:+AlwaysPreTouch</jvmFlag>
+              <jvmFlag>-XX:+ExitOnOutOfMemoryError</jvmFlag>
+              <jvmFlag>-XX:+HeapDumpOnOutOfMemoryError</jvmFlag>
+              <jvmFlag>-XX:HeapDumpPath=/tmp</jvmFlag>
+              <jvmFlag>--add-opens=java.base/java.nio=ALL-UNNAMED</jvmFlag>
+              <jvmFlag>--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED</jvmFlag>
+              <jvmFlag>-Dio.netty.tryReflectionSetAccessible=true</jvmFlag>
+              <jvmFlag>-Djava.security.egd=file:/dev/urandom</jvmFlag>
+              <jvmFlag>-Dfile.encoding=UTF-8</jvmFlag>
+            </jvmFlags>
             <ports><port>8443</port><port>8883</port><port>8081</port></ports>
             <creationTime>USE_CURRENT_TIMESTAMP</creationTime>
           </container>
