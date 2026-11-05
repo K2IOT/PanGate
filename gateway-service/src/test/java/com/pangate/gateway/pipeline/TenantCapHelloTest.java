@@ -150,6 +150,24 @@ class TenantCapHelloTest {
   }
 
   @Test
+  void tenantBlockedWhileBorrowingIsRejectedAndTheSlotReleased() throws Exception {
+    fillLocalQuota();
+    borrowResult = new CompletableFuture<>();
+    hello();
+    // The control event runs now: the enforcer only closes ACTIVE sessions, so this HANDSHAKING one is left to us.
+    f.tenants.apply(TenantCfg.newBuilder().setScope(Scope.SCOPE_TENANT).setScopeId("t1")
+        .setLimits(TenantLimits.newBuilder().setMaxConns(2))
+        .setSwitches(com.pangate.contracts.v1.KillSwitches.newBuilder().setTenantBlocked(true)).build());
+    borrowResult.complete(true);
+
+    ErrorInfo e = ErrorInfo.parseFrom(drain().getPayload());
+    assertThat(e.getCode()).isEqualTo(4009);
+    assertThat(session.identity()).isNull();
+    assertThat(f.channel.isOpen()).isFalse();
+    assertThat(counter.count("t1")).isEqualTo(3);
+  }
+
+  @Test
   void slotIsReleasedWhenActivationFailsBeforeTheSessionHasAnIdentity() throws Exception {
     // A cell id too long for a resume ticket (> 1536 B): issuing throws during activation, after the reservation.
     String longCell = "c".repeat(2000);

@@ -232,6 +232,18 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
             5_000 + java.util.concurrent.ThreadLocalRandom.current().nextLong(25_001));
         return;
       }
+      // A control event handled while Redis answered (tenant blocked, cell moved, revoke) skipped this HANDSHAKING
+      // session: check the policy again, without the per-principal limiter (that HELLO was already counted).
+      var rejection = policy.checkPolicy(new HelloPolicy.Candidate(ticketCell, t.tenant(), t.principal(), t.device(),
+          t.authJtiHash(), hello.getSdkVersion(), session.origin()));
+      if (rejection.isPresent()) {
+        cap.release(t.tenant());
+        failed = true;
+        metrics.handshake(rejection.get().metricResult());
+        releaseHeld();
+        session.close(rejection.get().code(), rejection.get().code().name(), rejection.get().retryAfterMs());
+        return;
+      }
       session.tenantReserved(true);
       activateReserved(ctx, session, hello, t);
     }));

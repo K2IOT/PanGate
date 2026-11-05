@@ -232,6 +232,24 @@ class SseAdapterTest {
   }
 
   @Test
+  void heartbeatFollowsAnIntervalReducedWhileStreaming() {
+    enableSse();
+    f.channel.writeInbound(post(HttpMethod.POST, "application/x-protobuf", hello()));
+    outbound().forEach(ReferenceCountUtil::release);
+
+    // Idle timeout is now 3 × 5 s: a comment every 30 s would let a healthy client time out.
+    f.tenants.apply(TenantCfg.newBuilder().setScope(Scope.SCOPE_TENANT).setScopeId("t1")
+        .setSwitches(KillSwitches.newBuilder().setSseFallbackEnabled(true).setHeartbeatIntervalSec(5)).build());
+    for (int i = 0; i < 6; i++) {
+      f.channel.advanceTimeBy(1, TimeUnit.SECONDS);
+      f.channel.runScheduledPendingTasks();
+    }
+    List<Object> out = outbound();
+    assertThat(out).hasSize(1);
+    assertThat(text(out.get(0))).isEqualTo(":\n\n");
+  }
+
+  @Test
   void allowedOriginIsEchoedOnTheStream() {
     f.tenants.apply(TenantCfg.newBuilder().setScope(Scope.SCOPE_TENANT).setScopeId("t1")
         .setSwitches(KillSwitches.newBuilder().setSseFallbackEnabled(true))

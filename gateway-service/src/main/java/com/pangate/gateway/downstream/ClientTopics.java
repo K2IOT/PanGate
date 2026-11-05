@@ -70,6 +70,23 @@ public final class ClientTopics {
     fresh.forEach(t -> index.add(s, t));
   }
 
+  /**
+   * After REAUTH replaced the session's topic claims: drop the subscriptions the new claims no longer allow, so a
+   * narrower JWT also narrows what broadcasts reach the client. Owner loop only.
+   */
+  public static void pruneDisallowed(Session s) {
+    String[] held = s.topics();
+    if (held == null) {
+      return;
+    }
+    TopicIndex index = s.loop().topics();
+    for (String t : held.clone()) {
+      if (!TopicPatterns.allowed(s.topicPatterns(), t)) {
+        index.remove(s, t);
+      }
+    }
+  }
+
   private static void reject(ChannelHandlerContext ctx, Frame frame, String message) {
     ctx.writeAndFlush(Frames.error(CloseCode.BAD_FRAME.code(), message, false, false, 0, frame.getMsgId()));
   }

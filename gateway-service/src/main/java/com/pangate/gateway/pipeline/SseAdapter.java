@@ -49,6 +49,8 @@ public final class SseAdapter extends ChannelDuplexHandler {
   private boolean helloSeen;
   private boolean streaming;
   private ScheduledFuture<?> beat;
+  private long beatMs;
+  private long sinceBeatMs;
 
   public SseAdapter(Duration heartbeat, AtomicInteger streams, com.pangate.gateway.config.LimitsHolder limits) {
     this.limits = limits;
@@ -154,12 +156,32 @@ public final class SseAdapter extends ChannelDuplexHandler {
     }
     ctx.write(head);
     // The comment is this transport's only sign of life (idle timeout = 3 × heartbeat): never wait longer than the
-    // tenant's heartbeat interval.
+    // tenant's heartbeat interval. A 1 s tick re-reads it, so a heartbeat change from gw.control applies at once.
+    beatMs = interval(ctx);
+    sinceBeatMs = 0;
+    applyUserTimeout(ctx.channel(), Duration.ofMillis(3 * beatMs));
+    beat = ctx.executor().scheduleAtFixedRate(() -> tick(ctx), TICK_MS, TICK_MS, TimeUnit.MILLISECONDS);
+  }
+
+  private static final long TICK_MS = 1_000;
+
+  private long interval(ChannelHandlerContext ctx) {
     Session s = ctx.channel().attr(Session.KEY).get();
-    long ms = s == null ? heartbeat.toMillis()
-        : Math.max(1_000, Math.min(heartbeat.toMillis(), s.heartbeatSec() * 1000));
-    beat = ctx.executor().scheduleAtFixedRate(() -> keepAlive(ctx), ms, ms, TimeUnit.MILLISECONDS);
-    applyUserTimeout(ctx.channel(), Duration.ofMillis(3 * ms));
+    return s == null ? heartbeat.toMillis()
+        : Math.max(TICK_MS, Math.min(heartbeat.toMillis(), s.heartbeatSec() * 1000));
+  }
+
+  private void tick(ChannelHandlerContext ctx) {
+    long ms = interval(ctx);
+    if (ms != beatMs) {
+      beatMs = ms;
+      applyUserTimeout(ctx.channel(), Duration.ofMillis(3 * ms));
+    }
+    sinceBeatMs += TICK_MS;
+    if (sinceBeatMs >= beatMs) {
+      sinceBeatMs = 0;
+      keepAlive(ctx);
+    }
   }
 
   private void keepAlive(ChannelHandlerContext ctx) {

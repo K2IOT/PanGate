@@ -110,6 +110,7 @@ public final class SessionHandler extends ChannelInboundHandlerAdapter {
       String ticket = tickets.issue(new ResumeTicket(cell, c.tenant(), c.principal(), c.device(), now, exp, jtiHash,
           c.topics()));
       session.reauth(now, exp, jtiHash, c.topics());
+      com.pangate.gateway.downstream.ClientTopics.pruneDisallowed(session);
       ctx.writeAndFlush(Frames.reauth(Reauth.newBuilder().setResumeTicket(ticket)
           .setSessionExpiresAtMs(exp * 1000).build()));
     });

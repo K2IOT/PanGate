@@ -62,9 +62,16 @@ public final class AuthFixture {
   }
 
   public String jwt(ECKey signer, String principal, String device, long nowSec) {
+    return jwt(signer, principal, device, nowSec, List.of("t1:news.*"));
+  }
+
+  public String jwt(String principal, String device, long nowSec, List<String> topics) {
+    return jwt(key, principal, device, nowSec, topics);
+  }
+
+  private static String jwt(ECKey signer, String principal, String device, long nowSec, List<String> topics) {
     String tenant = principal.substring(0, principal.indexOf(':'));
-    return new JwtMinter(signer, "test").mint(
-        new TokenRequest(tenant, principal, device, List.of("t1:news.*"), Duration.ofMinutes(10)),
+    return new JwtMinter(signer, "test").mint(new TokenRequest(tenant, principal, device, topics, Duration.ofMinutes(10)),
         Instant.ofEpochSecond(nowSec));
   }
 }

@@ -89,6 +89,19 @@ class SessionHandlerTest {
   }
 
   @Test
+  void reauthWithNarrowerTopicsDropsSubscriptionsTheNewJwtNoLongerAllows() {
+    assertThat(topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s1", "t1:news.a", "t1:news.b")).isNull();
+
+    Frame out = in(Frame.newBuilder().setType(FrameType.FRAME_TYPE_REAUTH).setPayload(Reauth.newBuilder()
+        .setJwt(auth.jwt("t1:u1", "d1", f.now(), List.of("t1:news.a"))).build().toByteString()).build());
+
+    assertThat(out.getType()).isEqualTo(FrameType.FRAME_TYPE_REAUTH);
+    assertThat(f.loop.topics().snapshot("t1:news.a")).containsExactly(session);
+    assertThat(f.loop.topics().snapshot("t1:news.b")).isEmpty();
+    assertThat(session.hasTopic("t1:news.b")).isFalse();
+  }
+
+  @Test
   void reauthForOtherPrincipalAuthFailed() throws Exception {
     Frame req = Frame.newBuilder().setType(FrameType.FRAME_TYPE_REAUTH)
         .setPayload(Reauth.newBuilder().setJwt(auth.jwt("t1:other", "d1", f.now())).build().toByteString()).build();
