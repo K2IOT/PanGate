@@ -42,8 +42,16 @@ sleep 15
 # The ramp (2000 TLS handshakes/s, client on the same box) can raise lag p99 past 50 ms and enter L1, which exits
 # only after 30 s of calm (spec §7.3). The exit criterion is the steady state: wait up to 180 s for level 0.
 shed() { curl -s http://127.0.0.1:8081/actuator/prometheus | awk '/^gw_shed_level/ {print int($2); exit}'; }
+# The L1 exit inputs (budget < 0.60, lag p99 < 30 ms, process CPU < 0.60 for 30 s), so a stuck level says why.
+signals() {
+  curl -s http://127.0.0.1:8081/actuator/prometheus | awk '
+    /^gw_shed_level/ {lvl=$2} /^process_cpu_usage/ {cpu=$2} /^gw_outbound_budget_ratio/ {b=$2}
+    /^gw_eventloop_lag_seconds/ {if ($2 > lag) lag=$2}
+    END {printf "shed=%s cpu=%s budget=%s max_lag_p99=%s\n", lvl, cpu, b, lag}'
+}
 for i in $(seq 1 180); do
   [ "$(shed)" = "0" ] && break
+  [ $((i % 15)) = 1 ] && echo "after $((i - 1)) s: $(signals)"
   sleep 1
 done
 echo "shed level transitions during the run: $(grep -c 'shed level' "$GLOG"); level 0 after $((i - 1)) s more"
@@ -52,5 +60,9 @@ PROM=$(curl -s http://127.0.0.1:8081/actuator/prometheus)
 LAG=$(awk '/^gw_eventloop_lag_seconds/ {print $2}' <<<"$PROM" | sort -g | tail -1)
 SHED=$(awk '/^gw_shed_level/ {print $2}' <<<"$PROM" | head -1)
 echo "sessions=$N max_loop_lag_p99_seconds=$LAG shed_level=$SHED"
-[ "${SHED%.*}" = "0" ] || { echo "shed level ${SHED:-missing} != 0 under idle load"; exit 1; }
+[ "${SHED%.*}" = "0" ] || {
+  echo "shed level ${SHED:-missing} != 0 under idle load ($(signals))"
+  grep 'shed level' "$GLOG" | tail -20
+  exit 1
+}
 awk -v l="$LAG" -v m="$MAX_LAG" 'BEGIN { exit !(l < m) }' || { echo "loop lag $LAG >= $MAX_LAG"; exit 1; }
