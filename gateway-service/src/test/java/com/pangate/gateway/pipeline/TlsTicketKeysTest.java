@@ -30,6 +30,7 @@ import java.nio.file.Path;
 import java.util.Base64;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -119,7 +120,21 @@ class TlsTicketKeysTest {
     }
   }
 
+  @AfterEach
+  void releaseServerContexts() {  // OPENSSL_REFCNT contexts hold native memory until released
+    SERVERS.forEach(io.netty.util.ReferenceCountUtil::release);
+    SERVERS.clear();
+  }
+
+  private static final java.util.List<SslContext> SERVERS = new java.util.ArrayList<>();
+
   private static SslContext server(Path d) throws Exception {
+    SslContext ctx = buildServer(d);
+    SERVERS.add(ctx);
+    return ctx;
+  }
+
+  private static SslContext buildServer(Path d) throws Exception {
     return SslContextBuilder.forServer(d.resolve("gateway.crt").toFile(), d.resolve("gateway.key").toFile())
         .sslProvider(SslProvider.OPENSSL_REFCNT).protocols("TLSv1.3").build();
   }

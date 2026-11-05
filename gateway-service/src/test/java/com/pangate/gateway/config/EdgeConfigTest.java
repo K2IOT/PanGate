@@ -38,5 +38,25 @@ class EdgeConfigTest {
     }
     rotation.join(2000);
     assertThat(keys.get()).isEqualTo(TlsTicketKeys.load(secrets));
+    tls.close();
+  }
+
+  @Test
+  void ticketKeyRotationAfterShutdownIsSkippedQuietly(@TempDir Path d) throws Exception {
+    DevSecretsGenerator.ensure(d);
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    GatewayMetrics m = new GatewayMetrics(meters);
+    SslContextProvider tls = new SslContextProvider(new GatewayProperties.Tls(d.resolve("gateway.crt"),
+        d.resolve("gateway.key"), Duration.ofSeconds(30)), Executors.newSingleThreadScheduledExecutor(),
+        Duration.ZERO, m);
+    FileSecretSource secrets = new FileSecretSource(d);
+    AtomicReference<TlsTicketKeys> keys = new AtomicReference<>(TlsTicketKeys.load(secrets));
+    java.nio.file.Files.delete(d.resolve("tls-ticket-keys/current"));
+    DevSecretsGenerator.ensure(d);  // rotated current key
+    tls.close();
+
+    EdgeConfig.reloadTlsTicketKeys(secrets, tls, keys, m);
+
+    assertThat(meters.find("gw.secrets.reload").tag("result", "failed").counter()).isNull();
   }
 }

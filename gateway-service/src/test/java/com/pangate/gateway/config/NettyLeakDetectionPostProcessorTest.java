@@ -14,6 +14,7 @@ import org.springframework.core.env.StandardEnvironment;
 class NettyLeakDetectionPostProcessorTest {
 
   private static final String PROP = "io.netty.leakDetection.level";
+  private static final String LEGACY = "io.netty.leakDetectionLevel";
   private ResourceLeakDetector.Level level;
   private String sysProp;
 
@@ -31,6 +32,7 @@ class NettyLeakDetectionPostProcessorTest {
     } else {
       System.setProperty(PROP, sysProp);
     }
+    System.clearProperty(LEGACY);
   }
 
   private static StandardEnvironment env(String value) {
@@ -52,5 +54,25 @@ class NettyLeakDetectionPostProcessorTest {
     ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
     new NettyLeakDetectionPostProcessor().postProcessEnvironment(env("disabled"), new SpringApplication());
     assertThat(ResourceLeakDetector.getLevel()).isEqualTo(ResourceLeakDetector.Level.PARANOID);
+  }
+
+  @Test
+  void legacySystemPropertyAlsoWins() {
+    System.clearProperty(PROP);
+    System.setProperty(LEGACY, "paranoid");
+    ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
+    new NettyLeakDetectionPostProcessor().postProcessEnvironment(env("disabled"), new SpringApplication());
+    assertThat(ResourceLeakDetector.getLevel()).isEqualTo(ResourceLeakDetector.Level.PARANOID);
+  }
+
+  @Test
+  void invalidLevelNamesTheKeyAndTheAllowedValues() {
+    System.clearProperty(PROP);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> new NettyLeakDetectionPostProcessor()
+        .postProcessEnvironment(env("paranoidd"), new SpringApplication()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("gateway.netty.leak-detection")
+        .hasMessageContaining("paranoidd")
+        .hasMessageContaining("disabled, simple, advanced, paranoid");
   }
 }

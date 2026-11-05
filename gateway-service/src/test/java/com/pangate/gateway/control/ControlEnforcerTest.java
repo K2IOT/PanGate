@@ -15,11 +15,19 @@ import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 class ControlEnforcerTest {
 
   private final LoopFixture f = new LoopFixture();
+  private final List<EmbeddedChannel> channels = new ArrayList<>();
+
+  @AfterEach
+  void releaseOutbound() {  // close frames written to the sessions' channels
+    channels.forEach(EmbeddedChannel::finishAndReleaseAll);
+    f.channel.finishAndReleaseAll();
+  }
   private final List<String> migrations = new ArrayList<>();
   private final TenantMigrator migrator = new TenantMigrator(f.loops, f.cells, () -> 0L) {
     @Override
@@ -38,6 +46,7 @@ class ControlEnforcerTest {
 
   private Session session(String tenant, String principal, String device, long jtiHash) {
     EmbeddedChannel ch = new EmbeddedChannel();
+    channels.add(ch);
     ch.attr(ChannelAttrs.TRANSPORT).set(ChannelAttrs.TransportKind.WS);
     ch.attr(ChannelAttrs.PROTOCOL_READY).set(true);
     Session s = f.tracker.admit(ch, f.loop, InetAddress.getLoopbackAddress());

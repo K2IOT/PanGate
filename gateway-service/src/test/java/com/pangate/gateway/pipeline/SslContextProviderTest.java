@@ -10,6 +10,7 @@ import io.netty.buffer.ByteBufAllocator;
 import io.netty.util.ReferenceCountUtil;
 import java.nio.file.Path;
 import javax.net.ssl.SSLEngine;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -18,11 +19,23 @@ class SslContextProviderTest {
   private final io.micrometer.core.instrument.simple.SimpleMeterRegistry meters =
       new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
 
+  private final java.util.List<SslContextProvider> providers = new java.util.ArrayList<>();
+
+  @AfterEach
+  void closeProviders() {  // releases the native contexts (close() is idempotent)
+    providers.forEach(SslContextProvider::close);
+  }
+
   private SslContextProvider provider(Path d) {
     java.util.concurrent.ScheduledExecutorService now = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
-    return new SslContextProvider(new GatewayProperties.Tls(d.resolve("gateway.crt"), d.resolve("gateway.key"),
+    return track(new SslContextProvider(new GatewayProperties.Tls(d.resolve("gateway.crt"), d.resolve("gateway.key"),
         java.time.Duration.ofSeconds(30)), now, java.time.Duration.ZERO,
-        new com.pangate.gateway.metrics.GatewayMetrics(meters));
+        new com.pangate.gateway.metrics.GatewayMetrics(meters)));
+  }
+
+  private SslContextProvider track(SslContextProvider p) {
+    providers.add(p);
+    return p;
   }
 
   private double reloads(String result) {
@@ -109,6 +122,16 @@ class SslContextProviderTest {
     assertThat(ws.refCnt()).isZero();
     assertThat(tcp.refCnt()).isZero();
     assertThat(oldWs.refCnt()).as("replaced context still waiting for its delayed release").isZero();
+  }
+
+  @Test
+  void contextsAfterCloseFailWithAClearError(@TempDir Path d) {
+    DevSecretsGenerator.ensure(d);
+    SslContextProvider p = provider(d);
+    p.close();
+    assertThat(p.isClosed()).isTrue();
+    assertThatThrownBy(p::ws).isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
+    assertThatThrownBy(p::tcp).isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
   }
 
   @Test

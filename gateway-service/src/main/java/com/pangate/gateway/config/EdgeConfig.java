@@ -25,7 +25,7 @@ public class EdgeConfig {
 
   /** Spec §9.1: log GC, heap and direct-memory limits (the prod check runs earlier, JvmSettingsEnvironmentPostProcessor). */
   @Bean
-  com.pangate.gateway.diagnostics.JvmSettings jvmSettingsCheck() {
+  com.pangate.gateway.diagnostics.JvmSettings jvmSettingsLog() {
     com.pangate.gateway.diagnostics.JvmSettings s = com.pangate.gateway.diagnostics.JvmSettings.read();
     log.info(s.describe());
     return s;
@@ -154,6 +154,9 @@ public class EdgeConfig {
 
   private static void rotateTlsTicketKeys(SecretSource secrets, SslContextProvider tls,
       AtomicReference<TlsTicketKeys> keys, GatewayMetrics metrics) {
+    if (tls.isClosed()) {
+      return;  // shutting down: nothing left to install the keys on
+    }
     try {
       TlsTicketKeys next = TlsTicketKeys.load(secrets);
       if (!next.equals(keys.get())) {

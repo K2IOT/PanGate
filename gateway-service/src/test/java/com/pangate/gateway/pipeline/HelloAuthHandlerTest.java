@@ -29,6 +29,7 @@ import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import com.pangate.gateway.registry.SeqReader;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -53,6 +54,11 @@ class HelloAuthHandlerTest {
       return seqEpoch;
     }
   };
+
+  @AfterEach
+  void releaseOutbound() {
+    f.channel.finishAndReleaseAll();
+  }
 
   @BeforeEach
   void pipeline() {
@@ -297,6 +303,7 @@ class HelloAuthHandlerTest {
     assertThat(other.identity().sdkVersion()).isSameAs(session.identity().sdkVersion());
     assertThat(other.identity().platform()).isSameAs(session.identity().platform());
     assertThat(other.identity().tenantId()).isSameAs(session.identity().tenantId());
+    g.channel.finishAndReleaseAll();
     assertThat(session.identity().capabilities()).isEmpty();
   }
 

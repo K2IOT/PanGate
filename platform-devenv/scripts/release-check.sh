@@ -18,7 +18,8 @@ for pom in platform-parent platform-contracts platform-spring-starter gateway-de
   [ -z "$par" ] || [ "$par" = "$expected" ] || err "$f: parent version $par, expected $expected"
 done
 
-hits=$(grep -rn 'SNAPSHOT' Makefile platform-devenv .github */README.md README.md 2>/dev/null | grep -v 'release-check' | sort -u)
+hits=$(grep -rn 'SNAPSHOT' Makefile platform-devenv .github */README.md README.md 2>/dev/null \
+  | grep -v '^platform-devenv/scripts/release-check.sh:' | sort -u)
 [ -z "$hits" ] || { echo "$hits"; err "SNAPSHOT left in build/run files"; }
 
 [ -f docs/adr/README.md ] || err "docs/adr/README.md missing"
@@ -33,6 +34,10 @@ for adr in docs/adr/0*.md; do
   done
 done
 [ "$n" -gt 0 ] || err "no ADR in docs/adr"
+# and the other way: every ADR the index links to exists
+for link in $(grep -o '([0-9][0-9][0-9][0-9]-[^)]*\.md)' docs/adr/README.md 2>/dev/null | tr -d '()'); do
+  [ -f "docs/adr/$link" ] || err "docs/adr/README.md links to missing $link"
+done
 
 [ "$fail" -eq 0 ] && echo "release-check OK $expected"
 exit "$fail"

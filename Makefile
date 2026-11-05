@@ -83,7 +83,7 @@ load-check: infra-up
 FUZZ ?= FrameCodecFuzzTest
 .PHONY: fuzz
 fuzz:
-	JAZZER_FUZZ=1 $(MVNW) -f gateway-service/pom.xml test -Dtest=$(FUZZ) -Dsurefire.failIfNoSpecifiedTests=false
+	JAZZER_FUZZ=1 $(MVNW) -f gateway-service/pom.xml test -Dtest=$(FUZZ)
 
 ## Release check (spec §2, §13): module versions, no pre-release versions in build/run files, ADR index.
 .PHONY: release-check

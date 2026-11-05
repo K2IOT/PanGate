@@ -8,16 +8,28 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import reactor.blockhound.BlockingOperationError;
 
 /**
- * BlockHound treats Netty threads, Lettuce's own event loop included, as non-blocking. On close Lettuce takes
- * SharedLock exclusively on its event loop; if the test thread holds it (closing the same endpoint) that thread
- * parks for microseconds. This flaked TenantCapBorrowerIT teardown once in M3b.
+ * Netty's BlockHound integration treats every Netty thread as non-blocking, Lettuce's own event loop included. On
+ * close Lettuce takes SharedLock exclusively there; if another thread holds it (closing the same endpoint), the loop
+ * parks for microseconds. This flaked TenantCapBorrowerIT teardown once in M3b. Only gw-io-* threads are ours to
+ * police: Lettuce's threads are exempt, while the same contention on a gateway loop must still be caught.
  */
 class SharedLockBlockHoundTest {
 
   @Test
   void exclusiveLockContentionOnALettuceThreadIsAllowed() throws Exception {
+    assertThat(contendOn("lettuce-nioEventLoop-4-1")).as("blocking error on a Lettuce event loop thread").isNull();
+  }
+
+  @Test
+  void exclusiveLockContentionOnAGatewayLoopIsCaught() throws Exception {
+    assertThat(contendOn("gw-io-7")).isInstanceOf(BlockingOperationError.class);
+  }
+
+  /** Runs SharedLock.doExclusive on a Netty thread with the given name while another thread holds the lock. */
+  private static Throwable contendOn(String threadName) throws Exception {
     BlockHoundExtension.install();
     SharedLock lock = new SharedLock();
     CountDownLatch held = new CountDownLatch(1);
@@ -34,19 +46,25 @@ class SharedLockBlockHoundTest {
     assertThat(held.await(5, TimeUnit.SECONDS)).isTrue();
 
     AtomicReference<Throwable> error = new AtomicReference<>();
-    Thread lettuceLoop = new FastThreadLocalThread(() -> {
+    CountDownLatch done = new CountDownLatch(1);
+    Thread contender = new FastThreadLocalThread(() -> {
       try {
         lock.doExclusive(() -> { });
       } catch (Throwable t) {
         error.set(t);
+      } finally {
+        done.countDown();
       }
-    }, "lettuce-nioEventLoop-4-1");
-    lettuceLoop.start();
-    Thread.sleep(200);  // lettuceLoop is now parked on the lock
+    }, threadName);
+    contender.start();
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    // Contended: either parked on the lock, or already stopped by BlockHound.
+    while (contender.getState() != Thread.State.WAITING && done.getCount() > 0 && System.nanoTime() < deadline) {
+      Thread.onSpinWait();
+    }
     release.countDown();
-    lettuceLoop.join(5000);
+    contender.join(5000);
     holder.join(5000);
-
-    assertThat(error.get()).as("blocking error on a Lettuce event loop thread").isNull();
+    return error.get();
   }
 }

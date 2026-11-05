@@ -69,7 +69,10 @@ deployment sets the rest in `JAVA_TOOL_OPTIONS`:
   outbound budget is 35% of this value.
 - **dev compose:** `-Xmx1g -XX:MaxDirectMemorySize=1g` (an explicit `-Xmx` wins over `MaxRAMPercentage`).
 
-The container must have a memory limit: `AlwaysPreTouch` touches half of whatever memory the JVM sees. Netty leak
+The container must have a memory limit: `AlwaysPreTouch` touches half of whatever memory the JVM sees.
+On `OutOfMemoryError` the JVM writes a heap dump to `/tmp` before exiting; the dump is about as large as the heap
+(half the container). Mount `/tmp` as an `emptyDir` with a `sizeLimit` of at least the heap size: on the container's
+writable layer the dump eats ephemeral storage (the pod can be evicted), and with `readOnlyRootFilesystem` it fails. Netty leak
 detection follows `gateway.netty.leak-detection` (prod `disabled`, local/dev `simple`; tests run `paranoid`). The
 start-up log prints the result, e.g. `jvm gc=ZGC Minor Cycles,... heapMax=1024MiB directMax=1024MiB leak=simple`.
 
@@ -97,15 +100,16 @@ the run in `@AfterAll` without saving a reproducer input; re-run in regression m
 JMH benchmarks (spec §11) live in `src/jmh/java` and run with the `jmh` profile: `make bench` (results in
 `gateway-service/target/jmh.json`; pass `JMH_ARGS=...` for other JMH options, e.g. `JMH_ARGS=-l` to list).
 
-Baseline, 2026-11-05 (cloud dev container, 1 fork, 3 warm-up + 5 measured iterations of 10 s):
+Baseline, 2026-11-05 (cloud dev container, 1 fork, 3 warm-up + 5 measured iterations of 10 s; Netty leak detection
+`disabled` as in prod):
 
 | Benchmark | Setup | Score |
 |---|---|---|
-| `FrameCodecBench.decodeUpstream` | UPSTREAM frame, 256 B payload | 217.6 ± 4.3 ns/op |
-| `FrameCodecBench.encodePush` | PUSH frame, 256 B payload | 139.2 ± 3.0 ns/op |
-| `PrincipalIndexBench.get` | 100k principals | 55.7 ± 7.5 ns/op |
-| `PrincipalIndexBench.addRemove` | second device added and removed, 100k principals | 192.5 ± 17.9 ns/op |
-| `DeadlineWheelBench.tick` | 100k sessions, deadlines over 60 s (~1.7k due per tick) | 13.7 ± 1.4 µs/op |
+| `FrameCodecBench.decodeUpstream` | UPSTREAM frame, 256 B payload | 218.7 ± 13.1 ns/op |
+| `FrameCodecBench.encodePush` | PUSH frame, 256 B payload | 115.7 ± 1.9 ns/op |
+| `PrincipalIndexBench.get` | 100k principals | 54.8 ± 3.2 ns/op |
+| `PrincipalIndexBench.addRemove` | second device added and removed, 100k principals | 189.9 ± 28.5 ns/op |
+| `DeadlineWheelBench.tick` | 100k sessions, deadlines over 60 s (~1.7k due per tick) | 13.6 ± 0.4 µs/op |
 
 ## Edge features (M3b)
 

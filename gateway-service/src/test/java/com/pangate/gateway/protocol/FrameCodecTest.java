@@ -138,6 +138,7 @@ class FrameCodecTest {
     assertThat(lines).hasSize(2);
     assertThat(lines.get(0)).contains("in PING");
     assertThat(lines.get(1)).contains("out PONG");
+    ch.finishAndReleaseAll();
     assertThat(lines).noneMatch(l -> l.contains("t1:u1"));
   }
 

@@ -222,11 +222,23 @@ public final class SslContextProvider implements AutoCloseable {
     }
   }
 
+  public boolean isClosed() {
+    return current.get() == null;
+  }
+
+  private Contexts live() {
+    Contexts c = current.get();
+    if (c == null) {
+      throw new IllegalStateException("TLS contexts closed (gateway shutting down)");
+    }
+    return c;
+  }
+
   public SslContext ws() {
-    return current.get().ws();
+    return live().ws();
   }
 
   public SslContext tcp() {
-    return current.get().tcp();
+    return live().tcp();
   }
 }

@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -30,6 +31,18 @@ class BroadcastPacerTest {
   private final LoopFixture f = new LoopFixture();
   private final List<EmbeddedChannel> channels = new ArrayList<>();
   private final List<Session> sessions = new ArrayList<>();
+  /** Frames a test leaves queued in the pacer; released after the test (the pacer has no shutdown drain). */
+  private final List<PreEncodedFrame> leftInQueue = new ArrayList<>();
+
+  @AfterEach
+  void releaseLeftovers() {
+    channels.forEach(EmbeddedChannel::finishAndReleaseAll);
+    leftInQueue.forEach(fr -> {
+      while (fr.refCnt() > 0) {
+        fr.releaseShare();
+      }
+    });
+  }
   private BroadcastPacer pacer;
 
   @BeforeEach
@@ -220,14 +233,17 @@ class BroadcastPacerTest {
       pacer.submit("t1:x", Priority.PRIORITY_NORMAL, fr);
     }
     assertThat(pacer.queued()).isEqualTo(BroadcastPacer.MAX_QUEUED_JOBS);
-    pacer.submit("t1:x", Priority.PRIORITY_NORMAL, frame("t1:x"));   // drops the oldest BULK
-    pacer.submit("t1:x", Priority.PRIORITY_NORMAL, frame("t1:x"));   // drops the next BULK
-    pacer.submit("t1:x", Priority.PRIORITY_NORMAL, frame("t1:x"));   // no BULK left: drops the oldest NORMAL
+    List<PreEncodedFrame> late = List.of(frame("t1:x"), frame("t1:x"), frame("t1:x"));
+    pacer.submit("t1:x", Priority.PRIORITY_NORMAL, late.get(0));   // drops the oldest BULK
+    pacer.submit("t1:x", Priority.PRIORITY_NORMAL, late.get(1));   // drops the next BULK
+    pacer.submit("t1:x", Priority.PRIORITY_NORMAL, late.get(2));   // no BULK left: drops the oldest NORMAL
     assertThat(pacer.queued()).isEqualTo(BroadcastPacer.MAX_QUEUED_JOBS);
     assertThat(bulk).allMatch(fr -> fr.refCnt() == 0);
     assertThat(normal.get(0).refCnt()).isZero();
     assertThat(normal.get(1).refCnt()).isEqualTo(1);
     assertThat(f.meters.counter("gw.push.dropped", "reason", "broadcast_backlog").count()).isEqualTo(3);
+    leftInQueue.addAll(normal.subList(1, normal.size()));
+    leftInQueue.addAll(late);
   }
 
   @Test

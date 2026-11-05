@@ -371,9 +371,9 @@ Tag `v0.1.0` **không** tạo ở bước này. Tag được đặt trên `main`
 |---|---|
 | Fuzz `FrameCodec` 10 phút | Sau final review (limit 256 B / 1 KiB, input pooled): 12.054.022 lần chạy trong 601 s (~20k/s), cov 535, corpus 510; không finding, không leak. Lần đầu (harness yếu hơn): 22,65 triệu |
 | Fuzz `HelloAuthHandler` 10 phút | Sau final review (bắt close 4500, input pooled): 4.293.939 lần chạy trong 601 s (~7,1k/s), cov 1652, corpus 678; không finding, không leak. Lần đầu: 5,58 triệu |
-| JMH `decodeUpstream` / `encodePush` / `get` / `addRemove` / `tick` | 217,6 ns / 139,2 ns / 55,7 ns / 192,5 ns / 13,7 µs |
+| JMH `decodeUpstream` / `encodePush` / `get` / `addRemove` / `tick` | 218,7 ns / 115,7 ns / 54,8 ns / 189,9 ns / 13,6 µs (leak detection tắt; lần đầu có leak `simple`: encode 139,2 ns) |
 | `TenantCapBorrowerIT` 15 lần liên tiếp | 15/15 trước và sau khi sửa; cơ chế tái hiện tất định bằng `SharedLockBlockHoundTest` |
-| Unit / IT | gateway 561 unit + 97 IT (sau final review); contracts 11, starter 14, devtools 31 |
+| Unit / IT | gateway 567 unit + 97 IT (sau khi sửa minor); contracts 11, starter 14, devtools 31 |
 | Heap/session, lag p99 | 4808 B (10k session); 18k session, lag p99 1,68 ms, shed về level 0 (2 lần chuyển level lúc ramp) |
 | `make images up smoke` (log `jvm gc=ZGC`) | Xanh; `jvm gc=ZGC Minor Cycles,… heapMax=1024MiB directMax=1024MiB leak=simple` |
-| Leak detection `paranoid` trên cả suite | 46 leak `SslContextProvider` (production, đã sửa bằng `close()`); 21 leak còn lại tạo trong code test |
+| Leak detection `paranoid` trên cả suite | 46 leak `SslContextProvider` (production, đã sửa bằng `close()`); 26 leak do code test, đã sửa; còn 1 báo cáo cố ý của `LeakWatchTest` |

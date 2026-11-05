@@ -15,14 +15,26 @@ import org.springframework.core.env.ConfigurableEnvironment;
 public final class NettyLeakDetectionPostProcessor implements EnvironmentPostProcessor, Ordered {
 
   static final String SYSTEM_PROPERTY = "io.netty.leakDetection.level";
+  /** Netty still honours its old name; an explicit value under either name wins over the config. */
+  static final String LEGACY_SYSTEM_PROPERTY = "io.netty.leakDetectionLevel";
+  static final String KEY = "gateway.netty.leak-detection";
 
   @Override
   public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
-    if (System.getProperty(SYSTEM_PROPERTY) != null) {
+    if (System.getProperty(SYSTEM_PROPERTY) != null || System.getProperty(LEGACY_SYSTEM_PROPERTY) != null) {
       return;
     }
-    String level = Binder.get(environment).bind("gateway.netty.leak-detection", String.class).orElse("simple");
-    ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.valueOf(level.trim().toUpperCase(Locale.ROOT)));
+    String level = Binder.get(environment).bind(KEY, String.class).orElse("simple");
+    ResourceLeakDetector.setLevel(parse(level));
+  }
+
+  static ResourceLeakDetector.Level parse(String value) {
+    try {
+      return ResourceLeakDetector.Level.valueOf(value.trim().toUpperCase(Locale.ROOT));
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException(KEY + "=" + value + " is not a leak detection level; use one of: "
+          + "disabled, simple, advanced, paranoid", e);
+    }
   }
 
   @Override
