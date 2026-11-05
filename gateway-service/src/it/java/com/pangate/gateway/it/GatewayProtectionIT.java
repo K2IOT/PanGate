@@ -287,6 +287,7 @@ class GatewayProtectionIT {
     gw = Gw.start("--gateway.outbound-budget=256KB", "--gateway.limits.slow-consumer-timeout=5m");
     router = FakeRouter.connect(gw.grpc());
     NodeState node = gw.ctx().getBean(NodeState.class);
+    com.pangate.gateway.shed.OutboundBudget budget = gw.ctx().getBean(com.pangate.gateway.shed.OutboundBudget.class);
     List<GatewayClient> paused = new ArrayList<>();
     for (int i = 0; i < 4; i++) {
       GatewayClient c = client("t1");
@@ -309,18 +310,24 @@ class GatewayProtectionIT {
         }
       }
     });
+    double maxBudget = 0;
+    int maxLevel = 0;
     try {
       long end = System.nanoTime() + Duration.ofSeconds(40).toNanos();
       while (System.nanoTime() < end && gw.metric("gw_slow_consumer_closes_total", "reason=\"shed\"") < 1) {
+        maxBudget = Math.max(maxBudget, budget.ratio());
+        maxLevel = Math.max(maxLevel, node.shedLevel());
         Thread.sleep(20);
       }
     } finally {
       pusher.interrupt();
     }
+    String seen = "max budget ratio " + maxBudget + ", max level seen " + maxLevel + ", dropped unwritable "
+        + gw.metric("gw_push_dropped_total", "reason=\"unwritable\"");
     // A SHED close proves level 5: the sampler relieves the node only in a sample that evaluated L5
     // (ShedSamplerTest). Polling node.shedLevel() here instead missed it on a slow runner: L5 lasts one 100 ms
     // sample, the relief closes the paused clients, and the next sample can already be back at L1.
-    assertThat(gw.metric("gw_slow_consumer_closes_total", "reason=\"shed\"")).isGreaterThanOrEqualTo(1);
+    assertThat(gw.metric("gw_slow_consumer_closes_total", "reason=\"shed\"")).as(seen).isGreaterThanOrEqualTo(1);
     assertThat(gw.metric("gw_closes_total", "code=\"4008\"")).isGreaterThanOrEqualTo(1);
     reader.ping(T);
     await().atMost(Duration.ofSeconds(5)).until(() -> node.shedLevel() <= 1);
