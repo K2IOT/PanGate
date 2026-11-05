@@ -5,3 +5,6 @@ target/
 .pangate-dev/
 .gitnexus/
 .superpowers/
+
+# Jazzer working corpus (make fuzz); findings are kept next to the seeds instead
+.cifuzz-corpus/

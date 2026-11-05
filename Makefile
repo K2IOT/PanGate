@@ -1,4 +1,5 @@
 SHELL := /bin/bash
+VERSION := 0.1.0-SNAPSHOT
 MVNW := $(CURDIR)/mvnw
 MODULES := platform-parent platform-contracts platform-spring-starter gateway-devtools gateway-service
 
@@ -19,8 +20,8 @@ verify:
 	done
 
 COMPOSE := docker compose -f platform-devenv/docker-compose.yml
-GATEWAY_JAR := gateway-service/target/gateway-service-0.1.0-SNAPSHOT.jar
-DEVTOOLS_JAR := gateway-devtools/target/gateway-devtools-0.1.0-SNAPSHOT-exec.jar
+GATEWAY_JAR := gateway-service/target/gateway-service-$(VERSION).jar
+DEVTOOLS_JAR := gateway-devtools/target/gateway-devtools-$(VERSION)-exec.jar
 
 .PHONY: doctor infra-up infra-down run-local images up down logs smoke local-check memory-check load-check
 
@@ -76,3 +77,15 @@ memory-check: infra-up
 N ?= 18000
 load-check: infra-up
 	platform-devenv/scripts/idle-load.sh $(GATEWAY_JAR) $(DEVTOOLS_JAR) $(N)
+
+## Fuzz one target for real (spec §11: 10 min per target, maxDuration on the @FuzzTest). Findings are written
+## as new inputs next to the seeds (src/test/resources/**/<Class>Inputs/) and fail the build.
+FUZZ ?= FrameCodecFuzzTest
+.PHONY: fuzz
+fuzz:
+	JAZZER_FUZZ=1 $(MVNW) -f gateway-service/pom.xml test -Dtest=$(FUZZ) -Dsurefire.failIfNoSpecifiedTests=false
+
+## Release check (spec §2, §13): module versions, no pre-release versions in build/run files, ADR index.
+.PHONY: release-check
+release-check:
+	platform-devenv/scripts/release-check.sh $(VERSION:-SNAPSHOT=)

@@ -72,6 +72,22 @@ The container must have a memory limit: `AlwaysPreTouch` touches half of whateve
 detection follows `gateway.netty.leak-detection` (prod `disabled`, local/dev `simple`; tests run `paranoid`). The
 start-up log prints the result, e.g. `jvm gc=ZGC Minor Cycles,... heapMax=1024MiB directMax=1024MiB leak=simple`.
 
+## Fuzz
+
+Two Jazzer fuzz tests (spec §11): `FrameCodecFuzzTest` (random bytes into `FrameCodec.decode`, before and after
+auth) and `HelloAuthFuzzTest` (random bytes, random JWTs, a valid JWT with one byte changed, random resume tickets
+through `FrameCodec → HelloAuthHandler → SessionHandler`). Both fail on any unexpected exception or on a `ByteBuf`
+leak at leak level `paranoid`.
+
+- Every `make verify` runs them in regression mode: only the inputs under
+  `src/test/resources/**/<Class>Inputs/` (seeds plus any past findings).
+- `make fuzz FUZZ=FrameCodecFuzzTest` (or `HelloAuthFuzzTest`) fuzzes for 10 minutes. A finding is saved as a new
+  input next to the seeds and fails the build; keep it as a regression input once fixed. The working corpus goes to
+  `gateway-service/.cifuzz-corpus/` (git-ignored).
+- `jazzer.instrument` in `src/test/resources/junit-platform.properties` instruments `com.pangate.**` and protobuf so
+  coverage guides the fuzzer through the Frame wire format.
+- CI workflow `fuzz` runs both targets nightly and on demand.
+
 ## Edge features (M3b)
 
 - **Certificate rotation:** replace `gateway.crt`/`gateway.key` on disk; new connections get the new certificate within `gateway.tls.reload-interval` (30 s). A broken pair is ignored (`gw_tls_reloads_total{result="failed"}`). TLS session ticket keys and resume ticket keys are re-read every 60 s.
