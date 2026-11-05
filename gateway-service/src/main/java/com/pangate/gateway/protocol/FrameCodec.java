@@ -49,12 +49,22 @@ public final class FrameCodec extends MessageToMessageCodec<ByteBuf, Frame> {
     if (!CLIENT_TYPES.contains(frame.getType())) {
       throw new ProtocolException(CloseCode.BAD_FRAME, "unexpected frame type " + frame.getType());
     }
+    traceFrame(ctx, "in", frame, msg.readableBytes());
     out.add(frame);
+  }
+
+  /** Kill switch trace.principal (spec §7.8): one line per frame of a traced session. */
+  private static void traceFrame(ChannelHandlerContext ctx, String dir, Frame f, int bytes) {
+    com.pangate.gateway.session.Session s = ctx.channel().attr(com.pangate.gateway.session.Session.KEY).get();
+    if (s != null && s.traced()) {
+      com.pangate.gateway.trace.SessionTrace.frame(s, dir, f.getType(), f.getMsgId(), bytes);
+    }
   }
 
   @Override
   protected void encode(ChannelHandlerContext ctx, Frame msg, List<Object> out) throws IOException {
     int size = msg.getSerializedSize();
+    traceFrame(ctx, "out", msg, size);
     ByteBuf buf = ctx.alloc().ioBuffer(size);
     try {
       CodedOutputStream cos = CodedOutputStream.newInstance(buf.nioBuffer(buf.writerIndex(), size));

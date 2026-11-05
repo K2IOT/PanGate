@@ -13,7 +13,7 @@
 
   <groupId>com.pangate</groupId>
   <artifactId>platform-parent</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
+  <version>0.1.0</version>
   <packaging>pom</packaging>
   <name>PanGate platform parent</name>
 
@@ -25,18 +25,29 @@
     <netty.version>4.2.20.Final</netty.version>
     <protobuf-java.version>4.36.2</protobuf-java.version>
     <protoc.version>4.36.2</protoc.version>
+    <grpc.version>1.85.1</grpc.version>
     <protobuf-maven-plugin.version>5.1.12</protobuf-maven-plugin.version>
     <nimbus-jose-jwt.version>10.10</nimbus-jose-jwt.version>
     <bcpkix.version>1.86</bcpkix.version>
     <fastutil.version>8.5.19</fastutil.version>
     <picocli.version>4.7.7</picocli.version>
     <blockhound.version>1.0.18.RELEASE</blockhound.version>
+    <jazzer.version>0.24.0</jazzer.version>
+    <jmh.version>1.37</jmh.version>
+    <exec-maven-plugin.version>3.5.0</exec-maven-plugin.version>
     <jib-maven-plugin.version>3.5.2</jib-maven-plugin.version>
     <jib.base.image>gcr.io/distroless/java21-debian12:nonroot</jib.base.image>
   </properties>
 
   <dependencyManagement>
     <dependencies>
+      <dependency>
+        <groupId>io.grpc</groupId>
+        <artifactId>grpc-bom</artifactId>
+        <version>${grpc.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
       <dependency>
         <groupId>com.google.protobuf</groupId>
         <artifactId>protobuf-java</artifactId>
@@ -78,6 +89,11 @@
         <version>${blockhound.version}</version>
       </dependency>
       <dependency>
+        <groupId>com.code-intelligence</groupId>
+        <artifactId>jazzer-junit</artifactId>
+        <version>${jazzer.version}</version>
+      </dependency>
+      <dependency>
         <groupId>com.pangate</groupId>
         <artifactId>platform-contracts</artifactId>
         <version>${project.version}</version>
@@ -102,6 +118,11 @@
           <groupId>io.github.ascopes</groupId>
           <artifactId>protobuf-maven-plugin</artifactId>
           <version>${protobuf-maven-plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.codehaus.mojo</groupId>
+          <artifactId>exec-maven-plugin</artifactId>
+          <version>${exec-maven-plugin.version}</version>
         </plugin>
         <plugin>
           <groupId>com.google.cloud.tools</groupId>

@@ -11,7 +11,24 @@ public final class TestLimits {
 
   public static GatewayLimits defaults() {
     return new GatewayLimits(700_000, 550_000, 200, 65_536, 8_192, Duration.ofSeconds(5), Duration.ofSeconds(10),
-        20, Duration.ofSeconds(30), Duration.ofHours(24));
+        20, Duration.ofSeconds(30), Duration.ofHours(24), 50, 100, 100, 32, 65_536, Duration.ofSeconds(5), 10_000, Duration.ofSeconds(30));
+  }
+
+  public static GatewayLimits withBroadcastRate(int perLoop) {
+    GatewayLimits d = defaults();
+    return new GatewayLimits(d.hardCap(), d.softCap(), d.perIp(), d.frameMax(), d.helloMax(), d.helloTimeout(),
+        d.handshakeTimeout(), d.handshakesPerPrincipalPerMin(), d.heartbeatInterval(), d.sessionTtl(),
+        d.inboundRate(), d.inboundBurst(), d.topicsPerConn(), d.pendingAckMsgs(), d.pendingAckBytes(),
+        d.pendingAckTimeout(), perLoop, d.slowConsumerTimeout());
+  }
+
+  /** Defaults with other frame size limits (fuzz harnesses use small ones so inputs reach both). */
+  public static GatewayLimits withFrameLimits(int frameMax, int helloMax) {
+    GatewayLimits d = defaults();
+    return new GatewayLimits(d.hardCap(), d.softCap(), d.perIp(), frameMax, helloMax, d.helloTimeout(),
+        d.handshakeTimeout(), d.handshakesPerPrincipalPerMin(), d.heartbeatInterval(), d.sessionTtl(),
+        d.inboundRate(), d.inboundBurst(), d.topicsPerConn(), d.pendingAckMsgs(), d.pendingAckBytes(),
+        d.pendingAckTimeout(), d.broadcastRatePerLoop(), d.slowConsumerTimeout());
   }
 
   public static LimitsHolder holder() {

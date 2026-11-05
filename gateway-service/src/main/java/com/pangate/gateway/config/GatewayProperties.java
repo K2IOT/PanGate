@@ -3,6 +3,8 @@ package com.pangate.gateway.config;
 import com.pangate.gateway.server.Transport;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
+import org.springframework.util.unit.DataSize;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /** Typed {@code gateway.*} configuration (spec §9). Defaults live in application.yml. */
@@ -17,9 +19,37 @@ public record GatewayProperties(
     Admission admission,
     Auth auth,
     Dev dev,
-    Startup startup) {
+    Startup startup,
+    Redis redis,
+    Kafka kafka,
+    Grpc grpc,
+    PushApi pushApi,
+    Broadcast broadcast,
+    DataSize outboundBudget,
+    Recycling recycling,
+    Drain drain,
+    Warmup warmup,
+    Shed shed) {
 
-  public record Listeners(Ws ws, Tcp tcp) {}
+  public record Listeners(Ws ws, Tcp tcp, ProxyProtocol proxyProtocol) {
+    public Listeners {
+      proxyProtocol = proxyProtocol == null ? new ProxyProtocol(false, List.of(), false) : proxyProtocol;
+    }
+  }
+
+  /**
+   * Spec §4.1, §9: peers in {@code trustedCidrs} must start with a PROXY header. {@code trustLoopback} is a test seam
+   * (not in the spec): by default loopback peers (warm-up, local health checks) always connect directly.
+   */
+  public record ProxyProtocol(boolean enabled, List<String> trustedCidrs, boolean trustLoopback) {
+    public ProxyProtocol {
+      trustedCidrs = trustedCidrs == null ? List.of() : List.copyOf(trustedCidrs);
+      if (enabled && trustedCidrs.isEmpty()) {
+        throw new IllegalArgumentException(
+            "gateway.listeners.proxy-protocol.enabled=true needs gateway.listeners.proxy-protocol.trusted-cidrs");
+      }
+    }
+  }
 
   public record Ws(int port, String path, int acceptors) {}
 
@@ -27,7 +57,12 @@ public record GatewayProperties(
 
   public record Io(int threads, Transport transport) {}
 
-  public record Tls(Path certFile, Path keyFile) {}
+  /** {@code reloadInterval}: how often cert and key files are checked for replacement (spec §7.7). */
+  public record Tls(Path certFile, Path keyFile, java.time.Duration reloadInterval) {
+    public Tls {
+      reloadInterval = reloadInterval == null ? java.time.Duration.ofSeconds(30) : reloadInterval;
+    }
+  }
 
   public record Limits(
       int hardCap,
@@ -39,7 +74,41 @@ public record GatewayProperties(
       Duration handshakeTimeout,
       int handshakesPerPrincipalPerMin,
       Duration heartbeatInterval,
-      Duration sessionTtl) {}
+      Duration sessionTtl,
+      int inboundRate,
+      int inboundBurst,
+      int topicsPerConn,
+      PendingAck pendingAck,
+      Duration slowConsumerTimeout) {}
+
+  /** Connection recycling (spec §5.9): RECONNECT after U[min, max], closed after delay + grace. */
+  public record Recycling(Duration min, Duration max, Duration grace) {}
+
+  /** Staged drain (spec §7.5). */
+  public record Drain(int batchPercent, Duration interval, Duration maxDelay, Duration maxDuration,
+      Duration listenerCloseDelay) {}
+
+  /**
+   * Shed ladder inputs (spec §7.3). {@code cpu=false} drops the CPU signals (L1, L3): local and dev machines share
+   * their CPU with the IDE, tests and JIT, which would otherwise refuse new connections for a minute at a time.
+   */
+  public record Shed(boolean cpu) {}
+
+  /** Warm-up before readiness (spec §7.6). */
+  public record Warmup(int iterations, int concurrency, Duration timeout) {}
+
+  /** Downstream pending-ack window per session (spec §5.3, §5.4). */
+  public record PendingAck(int msgs, DataSize bytes, Duration timeout) {}
+
+  /** PushStream server for the push router (spec §6.3); plaintext only in local and dev. */
+  public record Grpc(int port, boolean plaintext, List<String> allowedSpiffe, GrpcTls tls) {}
+
+  public record GrpcTls(Path certFile, Path keyFile, Path trustFile) {}
+
+  /** Push API target for single-session KICK (spec §6.6). */
+  public record PushApi(boolean enabled, String target, boolean plaintext) {}
+
+  public record Broadcast(int ratePerLoop) {}
 
   public record Admission(int rate, int burst, int rampFrom, Duration rampDuration) {}
 
@@ -49,4 +118,15 @@ public record GatewayProperties(
   public record Dev(boolean bootstrapSecrets, Path dir) {}
 
   public record Startup(Duration dependencyTimeout) {}
+
+  /** Redis for the registry (lease, reg:{p}) and state (seq, seqepochs); one server may serve both (spec §9.1). */
+  public record Redis(RedisTopology topology, String registryUri, String stateUri, Duration commandTimeout) {}
+
+  public record Kafka(
+      String bootstrap,
+      boolean createTopics,
+      List<String> upstreamTypes,
+      String topicPrefix,
+      DataSize reliableBuffer,
+      DataSize telemetryBuffer) {}
 }

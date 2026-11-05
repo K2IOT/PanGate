@@ -1,0 +1,35 @@
+name: fuzz
+
+# Spec §11: FrameCodec and HelloAuthHandler fuzzed for 10 minutes each; nightly and on demand.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 19 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [FrameCodecFuzzTest, HelloAuthFuzzTest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - run: make bootstrap
+      - name: Fuzz ${{ matrix.target }} for 10 minutes
+        run: make fuzz FUZZ=${{ matrix.target }}
+      - name: Upload findings
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings-${{ matrix.target }}
+          path: gateway-service/src/test/resources/**/*Inputs/**

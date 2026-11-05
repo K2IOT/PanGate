@@ -79,8 +79,16 @@ public final class ClientCommand implements Callable<Integer> {
   @Option(names = "--bind", split = ",", description = "Local addresses to spread --load connections over.")
   List<String> bind = new ArrayList<>();
 
+  @Option(names = "--subscribe", split = ",",
+      description = "Topics to SUBSCRIBE after CONNECTED (minted tokens get them as topic patterns).")
+  List<String> subscribe = List.of();
+
   @Option(names = "--ping-interval", defaultValue = "PT30S")
   Duration pingInterval;
+
+  @Option(names = "--stop-reading",
+      description = "After the first PONG stop reading (and pinging) until the gateway closes: a stuck client.")
+  boolean stopReading;
 
   @Override
   public Integer call() throws Exception {
@@ -90,14 +98,35 @@ public final class ClientCommand implements Callable<Integer> {
 
   private int runSingle(ClientTls tls) throws Exception {
     try (GatewayClient c = GatewayClient.connect(url, tls, T)) {
+      // Print every PUSH / RPC_REQ and ACK the reliable ones (spec §2.3).
+      c.onPush(f -> {
+        System.out.println(f.getType().name().substring("FRAME_TYPE_".length()) + " msg_id=" + f.getMsgId()
+            + " class=" + f.getClass_() + (f.getTopic().isEmpty() ? "" : " topic=" + f.getTopic())
+            + " bytes=" + f.getPayload().size());
+        if (f.getClass_() == com.pangate.contracts.v1.DeliveryClass.DELIVERY_CLASS_RELIABLE
+            || f.getClass_() == com.pangate.contracts.v1.DeliveryClass.DELIVERY_CLASS_ORDERED) {
+          c.ack(f.getMsgId());
+        }
+      });
       Connected connected = c.hello(singleHello(), T);
       System.out.println("CONNECTED conn_id=" + connected.getConnId() + " expires_at_ms=" + connected.getSessionExpiresAtMs());
       if (ticketFile != null) {
         Files.writeString(ticketFile, connected.getResumeTicket());
       }
+      if (!subscribe.isEmpty()) {
+        c.subscribe(subscribe.toArray(String[]::new));
+      }
       c.ping(T);
       System.out.println("PONG");
       if (once) {
+        return 0;
+      }
+      if (stopReading) {
+        c.pauseReading();
+        System.out.println("READING STOPPED");
+        while (c.isOpen()) {
+          Thread.sleep(200);
+        }
         return 0;
       }
       while (c.isOpen()) {
@@ -118,7 +147,7 @@ public final class ClientCommand implements Callable<Integer> {
     }
     if (key != null) {
       String p = principal != null ? principal : tenant + ":dev";
-      return Hellos.jwt(minter().mint(new TokenRequest(tenant, p, device, List.of(), Duration.ofMinutes(10)), Instant.now()), device);
+      return Hellos.jwt(minter().mint(new TokenRequest(tenant, p, device, subscribe, Duration.ofMinutes(10)), Instant.now()), device);
     }
     throw new IllegalArgumentException("one of --token, --ticket-file (existing) or --key is required");
   }
@@ -177,14 +206,30 @@ public final class ClientCommand implements Callable<Integer> {
     inFlight.acquire(512);
     System.out.println("connected=" + connected.get() + " failed=" + failed.get());
     Frame ping = Frame.newBuilder().setType(FrameType.FRAME_TYPE_PING).build();
+    // Each client pings once per interval, spread evenly over it: real clients connect at different times, and one
+    // burst of N pings would stall the gateway's loops every interval (and hold the shed ladder at L1).
+    long round = System.nanoTime() + pingInterval.toNanos();
     while (true) {
-      Thread.sleep(pingInterval.toMillis());
+      TimeUnit.NANOSECONDS.sleep(Math.max(0, round - System.nanoTime()));
       clients.removeIf(c -> !c.isOpen());
-      clients.forEach(c -> c.send(ping));
+      List<GatewayClient> batch = List.copyOf(clients);
+      for (int i = 0; i < batch.size(); i++) {
+        long wait = round + pingOffsetNanos(i, batch.size(), pingInterval) - System.nanoTime();
+        if (wait > 0) {
+          TimeUnit.NANOSECONDS.sleep(wait);
+        }
+        batch.get(i).send(ping);
+      }
+      round += pingInterval.toNanos();
       connected.set(clients.size());
       if (reporter.isInterrupted()) {
         return 0;
       }
     }
+  }
+
+  /** When, from the start of a ping round, client {@code i} of {@code n} sends its PING. */
+  static long pingOffsetNanos(int i, int n, Duration interval) {
+    return interval.toNanos() / n * i;
   }
 }

@@ -65,12 +65,19 @@ public final class DevSecretsGenerator {
       Files.createDirectories(dir);
       restrict(dir, "rwxr-xr-x");
       Files.createDirectories(dir.resolve("ticket-keys"));
+      Files.createDirectories(dir.resolve("tls-ticket-keys"));
       ensureCertificates(dir);
       ensureEs256(dir);
       for (int i = 0; i < TICKET_ROLES.length; i++) {
         Path f = dir.resolve("ticket-keys").resolve(TICKET_ROLES[i]);
         if (!Files.exists(f)) {
           write(f, (i + 1) + " " + Base64.getEncoder().encodeToString(randomBytes(32)) + "\n");
+        }
+      }
+      for (String role : TICKET_ROLES) {  // TLS session ticket keys (spec §7.7): 48 random bytes, base64
+        Path f = dir.resolve("tls-ticket-keys").resolve(role);
+        if (!Files.exists(f)) {
+          write(f, Base64.getEncoder().encodeToString(randomBytes(48)) + "\n");
         }
       }
       Path hashKey = dir.resolve("principal-hash.key");
@@ -102,23 +109,43 @@ public final class DevSecretsGenerator {
     Path gwCrt = dir.resolve("gateway.crt");
     Path gwKey = dir.resolve("gateway.key");
     if (!Files.exists(gwCrt) || !Files.exists(gwKey)) {
-      X509Certificate caCert = readCertificate(caCrt);
-      PrivateKey caPrivate = readPrivateKey(caKey);
-      KeyPair gw = ecKeyPair();
-      Instant now = Instant.now();
-      JcaX509v3CertificateBuilder b = new JcaX509v3CertificateBuilder(caCert, serial(),
-          Date.from(now.minusSeconds(60)), Date.from(now.plus(Duration.ofDays(825))),
-          new X500Name("CN=localhost"), gw.getPublic());
-      b.addExtension(Extension.subjectAlternativeName, false, new GeneralNames(new GeneralName[] {
-          new GeneralName(GeneralName.dNSName, "localhost"),
-          new GeneralName(GeneralName.dNSName, "gateway"),
-          new GeneralName(GeneralName.iPAddress, "127.0.0.1"),
-          new GeneralName(GeneralName.iPAddress, InetAddress.getByName("::1").getHostAddress())}));
-      b.addExtension(Extension.extendedKeyUsage, false, new ExtendedKeyUsage(KeyPurposeId.id_kp_serverAuth));
-      b.addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.digitalSignature));
-      writePublic(gwCrt, pem(certificate(b, caPrivate)));
-      write(gwKey, pkcs8(gw.getPrivate()));
+      writeGatewayCert(dir);
     }
+  }
+
+  /**
+   * Dev and tests only: signs a new gateway certificate (new key, new serial) with the existing dev CA. Each file is
+   * replaced atomically, so a running gateway's reload sees either the old or the new file, never a partial one.
+   */
+  public static void reissueGatewayCert(Path dir) {
+    try {
+      writeGatewayCert(dir);
+    } catch (Exception e) {
+      throw new IllegalStateException("Cannot reissue the dev gateway certificate in " + dir, e);
+    }
+  }
+
+  private static void writeGatewayCert(Path dir) throws Exception {
+    Path caCrt = dir.resolve("ca.crt");
+    Path caKey = dir.resolve("ca.key");
+    Path gwCrt = dir.resolve("gateway.crt");
+    Path gwKey = dir.resolve("gateway.key");
+    X509Certificate caCert = readCertificate(caCrt);
+    PrivateKey caPrivate = readPrivateKey(caKey);
+    KeyPair gw = ecKeyPair();
+    Instant now = Instant.now();
+    JcaX509v3CertificateBuilder b = new JcaX509v3CertificateBuilder(caCert, serial(),
+        Date.from(now.minusSeconds(60)), Date.from(now.plus(Duration.ofDays(825))),
+        new X500Name("CN=localhost"), gw.getPublic());
+    b.addExtension(Extension.subjectAlternativeName, false, new GeneralNames(new GeneralName[] {
+        new GeneralName(GeneralName.dNSName, "localhost"),
+        new GeneralName(GeneralName.dNSName, "gateway"),
+        new GeneralName(GeneralName.iPAddress, "127.0.0.1"),
+        new GeneralName(GeneralName.iPAddress, InetAddress.getByName("::1").getHostAddress())}));
+    b.addExtension(Extension.extendedKeyUsage, false, new ExtendedKeyUsage(KeyPurposeId.id_kp_serverAuth));
+    b.addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.digitalSignature));
+    writePublic(gwCrt, pem(certificate(b, caPrivate)));
+    write(gwKey, pkcs8(gw.getPrivate()));
   }
 
   private static void ensureEs256(Path dir) throws Exception {

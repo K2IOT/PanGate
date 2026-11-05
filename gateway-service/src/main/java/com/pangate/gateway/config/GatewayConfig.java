@@ -19,11 +19,14 @@ import com.pangate.gateway.pipeline.PipelineDeps;
 import com.pangate.gateway.pipeline.SslContextProvider;
 import com.pangate.gateway.pipeline.TcpChannelInitializer;
 import com.pangate.gateway.pipeline.WsChannelInitializer;
+import com.pangate.gateway.registry.SeqReader;
+import com.pangate.gateway.upstream.UpstreamPublisher;
 import com.pangate.gateway.server.IoGroups;
 import com.pangate.gateway.server.NettyGatewayServer;
 import com.pangate.gateway.server.NodeState;
 import com.pangate.gateway.server.TickScheduler;
 import com.pangate.gateway.session.PrincipalIndex;
+import com.pangate.gateway.session.SessionListener;
 import com.pangate.gateway.session.SessionTracker;
 import com.pangate.gateway.shed.AdmissionController;
 import com.pangate.gateway.shed.IpConnectionCounter;
@@ -83,8 +86,8 @@ public class GatewayConfig {
   }
 
   @Bean
-  AdmissionController admissionController(GatewayProperties p, LoopRegistry loops) {
-    return new AdmissionController(p.admission(), loops.size(), System::nanoTime);
+  AdmissionController admissionController(GatewayProperties p, LoopRegistry loops, NodeState node) {
+    return new AdmissionController(p.admission(), loops.size(), System::nanoTime, node::shedLevel);
   }
 
   @Bean
@@ -99,8 +102,9 @@ public class GatewayConfig {
 
   @Bean
   SessionTracker sessionTracker(LoopRegistry loops, PrincipalIndex principals, IpConnectionCounter ips,
-      LimitsHolder limits, GatewayMetrics metrics) {
-    return new SessionTracker(loops, principals, ips, limits, metrics, System::currentTimeMillis);
+      LimitsHolder limits, GatewayMetrics metrics, List<SessionListener> listeners,
+      com.pangate.gateway.control.TenantLimitsStore tenants) {
+    return new SessionTracker(loops, principals, ips, limits, metrics, System::currentTimeMillis, listeners, tenants);
   }
 
   @Bean
@@ -118,8 +122,14 @@ public class GatewayConfig {
   }
 
   @Bean
-  JwtAuthFlow jwtAuthFlow(GatewayProperties p, JwksCache jwks) {
-    JwtVerifier verifier = new JwtVerifier(jwks, p.auth().audience(), p.auth().issuer(), p.auth().clockSkew());
+  com.pangate.gateway.auth.WarmUpTokens warmUpTokens(GatewayProperties p) {
+    return new com.pangate.gateway.auth.WarmUpTokens(p.auth().audience(), p.auth().issuer());
+  }
+
+  @Bean
+  JwtAuthFlow jwtAuthFlow(GatewayProperties p, JwksCache jwks, com.pangate.gateway.auth.WarmUpTokens warmUp) {
+    JwtVerifier verifier = new JwtVerifier(jwks, p.auth().audience(), p.auth().issuer(), p.auth().clockSkew(),
+        warmUp);
     return new JwtAuthFlow(verifier, jwks, Duration.ofSeconds(2));
   }
 
@@ -132,16 +142,24 @@ public class GatewayConfig {
   }
 
   @Bean
-  SslContextProvider sslContextProvider(GatewayProperties p) {
-    return new SslContextProvider(p.tls());
+  SslContextProvider sslContextProvider(GatewayProperties p, com.pangate.gateway.server.TickScheduler tick,
+      GatewayMetrics metrics) {
+    // Replaced contexts are released after 60 s (spec §7.7): handshakes begun on them have finished by then.
+    return new SslContextProvider(p.tls(), tick.executor(), java.time.Duration.ofSeconds(60), metrics);
   }
 
   @Bean
   PipelineDeps pipelineDeps(GatewayProperties p, LimitsHolder limits, LoopRegistry loops, NodeState node,
       IpConnectionCounter ips, AdmissionController admission, SessionTracker tracker, GatewayMetrics metrics,
-      SslContextProvider tls, ResumeTicketService tickets, JwtAuthFlow jwt, PrincipalHandshakeLimiter limiter) {
+      SslContextProvider tls, ResumeTicketService tickets, JwtAuthFlow jwt, PrincipalHandshakeLimiter limiter,
+      SeqReader seq, UpstreamPublisher upstream, com.pangate.gateway.auth.HelloPolicy policy,
+      com.pangate.gateway.control.TenantLimitsStore tenants,
+      com.pangate.gateway.downstream.PushDelivery delivery, com.pangate.gateway.downstream.ClientTopics clientTopics,
+      com.pangate.gateway.tenant.TenantCap tenantCap,
+      com.pangate.gateway.upstream.PrincipalRateLimiter upstreamRate) {
     AcceptGate gate = new AcceptGate(node, loops, limits, ips, admission, tracker, metrics);
-    return new PipelineDeps(p, limits, loops, node, gate, tls, tickets, jwt, tracker, limiter, metrics);
+    return new PipelineDeps(p, limits, loops, node, gate, tls, tickets, jwt, tracker, limiter, policy, tenants,
+        metrics, seq, upstream, delivery, clientTopics, tenantCap, upstreamRate);
   }
 
   @Bean
@@ -153,14 +171,21 @@ public class GatewayConfig {
 
   @Bean
   NettyGatewayServer nettyGatewayServer(GatewayProperties p, IoGroups io, LoopRegistry loops, NodeState node,
-      AdmissionController admission, EventLoopLagProbe lag, PipelineDeps deps) {
+      AdmissionController admission, EventLoopLagProbe lag, PipelineDeps deps,
+      com.pangate.gateway.lifecycle.DrainCoordinator drain, com.pangate.gateway.auth.WarmUpTokens warmUpTokens) {
     return new NettyGatewayServer(p, io, loops, node, admission, lag, new WsChannelInitializer(deps),
-        new TcpChannelInitializer(deps));
+        new TcpChannelInitializer(deps), drain, new com.pangate.gateway.lifecycle.WarmUpRunner(p.warmup(),
+            p.listeners().ws().path(), warmUpTokens, () -> System.currentTimeMillis() / 1000));
   }
 
   @Bean
   ReadinessCheck listenersBoundCheck(NodeState node) {
     return () -> node.listenersBound() ? Optional.empty() : Optional.of("listeners not bound");
+  }
+
+  @Bean
+  ReadinessCheck warmedUpCheck(NodeState node) {
+    return () -> node.warmedUp() ? Optional.empty() : Optional.of("warm-up not finished");
   }
 
   @Bean
@@ -186,10 +211,7 @@ public class GatewayConfig {
 
   @Bean
   AdminController adminController(NettyGatewayServer server) {
-    return new AdminController(() -> {
-      if (server.isRunning()) {
-        server.stop();
-      }
-    });
+    // preStop: drain only; the SIGTERM that follows waits for the same drain in stop() (spec §7.5).
+    return new AdminController(server::drain);
   }
 }

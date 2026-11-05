@@ -71,6 +71,15 @@ public final class GatewayClient implements AutoCloseable {
   }
 
   public static GatewayClient connect(URI url, ClientTls tls, Duration timeout, InetSocketAddress localBind) {
+    return connect(url, tls, timeout, localBind, null);
+  }
+
+  /**
+   * {@code proxySource} non-null: send a PROXY protocol v1 header claiming that source before TLS, as a load balancer
+   * would (gateway spec §4.1); for tests of the gateway's PROXY support.
+   */
+  public static GatewayClient connect(URI url, ClientTls tls, Duration timeout, InetSocketAddress localBind,
+      InetSocketAddress proxySource) {
     boolean ws = switch (url.getScheme()) {
       case "wss" -> true;
       case "tcps" -> false;
@@ -87,6 +96,9 @@ public final class GatewayClient implements AutoCloseable {
           @Override
           protected void initChannel(SocketChannel ch) {
             SslHandler ssl = sslContext.newHandler(ch.alloc(), host, port);
+            if (proxySource != null) {
+              ch.pipeline().addLast(new ProxyHeaderWriter(proxySource));
+            }
             ch.pipeline().addLast(ssl);
             if (ws) {
               ch.pipeline().addLast(new HttpClientCodec(), new HttpObjectAggregator(8192),
@@ -114,6 +126,26 @@ public final class GatewayClient implements AutoCloseable {
     return new GatewayClient(ch, ws, handler);
   }
 
+  /** Writes a PROXY v1 line on connect, before the TLS handshake starts, then steps aside. */
+  private static final class ProxyHeaderWriter extends io.netty.channel.ChannelInboundHandlerAdapter {
+    private final InetSocketAddress source;
+
+    ProxyHeaderWriter(InetSocketAddress source) {
+      this.source = source;
+    }
+
+    @Override
+    public void channelActive(io.netty.channel.ChannelHandlerContext ctx) {
+      InetSocketAddress dst = (InetSocketAddress) ctx.channel().remoteAddress();
+      String family = source.getAddress() instanceof java.net.Inet6Address ? "TCP6" : "TCP4";
+      String line = "PROXY " + family + " " + source.getAddress().getHostAddress() + " "
+          + dst.getAddress().getHostAddress() + " " + source.getPort() + " " + dst.getPort() + "\r\n";
+      ctx.writeAndFlush(io.netty.buffer.Unpooled.copiedBuffer(line, java.nio.charset.StandardCharsets.US_ASCII));
+      ctx.pipeline().remove(this);
+      ctx.fireChannelActive();
+    }
+  }
+
   /** Sends a frame without waiting for anything. */
   public void send(Frame frame) {
     channel.writeAndFlush(frame);
@@ -137,18 +169,75 @@ public final class GatewayClient implements AutoCloseable {
     return await(FrameType.FRAME_TYPE_PONG, timeout);
   }
 
+  /** Sends UPSTREAM {@code type} and waits for the gateway's answer: UPSTREAM_ACK (msg_id) or ERROR. */
+  public Frame upstream(String type, String msgId, byte[] payload, Duration timeout) {
+    send(Frame.newBuilder().setType(FrameType.FRAME_TYPE_UPSTREAM).setMsgId(msgId).putHeaders("type", type)
+        .setPayload(com.google.protobuf.ByteString.copyFrom(payload)).build());
+    return awaitFirst(f -> (f.getType() == FrameType.FRAME_TYPE_UPSTREAM_ACK && msgId.equals(f.getMsgId()))
+        || f.getType() == FrameType.FRAME_TYPE_ERROR, "UPSTREAM_ACK or ERROR", timeout);
+  }
+
+  /** Waits for the next PUSH or RPC_REQ, discarding other frames. */
+  public Frame awaitPush(Duration timeout) {
+    return awaitFirst(f -> f.getType() == FrameType.FRAME_TYPE_PUSH || f.getType() == FrameType.FRAME_TYPE_RPC_REQ,
+        "PUSH", timeout);
+  }
+
+  /** From now on PUSH and RPC_REQ frames go to {@code listener} (on the I/O thread) instead of the await queue. */
+  public void onPush(java.util.function.Consumer<Frame> listener) {
+    handler.pushListener = listener;
+  }
+
+  /** Stops reading from the socket (a slow consumer): the gateway's writes back up into its buffers. */
+  public void pauseReading() {
+    channel.config().setAutoRead(false);
+  }
+
+  public void resumeReading() {
+    channel.config().setAutoRead(true);
+    channel.read();
+  }
+
+  /** ACK for RELIABLE / ORDERED pushes (at most 32 ids per frame). */
+  public void ack(String... msgIds) {
+    send(Frame.newBuilder().setType(FrameType.FRAME_TYPE_ACK)
+        .setPayload(com.pangate.contracts.v1.Ack.newBuilder().addAllMsgIds(java.util.List.of(msgIds)).build()
+            .toByteString()).build());
+  }
+
+  /** SUBSCRIBE; the gateway answers only on rejection (ERROR 4000 with this frame's msg_id). Returns the msg_id. */
+  public String subscribe(String... topics) {
+    return topics(FrameType.FRAME_TYPE_SUBSCRIBE, topics);
+  }
+
+  public String unsubscribe(String... topics) {
+    return topics(FrameType.FRAME_TYPE_UNSUBSCRIBE, topics);
+  }
+
+  private String topics(FrameType type, String... topics) {
+    String id = UUID.randomUUID().toString();
+    send(Frame.newBuilder().setType(type).setMsgId(id)
+        .setPayload(com.pangate.contracts.v1.Subscribe.newBuilder().addAllTopics(java.util.List.of(topics)).build()
+            .toByteString()).build());
+    return id;
+  }
+
   /** Waits for the next frame of {@code type}, discarding other frames. */
   public Frame await(FrameType type, Duration timeout) {
+    return awaitFirst(f -> f.getType() == type, type.name(), timeout);
+  }
+
+  private Frame awaitFirst(java.util.function.Predicate<Frame> match, String what, Duration timeout) {
     long deadline = System.nanoTime() + timeout.toNanos();
     try {
       while (true) {
         long left = deadline - System.nanoTime();
         if (left <= 0) {
-          throw new IllegalStateException(new TimeoutException("no " + type + " within " + timeout));
+          throw new IllegalStateException(new TimeoutException("no " + what + " within " + timeout));
         }
         Frame f = inbound.poll(Math.min(left, TimeUnit.MILLISECONDS.toNanos(50)), TimeUnit.NANOSECONDS);
         if (f != null) {
-          if (f.getType() == type) {
+          if (match.test(f)) {
             return f;
           }
           continue;
@@ -214,6 +303,7 @@ public final class GatewayClient implements AutoCloseable {
     final CompletableFuture<Void> ready = new CompletableFuture<>();
     private final boolean websocket;
     private volatile CloseInfo closeInfo;
+    volatile java.util.function.Consumer<Frame> pushListener;
 
     Inbound(boolean websocket) {
       this.websocket = websocket;
@@ -257,6 +347,11 @@ public final class GatewayClient implements AutoCloseable {
         if (err.getFatal()) {
           closeInfo = new CloseInfo(err.getCode(), err.getMessage());
         }
+      }
+      java.util.function.Consumer<Frame> l = pushListener;
+      if (l != null && (f.getType() == FrameType.FRAME_TYPE_PUSH || f.getType() == FrameType.FRAME_TYPE_RPC_REQ)) {
+        l.accept(f);
+        return;
       }
       queue.add(f);
     }

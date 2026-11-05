@@ -4,6 +4,12 @@ modules:
 lint:
   use:
     - STANDARD
+  # Keep the spec's names (PushStream.Stream(PushBatch) -> DeliveryAck), shared with push-router.
+  except:
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+    - RPC_REQUEST_RESPONSE_UNIQUE
+    - SERVICE_SUFFIX
 breaking:
   use:
     - FILE

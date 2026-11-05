@@ -8,16 +8,18 @@ import com.pangate.contracts.v1.Hello;
 import com.pangate.gateway.auth.ConnectClaims;
 import com.pangate.gateway.auth.JwtAuthFlow;
 import com.pangate.gateway.auth.JwtResult;
-import com.pangate.gateway.auth.PrincipalHandshakeLimiter;
+import com.pangate.gateway.auth.HelloPolicy;
 import com.pangate.gateway.auth.ResumeTicket;
 import com.pangate.gateway.auth.ResumeTicketService;
 import com.pangate.gateway.auth.TicketVerifyResult;
 import com.pangate.gateway.config.LimitsHolder;
+import com.pangate.gateway.control.TenantLimitsStore;
 import com.pangate.gateway.metrics.GatewayMetrics;
 import com.pangate.gateway.protocol.ChannelAttrs;
 import com.pangate.gateway.protocol.CloseCode;
 import com.pangate.gateway.protocol.Frames;
 import com.pangate.gateway.protocol.ProtocolException;
+import com.pangate.gateway.registry.SeqReader;
 import com.pangate.gateway.session.Session;
 import com.pangate.gateway.session.SessionState;
 import com.pangate.gateway.session.SessionTracker;
@@ -27,6 +29,8 @@ import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.ssl.SslHandshakeCompletionEvent;
 import java.util.ArrayDeque;
+import java.util.OptionalLong;
+import java.util.concurrent.CompletionStage;
 
 /**
  * Authenticates the first frame (spec §4.6): HELLO with a resume ticket (HMAC, offline) or a connect JWT (ES256,
@@ -40,24 +44,39 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
   private final ResumeTicketService tickets;
   private final JwtAuthFlow jwt;
   private final SessionTracker tracker;
-  private final PrincipalHandshakeLimiter limiter;
+  private final HelloPolicy policy;
+  private final TenantLimitsStore tenants;
   private final LimitsHolder limits;
   private final String cell;
   private final GatewayMetrics metrics;
+  private final SeqReader seq;
+  private final com.pangate.gateway.tenant.TenantCap cap;
   private final ArrayDeque<Object> held = new ArrayDeque<>();
   private boolean verifying;
   private boolean done;
   private boolean failed;
 
   public HelloAuthHandler(ResumeTicketService tickets, JwtAuthFlow jwt, SessionTracker tracker,
-      PrincipalHandshakeLimiter limiter, LimitsHolder limits, String cell, GatewayMetrics metrics) {
+      HelloPolicy policy, TenantLimitsStore tenants, LimitsHolder limits, String cell, GatewayMetrics metrics,
+      SeqReader seq) {
+    this(tickets, jwt, tracker, policy, tenants, limits, cell, metrics, seq,
+        com.pangate.gateway.tenant.TenantCap.localOnly(metrics));
+  }
+
+  public HelloAuthHandler(ResumeTicketService tickets, JwtAuthFlow jwt, SessionTracker tracker,
+      HelloPolicy policy, TenantLimitsStore tenants, LimitsHolder limits, String cell, GatewayMetrics metrics,
+      SeqReader seq,
+      com.pangate.gateway.tenant.TenantCap cap) {
     this.tickets = tickets;
     this.jwt = jwt;
     this.tracker = tracker;
-    this.limiter = limiter;
+    this.policy = policy;
+    this.tenants = tenants;
     this.limits = limits;
     this.cell = cell;
     this.metrics = metrics;
+    this.seq = seq;
+    this.cap = cap;
   }
 
   @Override
@@ -150,15 +169,11 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
       return;
     }
     ResumeTicket t = valid.ticket();
-    if (!cell.equals(t.cell())) {
-      fail(session, CloseCode.WRONG_CELL, "wrong_cell");
+    if (com.pangate.gateway.auth.WarmUpTokens.isWarmUp(t.tenant())) {
+      fail(session, CloseCode.AUTH_FAILED, "auth_failed");  // warm-up sessions are never resumable (spec §7.6)
       return;
     }
-    if (!limiter.tryAcquire(t.principal())) {
-      fail(session, CloseCode.RATE_LIMITED, "rate_limited");
-      return;
-    }
-    activate(ctx, session, hello, t);
+    proceed(ctx, session, hello, t.cell(), t);
   }
 
   private void withJwt(ChannelHandlerContext ctx, Session session, Hello hello, JwtResult result, long now) {
@@ -167,47 +182,169 @@ public final class HelloAuthHandler extends ChannelInboundHandlerAdapter {
       return;
     }
     ConnectClaims c = v.claims();
-    if (!limiter.tryAcquire(c.principal())) {
-      fail(session, CloseCode.RATE_LIMITED, "rate_limited");
+    if (com.pangate.gateway.auth.WarmUpTokens.isWarmUp(c.tenant())
+        && !ChannelAttrs.socketPeer(ctx.channel()).isLoopbackAddress()) {  // the socket, never a PROXY claim
+      fail(session, CloseCode.AUTH_FAILED, "auth_failed");  // warm-up tokens only from this host (spec §7.6)
       return;
     }
     long exp = now + limits.current().sessionTtl().toSeconds();
-    activate(ctx, session, hello, new ResumeTicket(cell, c.tenant(), c.principal(), c.device(), now, exp,
-        ResumeTicketService.jtiHash(c.jti()), c.topics()));
+    ResumeTicket t = new ResumeTicket(cell, c.tenant(), c.principal(), c.device(), now, exp,
+        ResumeTicketService.jtiHash(c.jti()), c.topics());
+    proceed(ctx, session, hello, cell, t);
+  }
+
+  /** Spec §4.6 step 3 c–h, then step i (tenant cap: local quota, else borrow through Redis), then activation. */
+  private void proceed(ChannelHandlerContext ctx, Session session, Hello hello, String ticketCell, ResumeTicket t) {
+    if (!admitted(session, hello, ticketCell, t)) {
+      return;
+    }
+    if (ctx.channel().attr(ChannelAttrs.TRANSPORT).get() == ChannelAttrs.TransportKind.SSE
+        && !tenants.policy(t.tenant()).sseFallbackEnabled()) {
+      fail(session, CloseCode.AUTH_FAILED, "sse_disabled");  // kill switch sse.fallback.enabled (spec §7.8)
+      return;
+    }
+    int max = tenants.policy(t.tenant()).maxConns();
+    if (max <= 0 || com.pangate.gateway.auth.WarmUpTokens.isWarmUp(t.tenant())) {
+      activate(ctx, session, hello, t);
+      return;
+    }
+    if (cap.tryReserve(t.tenant(), max)) {
+      session.tenantReserved(true);
+      activateReserved(ctx, session, hello, t);
+      return;
+    }
+    verifying = true;  // frames the client pipelines meanwhile are held, like during JWKS refresh
+    ctx.channel().config().setAutoRead(false);
+    cap.borrow(t.tenant(), max).thenAccept(ok -> session.loop().eventLoop().execute(() -> {
+      verifying = false;
+      if (session.state() != SessionState.HANDSHAKING || !ctx.channel().isActive()) {
+        if (ok) {
+          cap.release(t.tenant());  // closed while borrowing: give the granted slot back
+        }
+        releaseHeld();
+        return;
+      }
+      if (!ok) {
+        failed = true;
+        metrics.handshake("tenant_cap");
+        releaseHeld();
+        session.close(CloseCode.OVERLOADED, "TENANT_CAP",
+            5_000 + java.util.concurrent.ThreadLocalRandom.current().nextLong(25_001));
+        return;
+      }
+      // A control event handled while Redis answered (tenant blocked, cell moved, revoke) skipped this HANDSHAKING
+      // session: check the policy again, without the per-principal limiter (that HELLO was already counted).
+      var rejection = policy.checkPolicy(new HelloPolicy.Candidate(ticketCell, t.tenant(), t.principal(), t.device(),
+          t.authJtiHash(), hello.getSdkVersion(), session.origin()));
+      if (rejection.isPresent()) {
+        cap.release(t.tenant());
+        failed = true;
+        metrics.handshake(rejection.get().metricResult());
+        releaseHeld();
+        session.close(rejection.get().code(), rejection.get().code().name(), rejection.get().retryAfterMs());
+        return;
+      }
+      session.tenantReserved(true);
+      activateReserved(ctx, session, hello, t);
+    }));
+  }
+
+  /** The close listener only releases sessions that got an identity: release here if activation threw before. */
+  private void activateReserved(ChannelHandlerContext ctx, Session session, Hello hello, ResumeTicket t) {
+    try {
+      activate(ctx, session, hello, t);
+    } catch (RuntimeException e) {
+      if (session.identity() == null && session.tenantReserved()) {
+        session.tenantReserved(false);
+        cap.release(t.tenant());
+      }
+      throw e;
+    }
+  }
+
+  /** Spec §4.6 step 3 c–h; on rejection the session is closed with the check's code. */
+  private boolean admitted(Session session, Hello hello, String ticketCell, ResumeTicket t) {
+    var rejection = policy.check(new HelloPolicy.Candidate(ticketCell, t.tenant(), t.principal(), t.device(),
+        t.authJtiHash(), hello.getSdkVersion(), session.origin()));
+    rejection.ifPresent(r -> {
+      failed = true;
+      metrics.handshake(r.metricResult());
+      releaseHeld();
+      session.close(r.code(), r.code().name(), r.retryAfterMs());
+    });
+    return rejection.isEmpty();
   }
 
   private void activate(ChannelHandlerContext ctx, Session session, Hello hello, ResumeTicket t) {
-    String ticket = tickets.issue(t);  // first: if this throws, no session state has been touched
+    // First: if this throws, no session state has been touched. Warm-up sessions get no ticket, so nothing issued to
+    // the loopback warm-up client can be replayed from elsewhere (spec §7.6).
+    String ticket = com.pangate.gateway.auth.WarmUpTokens.isWarmUp(t.tenant()) ? "" : tickets.issue(t);
     done = true;
     String connId = tracker.newConnId(session);
     session.activate(new Session.Identity(t.tenant(), t.principal(), t.device(), hello.getPlatform(),
-        hello.getSdkVersion(), java.util.Set.copyOf(hello.getCapabilitiesList())), connId, t.authAtSec(), t.expSec(),
+        hello.getSdkVersion(), java.util.Set.copyOf(hello.getCapabilitiesList())), connId, System.currentTimeMillis(),
+        t.authAtSec(), t.expSec(),
         t.authJtiHash(), t.topicPatterns());
     ctx.channel().attr(ChannelAttrs.AUTHENTICATED).set(true);
-    tracker.onActivated(session);
+    tracker.onActivated(session);  // listeners: registry write and lifecycle CONNECTED, in parallel with the seq read
+    // A revoke handled between the policy check and indexing found no session to close: check once more now.
+    if (policy.isRevoked(t.principal(), t.device(), t.authJtiHash())) {
+      metrics.handshake("revoked");
+      session.close(CloseCode.REVOKED, CloseCode.REVOKED.name());
+      return;
+    }
+    // CONNECTED waits for seq (≤ 200 ms); frames the client pipelines meanwhile stay held, reads pause.
+    ctx.channel().config().setAutoRead(false);
+    CompletionStage<OptionalLong> read;
+    try {
+      read = session.warmUp() ? java.util.concurrent.CompletableFuture.completedFuture(OptionalLong.empty())
+          : seq.read(t.principal());
+    } catch (RuntimeException e) {
+      read = java.util.concurrent.CompletableFuture.completedFuture(OptionalLong.empty());
+    }
+    read.whenComplete((v, e) -> session.loop().eventLoop().execute(() ->
+        connected(ctx, session, t, connId, ticket, e == null && v != null ? v : OptionalLong.empty())));
+  }
+
+  private void connected(ChannelHandlerContext ctx, Session session, ResumeTicket t, String connId, String ticket,
+      OptionalLong seqValue) {
+    if (session.state() != SessionState.ACTIVE) {
+      releaseHeld();
+      return;
+    }
     ctx.writeAndFlush(Frames.connected(Connected.newBuilder()
         .setConnId(connId)
         .setCell(cell)
-        .setHeartbeatSec((int) limits.current().heartbeatInterval().toSeconds())
+        .setHeartbeatSec(tenants.policy(t.tenant()).heartbeatSec())
         .setResumeTicket(ticket)
         .setServerTimeMs(System.currentTimeMillis())
         .setSessionExpiresAtMs(t.expSec() * 1000)
-        .setSeq(0)
-        .setSeqEpoch(0)
-        .setSeqUnknown(true)
+        .setSeq(seqValue.orElse(0))
+        .setSeqEpoch(seq.seqEpoch(t.principal()))
+        .setSeqUnknown(seqValue.isEmpty())
         .build()));
-    metrics.handshake("ok");
+    metrics.handshake(session.warmUp() ? "warmup" : "ok");
     while (!held.isEmpty()) {
       ctx.fireChannelRead(held.poll());
     }
+    ctx.channel().config().setAutoRead(true);
     ctx.pipeline().remove(this);
+  }
+
+  private void releaseHeld() {
+    held.forEach(io.netty.util.ReferenceCountUtil::release);
+    held.clear();
+  }
+
+  @Override
+  public void handlerRemoved(ChannelHandlerContext ctx) {
+    releaseHeld();
   }
 
   private void fail(Session session, CloseCode code, String result) {
     failed = true;
     metrics.handshake(result);
-    held.forEach(io.netty.util.ReferenceCountUtil::release);
-    held.clear();
+    releaseHeld();
     session.close(code, code.name());
   }
 }

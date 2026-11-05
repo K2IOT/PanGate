@@ -79,4 +79,100 @@ class GatewayClientTest {
           .isInstanceOfSatisfying(GatewayClosedException.class, e -> assertThat(e.closeInfo().code()).isEqualTo(4012));
     }
   }
+  @Test
+  void upstreamReturnsAck() {
+    try (GatewayClient c = GatewayClient.connect(ws(), ClientTls.insecure(), T)) {
+      c.hello(Hellos.jwt("t", "d1"), T);
+
+      com.pangate.contracts.v1.Frame ack = c.upstream("cmd", "m-9", "x".getBytes(), T);
+
+      assertThat(ack.getType()).isEqualTo(com.pangate.contracts.v1.FrameType.FRAME_TYPE_UPSTREAM_ACK);
+      assertThat(ack.getMsgId()).isEqualTo("m-9");
+    }
+  }
+
+  @Test
+  void upstreamReturnsErrorFrame() {
+    try (GatewayClient c = GatewayClient.connect(ws(), ClientTls.insecure(), T)) {
+      c.hello(Hellos.jwt("t", "d1"), T);
+
+      assertThat(c.upstream("nope", "m-1", new byte[0], T).getType())
+          .isEqualTo(com.pangate.contracts.v1.FrameType.FRAME_TYPE_ERROR);
+    }
+  }
+
+  @Test
+  void subscribeSendsSubscribePayload() throws Exception {
+    try (GatewayClient c = GatewayClient.connect(ws(), ClientTls.insecure(), T)) {
+      c.hello(Hellos.jwt("x", "d1"), T);
+      c.subscribe("t1:a", "t1:b");
+      com.pangate.contracts.v1.Frame push = c.awaitPush(T);
+      com.pangate.contracts.v1.Frame sub = server.received.stream()
+          .filter(f -> f.getType() == FrameType.FRAME_TYPE_SUBSCRIBE).reduce((a, b) -> b).orElseThrow();
+      assertThat(com.pangate.contracts.v1.Subscribe.parseFrom(sub.getPayload()).getTopicsList())
+          .containsExactly("t1:a", "t1:b");
+      assertThat(sub.getMsgId()).isNotEmpty();
+      assertThat(push.getTopic()).isEqualTo("t1:a");
+    }
+  }
+
+  @Test
+  void awaitPushAndAckSendsAckFrame() throws Exception {
+    try (GatewayClient c = GatewayClient.connect(ws(), ClientTls.insecure(), T)) {
+      c.hello(Hellos.jwt("x", "d1"), T);
+      c.subscribe("t1:x");
+      assertThat(c.awaitPush(T).getMsgId()).isEqualTo("p1");
+      c.ack("p1");
+      c.ping(T);  // ordered after the ACK on the same connection
+      com.pangate.contracts.v1.Frame ack = server.received.stream()
+          .filter(f -> f.getType() == FrameType.FRAME_TYPE_ACK).reduce((a, b) -> b).orElseThrow();
+      assertThat(com.pangate.contracts.v1.Ack.parseFrom(ack.getPayload()).getMsgIdsList()).containsExactly("p1");
+    }
+  }
+
+  @Test
+  void pushListenerReceivesPushesInsteadOfTheQueue() throws Exception {
+    java.util.List<com.pangate.contracts.v1.Frame> got = new java.util.concurrent.CopyOnWriteArrayList<>();
+    try (GatewayClient c = GatewayClient.connect(ws(), ClientTls.insecure(), T)) {
+      c.onPush(got::add);
+      c.hello(Hellos.jwt("x", "d1"), T);
+      c.subscribe("t1:x");
+      org.awaitility.Awaitility.await().atMost(T).until(() -> got.size() == 1);
+    }
+  }
+
+  @Test
+  void pausedClientReadsNothingUntilResumed() {
+    try (GatewayClient c = GatewayClient.connect(ws(), ClientTls.insecure(), T)) {
+      c.hello(Hellos.jwt("x", "d1"), T);
+      c.pauseReading();
+      c.subscribe("t1:x");  // the fake server answers with a PUSH
+      assertThatThrownBy(() -> c.awaitPush(Duration.ofMillis(300))).isInstanceOf(IllegalStateException.class);
+      c.resumeReading();
+      assertThat(c.awaitPush(T).getMsgId()).isEqualTo("p1");
+    }
+  }
+
+  @Test
+  void proxyHeaderIsSentBeforeTls() throws Exception {
+    java.util.concurrent.CompletableFuture<String> firstLine = new java.util.concurrent.CompletableFuture<>();
+    try (java.net.ServerSocket ss = new java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())) {
+      Thread acceptor = Thread.ofVirtual().start(() -> {
+        try (java.net.Socket s = ss.accept()) {
+          java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(s.getInputStream(),
+              java.nio.charset.StandardCharsets.US_ASCII));
+          firstLine.complete(r.readLine());
+        } catch (java.io.IOException e) {
+          firstLine.completeExceptionally(e);
+        }
+      });
+      URI url = URI.create("wss://localhost:" + ss.getLocalPort() + "/v1/ws");
+      assertThatThrownBy(() -> GatewayClient.connect(url, ClientTls.insecure(), Duration.ofSeconds(2), null,
+          new java.net.InetSocketAddress("203.0.113.7", 5555)))
+          .isInstanceOf(IllegalStateException.class);  // the fake peer never speaks TLS
+      assertThat(firstLine.get(5, java.util.concurrent.TimeUnit.SECONDS))
+          .isEqualTo("PROXY TCP4 203.0.113.7 127.0.0.1 5555 " + ss.getLocalPort());
+      acceptor.join();
+    }
+  }
 }

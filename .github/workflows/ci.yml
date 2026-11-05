@@ -18,6 +18,8 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+      - name: Release check (versions, ADR index)
+        run: make release-check
       - name: Build and test every module (unit + integration)
         run: make verify
 
@@ -33,6 +35,8 @@ jobs:
           breaking: false
           format: false
           push: false
+          # The workflow token is read-only; on pull_request the action would otherwise fail posting its summary comment.
+          pr_comment: false
 
   local-start:
     needs: build
@@ -46,6 +50,8 @@ jobs:
           java-version: "21"
           cache: maven
       - run: make bootstrap
+      - name: Kafka + Redis on localhost (spec §9.1 local)
+        run: make infra-up
       - name: Start, connect, stop, restart (spec §9.1 R1, R3, R4)
         run: make local-check
       - name: Idle heap per session (10k sessions, < 5 KB)
@@ -53,6 +59,9 @@ jobs:
       - name: Idle load (18k sessions, loop lag p99 < 20 ms)
         # TODO: 50k (spec §12) needs a runner with ulimit -n >= 120000; GitHub-hosted runners allow 65536.
         run: make load-check N=18000
+      - name: Tear down infra
+        if: always()
+        run: make infra-down
 
   dev-start:
     needs: build
@@ -72,7 +81,7 @@ jobs:
       - run: make smoke
       - name: Gateway logs on failure
         if: failure()
-        run: docker compose -f platform-devenv/docker-compose.yml --profile app logs --tail 200
+        run: docker compose -f platform-devenv/docker-compose.yml --profile app logs --tail 200 gateway fake-pushapi kafka redis
       - name: Tear down
         if: always()
         run: make down

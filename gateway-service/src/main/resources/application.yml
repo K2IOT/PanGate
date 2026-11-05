@@ -2,6 +2,8 @@
 spring:
   application:
     name: gateway-service
+  lifecycle:
+    timeout-per-shutdown-phase: 11m   # drain may take up to gateway.drain.max-duration (spec §7.5)
   threads:
     virtual:
       enabled: false
@@ -11,14 +13,19 @@ pangate:
 
 gateway:
   node-id: ${HOSTNAME:gateway-local}
+  netty: { leak-detection: disabled }   # spec §9.1; -Dio.netty.leakDetection.level wins
   cell: cell-1
   listeners:
     ws: { port: 8443, path: /v1/ws, acceptors: 4 }
     tcp: { port: 8883, enabled: true }
+    proxy-protocol: { enabled: false, trusted-cidrs: [] }
   io: { threads: 0, transport: auto }
   tls:
     cert-file: /etc/pangate/tls/gateway.crt
     key-file: /etc/pangate/tls/gateway.key
+    reload-interval: 30s
+  # OTLP/HTTP traces endpoint, e.g. http://otel-collector:4318/v1/traces; empty = spans off (spec §8)
+  tracing: { otlp-endpoint: "" }
   limits:
     hard-cap: 700000
     soft-cap: 550000
@@ -30,6 +37,11 @@ gateway:
     handshakes-per-principal-per-min: 20
     heartbeat-interval: 30s
     session-ttl: 24h
+    inbound-rate: 50
+    inbound-burst: 100
+    topics-per-conn: 100
+    pending-ack: { msgs: 32, bytes: 64KB, timeout: 5s }
+    slow-consumer-timeout: 30s
   admission: { rate: 5000, burst: 10000, ramp-from: 500, ramp-duration: 2m }
   auth:
     jwks-uri: https://auth/.well-known/jwks.json
@@ -37,8 +49,35 @@ gateway:
     audience: pangate-gw
     issuer: ""
     clock-skew: 30s
+  broadcast: { rate-per-loop: 10000 }
+  outbound-budget: 4GB
+  recycling: { min: 30m, max: 90m, grace: 30s }
+  drain: { batch-percent: 2, interval: 5s, max-delay: 60s, max-duration: 10m, listener-close-delay: 10s }
+  warmup: { iterations: 2000, concurrency: 32, timeout: 60s }
+  shed: { cpu: true }
+  grpc:
+    port: 9090
+    plaintext: false
+    allowed-spiffe: [spiffe://pangate/cell-1/push-router]
+    tls:
+      cert-file: /etc/pangate/grpc/gateway.crt
+      key-file: /etc/pangate/grpc/gateway.key
+      trust-file: /etc/pangate/grpc/spiffe-bundle.pem
+  push-api: { enabled: true, target: "dns:///push-api:9443", plaintext: false }
   dev: { bootstrap-secrets: false, dir: /etc/pangate/dev }
   startup: { dependency-timeout: 120s }
+  redis:
+    topology: cluster                 # cluster | standalone
+    registry-uri: redis://redis-registry:6379
+    state-uri: redis://redis-state:6379
+    command-timeout: 2s
+  kafka:
+    bootstrap: kafka:9092
+    create-topics: false
+    upstream-types: [telemetry, cmd, cmd_result, read, sdk.metrics]
+    topic-prefix: c1
+    reliable-buffer: 128MB
+    telemetry-buffer: 128MB
 
 # Management port only: Tomcat serves actuator, /ready, /live and /admin/drain.
 server:
@@ -62,6 +101,12 @@ management:
         readiness:
           include: gatewayReadiness
           additional-path: "server:/ready"
+          show-details: always            # spec §7.9: reasons in details.reasons
         liveness:
           include: eventLoopLag
           additional-path: "server:/live"
+
+# Kill switch trace.principal logs here (spec §7.8); keep at INFO even when the root level is raised.
+logging:
+  level:
+    pangate.trace: INFO

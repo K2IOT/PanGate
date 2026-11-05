@@ -6,7 +6,7 @@
   <parent>
     <groupId>com.pangate</groupId>
     <artifactId>platform-parent</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
     <relativePath>../platform-parent/pom.xml</relativePath>
   </parent>
   <artifactId>gateway-service</artifactId>
@@ -49,6 +49,38 @@
     </dependency>
     <dependency>
       <groupId>io.netty</groupId>
+      <artifactId>netty-codec-haproxy</artifactId>
+    </dependency>
+    <!-- OTel spans gw.push.handoff / gw.push.write (spec §8); versions from Spring Boot's opentelemetry-bom -->
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-sdk</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-exporter-otlp</artifactId>
+      <exclusions>
+        <exclusion>
+          <groupId>io.opentelemetry</groupId>
+          <artifactId>opentelemetry-exporter-sender-okhttp</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-exporter-sender-jdk</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-sdk-testing</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.netty</groupId>
       <artifactId>netty-transport-classes-epoll</artifactId>
     </dependency>
     <dependency>
@@ -80,6 +112,18 @@
       <artifactId>bcpkix-jdk18on</artifactId>
     </dependency>
     <dependency>
+      <groupId>io.lettuce</groupId>
+      <artifactId>lettuce-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.kafka</groupId>
+      <artifactId>kafka-clients</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.grpc</groupId>
+      <artifactId>grpc-netty-shaded</artifactId>
+    </dependency>
+    <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-configuration-processor</artifactId>
       <optional>true</optional>
@@ -96,8 +140,34 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+      <groupId>io.grpc</groupId>
+      <artifactId>grpc-inprocess</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.grpc</groupId>
+      <artifactId>grpc-testing</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>io.projectreactor.tools</groupId>
       <artifactId>blockhound</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- Fuzz tests (spec §11): regression mode in every build, `make fuzz` fuzzes for real -->
+    <dependency>
+      <groupId>com.code-intelligence</groupId>
+      <artifactId>jazzer-junit</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>kafka</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
@@ -163,6 +233,7 @@
           <argLine>${blockhound.argLine}</argLine>
           <systemPropertyVariables>
             <pangate.assertLoop>true</pangate.assertLoop>
+            <io.netty.leakDetection.level>paranoid</io.netty.leakDetection.level>
           </systemPropertyVariables>
           <excludes>
             <exclude>**/*IT.java</exclude>
@@ -176,6 +247,7 @@
           <argLine>${blockhound.argLine}</argLine>
           <systemPropertyVariables>
             <pangate.assertLoop>true</pangate.assertLoop>
+            <io.netty.leakDetection.level>paranoid</io.netty.leakDetection.level>
           </systemPropertyVariables>
           <includes>
             <include>**/*IT.java</include>
@@ -207,9 +279,32 @@
         <configuration>
           <to>
             <image>pangate/gateway-service:dev</image>
+            <tags><tag>${project.version}</tag></tags>
           </to>
           <container>
             <mainClass>${start-class}</mainClass>
+            <!-- Production JVM flags (spec §9.1, §10). Environment-specific values (-Xmx in dev, MaxDirectMemorySize =
+                 25% of container memory in prod) come from JAVA_TOOL_OPTIONS, which flags here would override. -->
+            <!-- The image is the production image: profile prod unless the deployment says otherwise (compose sets dev).
+                 Without it application.yml's prod defaults would run while the prod-only checks are skipped. -->
+            <environment>
+              <SPRING_PROFILES_ACTIVE>prod</SPRING_PROFILES_ACTIVE>
+            </environment>
+            <jvmFlags>
+              <jvmFlag>-XX:+UseZGC</jvmFlag>
+              <jvmFlag>-XX:+ZGenerational</jvmFlag>
+              <jvmFlag>-XX:InitialRAMPercentage=50</jvmFlag>
+              <jvmFlag>-XX:MaxRAMPercentage=50</jvmFlag>
+              <jvmFlag>-XX:+AlwaysPreTouch</jvmFlag>
+              <jvmFlag>-XX:+ExitOnOutOfMemoryError</jvmFlag>
+              <jvmFlag>-XX:+HeapDumpOnOutOfMemoryError</jvmFlag>
+              <jvmFlag>-XX:HeapDumpPath=/tmp</jvmFlag>
+              <jvmFlag>--add-opens=java.base/java.nio=ALL-UNNAMED</jvmFlag>
+              <jvmFlag>--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED</jvmFlag>
+              <jvmFlag>-Dio.netty.tryReflectionSetAccessible=true</jvmFlag>
+              <jvmFlag>-Djava.security.egd=file:/dev/urandom</jvmFlag>
+              <jvmFlag>-Dfile.encoding=UTF-8</jvmFlag>
+            </jvmFlags>
             <ports><port>8443</port><port>8883</port><port>8081</port></ports>
             <creationTime>USE_CURRENT_TIMESTAMP</creationTime>
           </container>
@@ -217,4 +312,63 @@
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <!-- JMH benchmarks (spec §11): ./mvnw -f gateway-service -Pjmh test-compile exec:exec -Djmh.args="..." (make bench).
+         Benchmarks live in src/jmh/java, compiled with the test classes so they can use the test fixtures. -->
+    <profile>
+      <id>jmh</id>
+      <properties>
+        <jmh.args>-f 1 -wi 3 -i 5</jmh.args>
+      </properties>
+      <dependencies>
+        <dependency>
+          <groupId>org.openjdk.jmh</groupId>
+          <artifactId>jmh-core</artifactId>
+          <version>${jmh.version}</version>
+          <scope>test</scope>
+        </dependency>
+        <dependency>
+          <groupId>org.openjdk.jmh</groupId>
+          <artifactId>jmh-generator-annprocess</artifactId>
+          <version>${jmh.version}</version>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.codehaus.mojo</groupId>
+            <artifactId>build-helper-maven-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>add-jmh-sources</id>
+                <phase>generate-test-sources</phase>
+                <goals>
+                  <goal>add-test-source</goal>
+                </goals>
+                <configuration>
+                  <sources>
+                    <source>src/jmh/java</source>
+                  </sources>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+          <plugin>
+            <groupId>org.codehaus.mojo</groupId>
+            <artifactId>exec-maven-plugin</artifactId>
+            <configuration>
+              <!-- The JDK Maven runs on; leak detection off as in prod (JMH copies the host JVM's options to forks).
+                   An explicit -jvmArgs replaces those options: add -Dio.netty.leakDetection.level=disabled to it, or
+                   use -jvmArgsAppend instead. -->
+              <executable>${java.home}/bin/java</executable>
+              <classpathScope>test</classpathScope>
+              <commandlineArgs>-Dio.netty.leakDetection.level=disabled -cp %classpath org.openjdk.jmh.Main ${jmh.args}</commandlineArgs>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>

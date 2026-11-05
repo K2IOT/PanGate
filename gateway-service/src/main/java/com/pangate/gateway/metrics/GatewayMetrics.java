@@ -39,7 +39,17 @@ public final class GatewayMetrics {
         c -> Counter.builder("gw.closes").tag("code", Integer.toString(c.code())).register(registry)).increment();
   }
 
+  /** 4008 closes by cause: unwritable deadline, pending-ack overflow, or shed level 5 (spec §7.3, §7.4). */
+  public void slowConsumerClosed(String closeReason) {
+    String reason = "PENDING_OVERFLOW".equals(closeReason) ? "overflow" : "SHED".equals(closeReason) ? "shed" : "unwritable";
+    Counter.builder("gw.slow.consumer.closes").tag("reason", reason).register(registry).increment();
+  }
+
   public void bindLoops(LoopRegistry loops) {
+    Gauge.builder("gw.unwritable.channels", loops,
+        l -> l.all().stream().mapToInt(LoopContext::unwritable).sum()).register(registry);
+    Gauge.builder("gw.pending.ack.inflight", loops,
+        l -> l.all().stream().mapToInt(LoopContext::pendingInflight).sum()).register(registry);
     for (LoopContext c : loops.all()) {
       Gauge.builder("gw.connections.active", c, LoopContext::activeCount)
           .tag("loop", Integer.toString(c.index())).register(registry);
@@ -53,6 +63,18 @@ public final class GatewayMetrics {
       FunctionCounter.builder("gw.jwks.refresh", jwks, j -> j.refreshCount(result))
           .tag("result", result).register(registry);
     }
+  }
+
+  /**
+   * A counter registered once; hot-path callers keep the returned instance. Tags are alternating key, value pairs
+   * with bounded values (spec §8).
+   */
+  public Counter counter(String name, String... tags) {
+    return Counter.builder(name).tags(tags).register(registry);
+  }
+
+  public <T> void gauge(String name, T obj, java.util.function.ToDoubleFunction<T> value) {
+    Gauge.builder(name, obj, value).register(registry);
   }
 
   public MeterRegistry registry() {

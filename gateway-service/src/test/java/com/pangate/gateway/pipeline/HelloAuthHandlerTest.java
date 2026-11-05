@@ -25,6 +25,11 @@ import io.netty.buffer.Unpooled;
 import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.OptionalLong;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import com.pangate.gateway.registry.SeqReader;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -34,6 +39,26 @@ class HelloAuthHandlerTest {
   private final AuthFixture auth = new AuthFixture(f::now);
   private final PrincipalHandshakeLimiter limiter = new PrincipalHandshakeLimiter(20, () -> f.now() * 1000);
   private Session session;
+  private CompletableFuture<OptionalLong> seqResult = CompletableFuture.completedFuture(OptionalLong.empty());
+  private int seqEpoch;
+  private final List<String> seqReads = new ArrayList<>();
+  private final SeqReader seq = new SeqReader() {
+    @Override
+    public CompletionStage<OptionalLong> read(String principal) {
+      seqReads.add(principal);
+      return seqResult;
+    }
+
+    @Override
+    public int seqEpoch(String principal) {
+      return seqEpoch;
+    }
+  };
+
+  @AfterEach
+  void releaseOutbound() {
+    f.channel.finishAndReleaseAll();
+  }
 
   @BeforeEach
   void pipeline() {
@@ -41,8 +66,9 @@ class HelloAuthHandlerTest {
     f.channel.attr(ChannelAttrs.PROTOCOL_READY).set(true);
     session = f.tracker.admit(f.channel, f.loop, InetAddress.getLoopbackAddress());
     f.channel.pipeline().addLast(new FrameCodec(f.limits),
-        new HelloAuthHandler(auth.tickets, auth.flow, f.tracker, limiter, f.limits, "cell-1", f.metrics),
-        new SessionHandler(auth.tickets, auth.flow, limiter, f.limits, "cell-1"), new ErrorTerminator());
+        new HelloAuthHandler(auth.tickets, auth.flow, f.tracker, f.policy(limiter), f.tenants, f.limits, "cell-1",
+            f.metrics, seq),
+        new SessionHandler(auth.tickets, auth.flow, limiter, f.policy(limiter), f.limits, "cell-1", f.upstream, f.delivery, f.clientTopics), new ErrorTerminator());
   }
 
   private static ByteBuf bytes(Frame frame) {
@@ -267,8 +293,8 @@ class HelloAuthHandlerTest {
     g.channel.attr(ChannelAttrs.PROTOCOL_READY).set(true);
     Session other = g.tracker.admit(g.channel, g.loop, InetAddress.getLoopbackAddress());
     g.channel.pipeline().addLast(new FrameCodec(g.limits),
-        new HelloAuthHandler(a2.tickets, a2.flow, g.tracker, new PrincipalHandshakeLimiter(20, () -> g.now() * 1000),
-            g.limits, "cell-1", g.metrics), new ErrorTerminator());
+        new HelloAuthHandler(a2.tickets, a2.flow, g.tracker, g.policy(new PrincipalHandshakeLimiter(20,
+            () -> g.now() * 1000)), g.tenants, g.limits, "cell-1", g.metrics, seq), new ErrorTerminator());
     g.channel.writeInbound(bytes(hello(Hello.newBuilder().setJwt(a2.jwt("t1:u2", "d2", g.now())).setDeviceId("d2")
         .setSdkVersion(new String("js-1.2.3")).setPlatform(new String("web")).build())));
     g.channel.runPendingTasks();
@@ -277,6 +303,7 @@ class HelloAuthHandlerTest {
     assertThat(other.identity().sdkVersion()).isSameAs(session.identity().sdkVersion());
     assertThat(other.identity().platform()).isSameAs(session.identity().platform());
     assertThat(other.identity().tenantId()).isSameAs(session.identity().tenantId());
+    g.channel.finishAndReleaseAll();
     assertThat(session.identity().capabilities()).isEmpty();
   }
 
@@ -291,5 +318,129 @@ class HelloAuthHandlerTest {
 
     assertThat(f.channel.attr(ChannelAttrs.PROTOCOL_READY).get()).isTrue();
     assertThat(session.nextDeadlineSec()).isEqualTo(f.now() + 5);
+  }
+  @Test
+  void connectedCarriesSeqAndEpochFromReader() throws Exception {
+    seqResult = CompletableFuture.completedFuture(OptionalLong.of(41));
+    seqEpoch = 3;
+
+    Connected c = send(jwtHello(auth.jwt("t1:u1", "d1", f.now()), "d1"));
+
+    assertThat(seqReads).containsExactly("t1:u1");
+    assertThat(c.getSeq()).isEqualTo(41);
+    assertThat(c.getSeqEpoch()).isEqualTo(3);
+    assertThat(c.getSeqUnknown()).isFalse();
+  }
+
+  @Test
+  void connectedSentWithSeqUnknownWhenSeqReadTimesOut() throws Exception {
+    seqResult = CompletableFuture.completedFuture(OptionalLong.empty());
+
+    Connected c = send(jwtHello(auth.jwt("t1:u1", "d1", f.now()), "d1"));
+
+    assertThat(c.getSeq()).isZero();
+    assertThat(c.getSeqUnknown()).isTrue();
+    assertThat(f.channel.isOpen()).isTrue();
+  }
+
+  @Test
+  void framesPipelinedDuringSeqReadProcessedAfterConnected() throws Exception {
+    seqResult = new CompletableFuture<>();
+    f.channel.writeInbound(bytes(hello(jwtHello(auth.jwt("t1:u1", "d1", f.now()), "d1"))),
+        bytes(Frame.newBuilder().setType(FrameType.FRAME_TYPE_PING).setMsgId("p1").build()));
+    assertThat(outbound()).isEmpty();
+    assertThat(session.state()).isEqualTo(SessionState.ACTIVE);
+
+    seqResult.complete(OptionalLong.of(7));
+    List<Frame> out = outbound();
+
+    assertThat(out).extracting(Frame::getType)
+        .containsExactly(FrameType.FRAME_TYPE_CONNECTED, FrameType.FRAME_TYPE_PONG);
+    assertThat(Connected.parseFrom(out.get(0).getPayload()).getSeq()).isEqualTo(7);
+    assertThat(f.channel.pipeline().get(HelloAuthHandler.class)).isNull();
+    assertThat(f.channel.config().isAutoRead()).isTrue();
+  }
+
+  @Test
+  void sessionClosedBeforeSeqReadCompletesReleasesHeldFrames() throws Exception {
+    seqResult = new CompletableFuture<>();
+    f.channel.writeInbound(bytes(hello(jwtHello(auth.jwt("t1:u1", "d1", f.now()), "d1"))));
+    ByteBuf ping = bytes(Frame.newBuilder().setType(FrameType.FRAME_TYPE_PING).setMsgId("p1").build());
+    ping.retain();
+    f.channel.writeInbound(ping);
+
+    session.close(com.pangate.gateway.protocol.CloseCode.GOING_AWAY, "SHUTDOWN");
+    seqResult.complete(OptionalLong.of(7));
+    List<Frame> out = outbound();
+
+    assertThat(out).extracting(Frame::getType).doesNotContain(FrameType.FRAME_TYPE_CONNECTED);
+    assertThat(ping.refCnt()).isEqualTo(1);
+    ping.release();
+  }
+  @Test
+  void readsStayPausedWhileSeqPendingAfterJwksRefresh() throws Exception {
+    ECKey rotated = AuthFixture.newKey();
+    auth.published.add(rotated);
+    seqResult = new CompletableFuture<>();
+
+    f.channel.writeInbound(bytes(hello(jwtHello(auth.jwt(rotated, "t1:u1", "d1", f.now()), "d1"))));
+    f.channel.runPendingTasks();
+
+    assertThat(session.state()).isEqualTo(SessionState.ACTIVE);
+    assertThat(f.channel.config().isAutoRead()).isFalse();
+    seqResult.complete(OptionalLong.of(1));
+    f.channel.runPendingTasks();
+    assertThat(f.channel.config().isAutoRead()).isTrue();
+  }
+  @Test
+  void revokedPrincipalGets4003() throws Exception {
+    f.revocations.add(com.pangate.gateway.control.RevocationList.principalKey("t1:u1"), Long.MAX_VALUE);
+
+    assertThat(closeCodeAfter(jwtHello(auth.jwt("t1:u1", "d1", f.now()), "d1"))).isEqualTo(4003);
+  }
+
+  @Test
+  void foreignCellTenantGets4011() throws Exception {
+    f.cells.put("t1", "cell-2");
+
+    assertThat(closeCodeAfter(jwtHello(auth.jwt("t1:u1", "d1", f.now()), "d1"))).isEqualTo(4011);
+  }
+
+  @Test
+  void blockedTenantGets4009WithRetryAfter() throws Exception {
+    f.tenants.apply(com.pangate.contracts.v1.TenantCfg.newBuilder()
+        .setScope(com.pangate.contracts.v1.Scope.SCOPE_TENANT).setScopeId("t1")
+        .setSwitches(com.pangate.contracts.v1.KillSwitches.newBuilder().setTenantBlocked(true)).build());
+    f.channel.writeInbound(bytes(hello(jwtHello(auth.jwt("t1:u1", "d1", f.now()), "d1"))));
+    List<Frame> out = outbound();
+
+    ErrorInfo e = ErrorInfo.parseFrom(out.get(out.size() - 1).getPayload());
+    assertThat(e.getCode()).isEqualTo(4009);
+    assertThat(e.getRetryAfterMs()).isEqualTo(300_000);
+  }
+
+  @Test
+  void connectedUsesTenantHeartbeat() throws Exception {
+    f.tenants.apply(com.pangate.contracts.v1.TenantCfg.newBuilder()
+        .setScope(com.pangate.contracts.v1.Scope.SCOPE_TENANT).setScopeId("t1")
+        .setSwitches(com.pangate.contracts.v1.KillSwitches.newBuilder().setHeartbeatIntervalSec(45)).build());
+
+    assertThat(send(jwtHello(auth.jwt("t1:u1", "d1", f.now()), "d1")).getHeartbeatSec()).isEqualTo(45);
+  }
+  @Test
+  void revokeLandingBetweenPolicyCheckAndIndexingStillCloses() throws Exception {
+    // gw-ctl adds the revocation after HELLO's policy check but before the session is visible in PrincipalIndex.
+    f.listeners.add(new com.pangate.gateway.session.SessionListener() {
+      @Override
+      public void activated(Session s) {
+        f.revocations.add(com.pangate.gateway.control.RevocationList.principalKey("t1:u1"), Long.MAX_VALUE);
+      }
+    });
+
+    f.channel.writeInbound(bytes(hello(jwtHello(auth.jwt("t1:u1", "d1", f.now()), "d1"))));
+    List<Frame> out = outbound();
+
+    assertThat(out).extracting(Frame::getType).doesNotContain(FrameType.FRAME_TYPE_CONNECTED);
+    assertThat(session.closeCode().code()).isEqualTo(4003);
   }
 }

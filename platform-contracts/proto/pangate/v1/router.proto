@@ -1,0 +1,83 @@
+// Push Router <-> gateway (spec §6.3). The router opens one long-lived stream per gateway node.
+// Enum values follow buf STANDARD (zero value *_UNSPECIFIED); see the M2a plan, Task 1.
+syntax = "proto3";
+
+package pangate.v1;
+
+import "pangate/v1/frame.proto";
+
+option java_package = "com.pangate.contracts.v1";
+option java_multiple_files = true;
+
+service PushStream {
+  rpc Stream(stream PushBatch) returns (stream DeliveryAck);
+}
+
+message PushBatch {
+  repeated PushItem items = 1;
+}
+
+message PushItem {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_MESSAGE = 1;    // exactly one connection: conn_id is required
+    KIND_BROADCAST = 2;  // every subscriber of topic on this node
+    KIND_CONTROL = 3;    // every session of principal_id on this node
+  }
+  enum Priority {
+    PRIORITY_UNSPECIFIED = 0;  // treated as NORMAL
+    PRIORITY_NORMAL = 1;
+    PRIORITY_CRITICAL = 2;
+    PRIORITY_BULK = 3;
+  }
+  uint64 delivery_id = 1;
+  Kind kind = 2;
+  string tenant_id = 3;
+  string principal_id = 4;
+  string conn_id = 5;
+  pangate.v1.Frame frame = 6;  // pre-built PUSH / RPC_REQ
+  string topic = 7;
+  Priority priority = 8;
+  ControlOp control = 9;
+  int64 enqueued_at_ms = 10;
+}
+
+message ControlOp {
+  oneof op {
+    Topics subscribe = 1;
+    Topics unsubscribe = 2;
+    Kick kick = 3;
+    RefreshConfig refresh_config = 4;
+  }
+}
+
+message Topics {
+  repeated string topics = 1;
+}
+
+message Kick {
+  string new_conn_id = 1;
+  int64 connected_at_ms = 2;
+}
+
+message RefreshConfig {}
+
+message DeliveryAck {
+  repeated AckItem acks = 1;
+}
+
+message AckItem {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_ACKED = 1;
+    STATUS_WRITTEN = 2;
+    STATUS_NACK_TIMEOUT = 3;
+    STATUS_NACK_OVERFLOW = 4;
+    STATUS_NACK_CLOSED = 5;
+    STATUS_NACK_NOT_FOUND = 6;
+    STATUS_NACK_SLOW_CONSUMER = 7;
+    STATUS_NACK_SHED = 8;
+  }
+  uint64 delivery_id = 1;
+  Status status = 2;
+}

@@ -15,26 +15,36 @@ import com.pangate.gateway.protocol.Frames;
 import com.pangate.gateway.protocol.ProtocolException;
 import com.pangate.gateway.session.Session;
 import com.pangate.gateway.session.SessionState;
+import com.pangate.gateway.upstream.UpstreamPublisher;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 
-/** Frames of an authenticated session (spec §5): PING, REAUTH; M2 features answer UNSUPPORTED for now. */
+/** Frames of an authenticated session (spec §5): PING, REAUTH, ACK, UPSTREAM, RPC_RES, SUBSCRIBE, UNSUBSCRIBE. */
 @io.netty.channel.ChannelHandler.Sharable
 public final class SessionHandler extends ChannelInboundHandlerAdapter {
 
   private final ResumeTicketService tickets;
   private final JwtAuthFlow jwt;
   private final PrincipalHandshakeLimiter limiter;
+  private final com.pangate.gateway.auth.HelloPolicy policy;
   private final LimitsHolder limits;
   private final String cell;
+  private final UpstreamPublisher upstream;
+  private final com.pangate.gateway.downstream.PushDelivery delivery;
+  private final com.pangate.gateway.downstream.ClientTopics topics;
 
   public SessionHandler(ResumeTicketService tickets, JwtAuthFlow jwt, PrincipalHandshakeLimiter limiter,
-      LimitsHolder limits, String cell) {
+      com.pangate.gateway.auth.HelloPolicy policy, LimitsHolder limits, String cell, UpstreamPublisher upstream,
+      com.pangate.gateway.downstream.PushDelivery delivery, com.pangate.gateway.downstream.ClientTopics topics) {
+    this.delivery = delivery;
+    this.topics = topics;
     this.tickets = tickets;
     this.jwt = jwt;
     this.limiter = limiter;
+    this.policy = policy;
     this.limits = limits;
     this.cell = cell;
+    this.upstream = upstream;
   }
 
   @Override
@@ -50,9 +60,22 @@ public final class SessionHandler extends ChannelInboundHandlerAdapter {
       case FRAME_TYPE_PING -> ctx.writeAndFlush(Frames.pong(frame.getMsgId()));
       case FRAME_TYPE_HELLO -> throw new ProtocolException(CloseCode.BAD_FRAME, "duplicate HELLO");
       case FRAME_TYPE_REAUTH -> reauth(ctx, session, frame, now);
-      case FRAME_TYPE_ACK -> { }
+      case FRAME_TYPE_ACK -> ack(session, frame);
+      case FRAME_TYPE_UPSTREAM -> upstream.publish(ctx, session, frame, null);
+      case FRAME_TYPE_RPC_RES -> upstream.publish(ctx, session, frame, "cmd_result");
+      case FRAME_TYPE_SUBSCRIBE, FRAME_TYPE_UNSUBSCRIBE -> topics.onFrame(ctx, session, frame);
       default -> ctx.writeAndFlush(Frames.error(CloseCode.INTERNAL.code(), "UNSUPPORTED", false, false));
     }
+  }
+
+  private void ack(Session session, Frame frame) {
+    com.pangate.contracts.v1.Ack ack;
+    try {
+      ack = com.pangate.contracts.v1.Ack.parseFrom(frame.getPayload());
+    } catch (InvalidProtocolBufferException e) {
+      throw new ProtocolException(CloseCode.BAD_FRAME, "malformed ACK");
+    }
+    delivery.onAck(session, ack);
   }
 
   private void reauth(ChannelHandlerContext ctx, Session session, Frame frame, long now) {
@@ -78,9 +101,16 @@ public final class SessionHandler extends ChannelInboundHandlerAdapter {
       ConnectClaims c = v.claims();
       long exp = now + limits.current().sessionTtl().toSeconds();
       long jtiHash = ResumeTicketService.jtiHash(c.jti());
+      var rejection = policy.checkPolicy(new com.pangate.gateway.auth.HelloPolicy.Candidate(cell, c.tenant(),
+          c.principal(), c.device(), jtiHash, session.identity().sdkVersion(), session.origin()));
+      if (rejection.isPresent()) {
+        session.close(rejection.get().code(), rejection.get().code().name(), rejection.get().retryAfterMs());
+        return;
+      }
       String ticket = tickets.issue(new ResumeTicket(cell, c.tenant(), c.principal(), c.device(), now, exp, jtiHash,
           c.topics()));
       session.reauth(now, exp, jtiHash, c.topics());
+      com.pangate.gateway.downstream.ClientTopics.pruneDisallowed(session);
       ctx.writeAndFlush(Frames.reauth(Reauth.newBuilder().setResumeTicket(ticket)
           .setSessionExpiresAtMs(exp * 1000).build()));
     });

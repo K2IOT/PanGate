@@ -1,0 +1,31 @@
+// Gateway -> Push API (spec §2.1, §6.6). The gateway only uses it to send KICK in single-session mode.
+syntax = "proto3";
+
+package pangate.v1;
+
+import "pangate/v1/router.proto";
+
+option java_package = "com.pangate.contracts.v1";
+option java_multiple_files = true;
+
+service PushService {
+  rpc SendStream(stream PushRequest) returns (stream PushResponse);
+}
+
+message PushRequest {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_CONTROL = 1;
+  }
+  string request_id = 1;
+  Kind kind = 2;
+  string tenant_id = 3;
+  string principal_id = 4;
+  pangate.v1.ControlOp control = 5;
+}
+
+message PushResponse {
+  string request_id = 1;
+  bool ok = 2;
+  string error = 3;
+}

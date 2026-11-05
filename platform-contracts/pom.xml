@@ -6,7 +6,7 @@
   <parent>
     <groupId>com.pangate</groupId>
     <artifactId>platform-parent</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
     <relativePath>../platform-parent/pom.xml</relativePath>
   </parent>
   <artifactId>platform-contracts</artifactId>
@@ -16,6 +16,14 @@
     <dependency>
       <groupId>com.google.protobuf</groupId>
       <artifactId>protobuf-java</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.grpc</groupId>
+      <artifactId>grpc-stub</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.grpc</groupId>
+      <artifactId>grpc-protobuf</artifactId>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -31,6 +39,14 @@
         <artifactId>protobuf-maven-plugin</artifactId>
         <configuration>
           <protoc>${protoc.version}</protoc>
+          <plugins>
+            <plugin kind="binary-maven">
+              <groupId>io.grpc</groupId>
+              <artifactId>protoc-gen-grpc-java</artifactId>
+              <version>${grpc.version}</version>
+              <options>@generated=omit</options>
+            </plugin>
+          </plugins>
           <sourceDirectories>
             <sourceDirectory>${project.basedir}/proto</sourceDirectory>
           </sourceDirectories>

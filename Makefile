@@ -1,4 +1,5 @@
 SHELL := /bin/bash
+VERSION := 0.1.0
 MVNW := $(CURDIR)/mvnw
 MODULES := platform-parent platform-contracts platform-spring-starter gateway-devtools gateway-service
 
@@ -19,18 +20,30 @@ verify:
 	done
 
 COMPOSE := docker compose -f platform-devenv/docker-compose.yml
-GATEWAY_JAR := gateway-service/target/gateway-service-0.1.0-SNAPSHOT.jar
-DEVTOOLS_JAR := gateway-devtools/target/gateway-devtools-0.1.0-SNAPSHOT-exec.jar
+GATEWAY_JAR := gateway-service/target/gateway-service-$(VERSION).jar
+DEVTOOLS_JAR := gateway-devtools/target/gateway-devtools-$(VERSION)-exec.jar
 
-.PHONY: doctor run-local images up down logs smoke local-check memory-check load-check
+.PHONY: doctor infra-up infra-down run-local images up down logs smoke local-check memory-check load-check
 
-## Check JDK 21, Docker and free ports.
+## Check JDK 21, Docker, free ports and Kafka/Redis on localhost.
 doctor:
 	@java -version 2>&1 | grep -q 'version "21' && echo "ok  JDK 21" || echo "ERR JDK 21 required"
 	@docker compose version >/dev/null 2>&1 && echo "ok  docker compose" || echo "WARN docker compose missing (needed for dev)"
-	@for p in 8443 8883 8081; do \
+	@for p in 8443 8883 9090 8081 9443; do \
 	  if ss -ltn 2>/dev/null | grep -q ":$$p "; then echo "ERR port $$p in use"; else echo "ok  port $$p free"; fi; \
 	done
+	@for d in kafka:9092 redis:6379; do n=$${d%%:*}; p=$${d##*:}; \
+	  if bash -c "</dev/tcp/127.0.0.1/$$p" 2>/dev/null; then echo "ok  $$n localhost:$$p"; \
+	  else echo "WARN $$n localhost:$$p unreachable (make infra-up)"; fi; \
+	done
+
+## Local infrastructure (Kafka + Redis) on localhost for the gateway run from the IDE (profile local).
+infra-up:
+	$(COMPOSE) up -d --wait --wait-timeout 90 kafka redis
+	$(COMPOSE) up kafka-init
+
+infra-down:
+	$(COMPOSE) down -v
 
 ## Run the gateway from source with profile local (same as the IDE run configuration).
 run-local:
@@ -52,15 +65,33 @@ logs:
 
 smoke:
 	$(COMPOSE) --profile tools run --rm devtools smoke --url wss://gateway:8443/v1/ws \
-	  --issuer http://issuer:8090 --ca /dev-secrets/ca.crt
+	  --issuer http://issuer:8090 --ca /dev-secrets/ca.crt --router gateway:9090
 
-local-check:
+local-check: infra-up
 	platform-devenv/scripts/local-start-check.sh $(GATEWAY_JAR) $(DEVTOOLS_JAR)
 
-memory-check:
+memory-check: infra-up
 	platform-devenv/scripts/idle-memory.sh $(GATEWAY_JAR) $(DEVTOOLS_JAR) 10000
 
 ## Idle-session load check; TODO: N=50000 on a machine with ulimit -n >= 120000.
 N ?= 18000
-load-check:
+load-check: infra-up
 	platform-devenv/scripts/idle-load.sh $(GATEWAY_JAR) $(DEVTOOLS_JAR) $(N)
+
+## Fuzz one target for real (spec §11: 10 min per target, maxDuration on the @FuzzTest). Findings are written
+## as new inputs next to the seeds (src/test/resources/**/<Class>Inputs/) and fail the build.
+FUZZ ?= FrameCodecFuzzTest
+.PHONY: fuzz
+fuzz:
+	JAZZER_FUZZ=1 $(MVNW) -f gateway-service/pom.xml test -Dtest=$(FUZZ)
+
+## Release check (spec §2, §13): module versions, no pre-release versions in build/run files, ADR index.
+.PHONY: release-check
+release-check:
+	platform-devenv/scripts/release-check.sh $(VERSION)
+
+## JMH benchmarks (spec §11): FrameCodec, PrincipalIndex, DeadlineWheel. Results in gateway-service/target/jmh.json.
+JMH_ARGS ?= -f 1 -wi 3 -i 5 -rf json -rff target/jmh.json
+.PHONY: bench
+bench:
+	$(MVNW) -q -f gateway-service/pom.xml -Pjmh test-compile exec:exec -Djmh.args="$(JMH_ARGS)"

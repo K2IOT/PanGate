@@ -18,29 +18,37 @@ import java.util.function.LongSupplier;
  */
 public final class SessionTracker {
 
+  private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SessionTracker.class);
+
   private final LoopRegistry loops;
   private final PrincipalIndex principals;
   private final IpConnectionCounter ips;
   private final LimitsHolder limits;
   private final GatewayMetrics metrics;
   private final LongSupplier epochMillis;
+  private final java.util.List<SessionListener> listeners;
+  private final com.pangate.gateway.control.TenantLimitsStore tenants;
 
   public SessionTracker(LoopRegistry loops, PrincipalIndex principals, IpConnectionCounter ips, LimitsHolder limits,
-      GatewayMetrics metrics, LongSupplier epochMillis) {
+      GatewayMetrics metrics, LongSupplier epochMillis, java.util.List<SessionListener> listeners,
+      com.pangate.gateway.control.TenantLimitsStore tenants) {
     this.loops = loops;
     this.principals = principals;
     this.ips = ips;
     this.limits = limits;
     this.metrics = metrics;
     this.epochMillis = epochMillis;
+    this.listeners = listeners;
+    this.tenants = tenants;
   }
 
   /** Called on the channel's loop after admission (the IP counter is already incremented). */
   public Session admit(Channel ch, LoopContext loop, InetAddress remote) {
-    Session s = new Session(loop, ch, loop.nextSessionKey(), loop.nowSec(), limits, remote);
+    Session s = new Session(loop, ch, loop.nextSessionKey(), loop.nowSec(), limits, remote, tenants);
     ch.attr(Session.KEY).set(s);
     loop.register(s);
     loop.incrementActive();
+    loop.addHandshaking(1);
     s.reschedule();
     ch.closeFuture().addListener(f -> onClosed(s));
     return s;
@@ -48,6 +56,16 @@ public final class SessionTracker {
 
   public void onActivated(Session s) {
     principals.add(s.identity().principalId(), new ConnRef(s.loop().index(), s.sessionKey()));
+    if (s.warmUp()) {
+      return;
+    }
+    for (SessionListener l : listeners) {
+      try {
+        l.activated(s);
+      } catch (RuntimeException e) {
+        log.warn("session listener {} failed on activation: {}", l.getClass().getSimpleName(), e.toString());
+      }
+    }
   }
 
   public String newConnId(Session s) {
@@ -59,13 +77,38 @@ public final class SessionTracker {
     Integer clientCode = s.channel().attr(ChannelAttrs.CLIENT_CLOSE_CODE).get();
     s.markClosedBy(clientCode != null ? CloseCode.of(clientCode) : CloseCode.ABNORMAL);
     loop.wheel().remove(s);
+    if (s.unwritable()) {
+      loop.addUnwritable(-1);
+    }
+    if (s.closeCode() == CloseCode.SLOW_CONSUMER) {
+      metrics.slowConsumerClosed(s.closeReason());
+    }
+    s.failPending(s.closeCode() == CloseCode.SLOW_CONSUMER
+        ? com.pangate.contracts.v1.AckItem.Status.STATUS_NACK_SLOW_CONSUMER
+        : com.pangate.contracts.v1.AckItem.Status.STATUS_NACK_CLOSED);
+    loop.topics().removeAll(s);
     loop.unregister(s);
     loop.decrementActive();
+    if (s.identity() == null) {
+      loop.addHandshaking(-1);  // never activated
+    }
     if (s.identity() != null) {
       principals.remove(s.identity().principalId(), new ConnRef(loop.index(), s.sessionKey()));
     }
     ips.decrement(s.remoteAddress());
+    if (s.warmUp()) {
+      return;
+    }
     metrics.closed(s.closeCode());
+    if (s.identity() != null) {
+      for (SessionListener l : listeners) {
+        try {
+          l.closed(s);
+        } catch (RuntimeException e) {
+          log.warn("session listener {} failed on close: {}", l.getClass().getSimpleName(), e.toString());
+        }
+      }
+    }
   }
 
   public LoopRegistry loops() {

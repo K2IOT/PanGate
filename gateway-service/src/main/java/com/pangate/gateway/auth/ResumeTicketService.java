@@ -23,10 +23,19 @@ public final class ResumeTicketService {
   private static final int MAC_LEN = 32;
   private static final int MAX_TOKEN_BYTES = 1536;
 
-  private final TicketKeyRing ring;
+  // Swapped when the key files rotate (spec §4.7, every 60 s); each issue/verify reads it once.
+  private volatile TicketKeyRing ring;
 
   public ResumeTicketService(TicketKeyRing ring) {
     this.ring = ring;
+  }
+
+  public TicketKeyRing ring() {
+    return ring;
+  }
+
+  public void ring(TicketKeyRing next) {
+    this.ring = next;
   }
 
   public String issue(ResumeTicket t) {

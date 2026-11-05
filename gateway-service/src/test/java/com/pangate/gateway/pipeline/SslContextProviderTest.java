@@ -10,15 +10,134 @@ import io.netty.buffer.ByteBufAllocator;
 import io.netty.util.ReferenceCountUtil;
 import java.nio.file.Path;
 import javax.net.ssl.SSLEngine;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class SslContextProviderTest {
 
+  private final io.micrometer.core.instrument.simple.SimpleMeterRegistry meters =
+      new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+
+  private final java.util.List<SslContextProvider> providers = new java.util.ArrayList<>();
+
+  @AfterEach
+  void closeProviders() {  // releases the native contexts (close() is idempotent)
+    providers.forEach(SslContextProvider::close);
+  }
+
+  private SslContextProvider provider(Path d) {
+    java.util.concurrent.ScheduledExecutorService now = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+    return track(new SslContextProvider(new GatewayProperties.Tls(d.resolve("gateway.crt"), d.resolve("gateway.key"),
+        java.time.Duration.ofSeconds(30)), now, java.time.Duration.ZERO,
+        new com.pangate.gateway.metrics.GatewayMetrics(meters)));
+  }
+
+  private SslContextProvider track(SslContextProvider p) {
+    providers.add(p);
+    return p;
+  }
+
+  private double reloads(String result) {
+    var c = meters.find("gw.tls.reloads").tag("result", result).counter();
+    return c == null ? 0 : c.count();
+  }
+
+  private static void bumpMtime(Path d) throws Exception {
+    for (String f : new String[] {"gateway.crt", "gateway.key"}) {
+      java.io.File file = d.resolve(f).toFile();
+      file.setLastModified(file.lastModified() + 2000);
+    }
+  }
+
+  @Test
+  void unchangedFilesDoNotRebuild(@TempDir Path d) {
+    DevSecretsGenerator.ensure(d);
+    SslContextProvider p = provider(d);
+    io.netty.handler.ssl.SslContext before = p.ws();
+
+    assertThat(p.reloadIfChanged()).isFalse();
+    assertThat(p.ws()).isSameAs(before);
+  }
+
+  @Test
+  void replacedCertIsServedToNewConnections(@TempDir Path d) throws Exception {
+    DevSecretsGenerator.ensure(d);
+    SslContextProvider p = provider(d);
+    io.netty.handler.ssl.SslContext before = p.ws();
+    io.netty.handler.ssl.SslContext beforeTcp = p.tcp();
+    java.util.List<io.netty.handler.ssl.SslContext> built = new java.util.ArrayList<>();
+    p.onContextsBuilt(built::add);
+
+    DevSecretsGenerator.reissueGatewayCert(d);
+    bumpMtime(d);
+
+    assertThat(p.reloadIfChanged()).isTrue();
+    assertThat(p.ws()).isNotSameAs(before);
+    assertThat(p.tcp()).isNotSameAs(beforeTcp);
+    assertThat(built).containsExactly(p.ws(), p.tcp());
+    SSLEngine engine = p.ws().newEngine(ByteBufAllocator.DEFAULT);
+    ReferenceCountUtil.release(engine);
+    if (before instanceof io.netty.util.ReferenceCounted rc) {
+      org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(2)).until(() -> rc.refCnt() == 0);
+    }
+    assertThat(reloads("ok")).isEqualTo(1);
+  }
+
+  @Test
+  void brokenReplacementKeepsCurrentContext(@TempDir Path d) throws Exception {
+    DevSecretsGenerator.ensure(d);
+    SslContextProvider p = provider(d);
+    io.netty.handler.ssl.SslContext before = p.ws();
+    String goodKey = java.nio.file.Files.readString(d.resolve("gateway.key"));
+
+    java.nio.file.Files.writeString(d.resolve("gateway.key"), "garbage");
+    bumpMtime(d);
+
+    assertThat(p.reloadIfChanged()).isFalse();
+    assertThat(p.ws()).isSameAs(before);
+    assertThat(reloads("failed")).isEqualTo(1);
+
+    java.nio.file.Files.writeString(d.resolve("gateway.key"), goodKey);
+    bumpMtime(d);
+    assertThat(p.reloadIfChanged()).isTrue();
+  }
+
+  @Test
+  void closeReleasesCurrentAndPendingContexts(@TempDir Path d) throws Exception {
+    DevSecretsGenerator.ensure(d);
+    java.util.concurrent.ScheduledExecutorService never = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+    SslContextProvider p = new SslContextProvider(new GatewayProperties.Tls(d.resolve("gateway.crt"),
+        d.resolve("gateway.key"), java.time.Duration.ofSeconds(30)), never, java.time.Duration.ofHours(1),
+        new com.pangate.gateway.metrics.GatewayMetrics(meters));
+    io.netty.util.ReferenceCounted oldWs = (io.netty.util.ReferenceCounted) p.ws();
+    bumpMtime(d);
+    assertThat(p.reloadIfChanged()).isTrue();
+    io.netty.util.ReferenceCounted ws = (io.netty.util.ReferenceCounted) p.ws();
+    io.netty.util.ReferenceCounted tcp = (io.netty.util.ReferenceCounted) p.tcp();
+
+    p.close();
+    never.shutdownNow();
+
+    assertThat(ws.refCnt()).isZero();
+    assertThat(tcp.refCnt()).isZero();
+    assertThat(oldWs.refCnt()).as("replaced context still waiting for its delayed release").isZero();
+  }
+
+  @Test
+  void contextsAfterCloseFailWithAClearError(@TempDir Path d) {
+    DevSecretsGenerator.ensure(d);
+    SslContextProvider p = provider(d);
+    p.close();
+    assertThat(p.isClosed()).isTrue();
+    assertThatThrownBy(p::ws).isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
+    assertThatThrownBy(p::tcp).isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
+  }
+
   @Test
   void loadsDevCertificateWithTls13Only(@TempDir Path d) {
     DevSecretsGenerator.ensure(d);
-    SslContextProvider p = new SslContextProvider(new GatewayProperties.Tls(d.resolve("gateway.crt"), d.resolve("gateway.key")));
+    SslContextProvider p = provider(d);
 
     SSLEngine engine = p.ws().newEngine(ByteBufAllocator.DEFAULT);
     try {
@@ -33,7 +152,7 @@ class SslContextProviderTest {
   @Test
   void tcpContextAdvertisesPangateAlpn(@TempDir Path d) {
     DevSecretsGenerator.ensure(d);
-    SslContextProvider p = new SslContextProvider(new GatewayProperties.Tls(d.resolve("gateway.crt"), d.resolve("gateway.key")));
+    SslContextProvider p = provider(d);
 
     assertThat(p.tcp().applicationProtocolNegotiator().protocols()).containsExactly("pangate.v1");
     assertThat(p.ws().applicationProtocolNegotiator().protocols()).containsExactly("http/1.1");
@@ -41,8 +160,34 @@ class SslContextProviderTest {
 
   @Test
   void missingCertFileThrowsSecretNotFound(@TempDir Path d) {
-    assertThatThrownBy(() -> new SslContextProvider(new GatewayProperties.Tls(d.resolve("gateway.crt"), d.resolve("gateway.key"))))
+    assertThatThrownBy(() -> provider(d))
         .isInstanceOf(SecretNotFoundException.class)
         .hasMessageContaining("gateway.crt");
+  }
+
+  @Test
+  void mismatchedKeyKeepsCurrentContext(@TempDir Path d, @TempDir Path other) throws Exception {
+    DevSecretsGenerator.ensure(d);
+    DevSecretsGenerator.ensure(other);
+    SslContextProvider p = provider(d);
+    io.netty.handler.ssl.SslContext before = p.ws();
+
+    java.nio.file.Files.copy(other.resolve("gateway.key"), d.resolve("gateway.key"),
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING);  // a valid key, but not this certificate's
+    bumpMtime(d);
+
+    assertThat(p.reloadIfChanged()).isFalse();
+    assertThat(p.ws()).isSameAs(before);
+    assertThat(reloads("failed")).isEqualTo(1);
+  }
+
+  @Test
+  void mismatchedPairFailsAtStart(@TempDir Path d, @TempDir Path other) throws Exception {
+    DevSecretsGenerator.ensure(d);
+    DevSecretsGenerator.ensure(other);
+    java.nio.file.Files.copy(other.resolve("gateway.key"), d.resolve("gateway.key"),
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+    assertThatThrownBy(() -> provider(d)).isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("does not match");
   }
 }

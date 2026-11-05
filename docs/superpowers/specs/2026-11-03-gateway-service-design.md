@@ -287,8 +287,15 @@ Start lỗi ở bất kỳ phase nào thì process exit (fail fast) và pod sẽ
 
 ### 4.3 Pipeline SSE (M3, cùng port 8443)
 
-- `POST /v1/sse`: body là `Hello` (protobuf, `content-type: application/x-protobuf`). Chỉ cho phép khi tenant bật `sse.fallback.enabled`. Pipeline sau HTTP codec: `HttpObjectAggregator` bị gỡ, `SseHandler` gửi response chunked `text/event-stream`. Mỗi `PUSH` là một event `data:` chứa base64 của frame. Heartbeat là dòng comment `:` mỗi 30 s. Ngữ nghĩa downstream giống hệt WS.
-- `POST /v1/upstream`: header `Authorization: Ticket <resume>`, body là `Frame(UPSTREAM)`. Gateway verify ticket rồi produce vào Kafka và trả `202`, không tra cứu session.
+- `POST /v1/sse`: body là `Hello` (protobuf, `content-type: application/x-protobuf`). Chỉ cho phép khi tenant bật `sse.fallback.enabled`. Pipeline sau HTTP codec: `HttpObjectAggregator` bị gỡ, `SseAdapter` gửi response chunked `text/event-stream`. Mỗi frame gửi xuống (kể cả `CONNECTED`) là một event `data:` chứa base64 của frame. Heartbeat là dòng comment `:` mỗi 30 s; ghi thành công tính là dấu hiệu sống, vì client SSE không gửi PING được. Ngữ nghĩa downstream giống WS, trừ một điểm: client SSE không có kênh gửi ACK, nên push RELIABLE/ORDERED được trả `STATUS_WRITTEN` ngay khi ghi (như `delivery.downgradeReliable`); client phục hồi phần mất qua `seq`.
+  - Trước khi stream bắt đầu, lỗi được trả bằng mã HTTP: 4001/4002 → 401, 4003 → 403, 4009 → 429, 4011 → 421, 4013 → 503, còn lại → 400 (kèm `Retry-After` nếu có). Tenant chưa bật SSE → 401. Method sai → 405, content-type sai → 415, body > `hello-max` → 413.
+  - Khi đang stream: một event `Frame(ERROR, fatal=true)`, rồi chunk cuối, rồi đóng.
+  - Drain, HELLO timeout và lỗi nội bộ trước khi stream → 503. Push RELIABLE tới channel SSE đang không ghi được → `NACK_SLOW_CONSUMER` (không ghi gì thì không báo `WRITTEN`). Trên epoll, socket SSE có `TCP_USER_TIMEOUT` = 3 × khoảng heartbeat, để client mất mạng không FIN bị phát hiện nhanh.
+- **CORS** cho `/v1/sse` và `/v1/upstream` (client trình duyệt): preflight `OPTIONS` trả `204` với `Access-Control-Allow-Origin` = Origin gửi lên, `Allow-Methods: POST`, `Allow-Headers: content-type, authorization`, `Max-Age: 600`. Request thật chỉ echo Origin sau khi Origin qua allowlist của tenant (§4.6 g); Origin không được phép → `403` (upstream) hoặc từ chối HELLO (SSE), không có header CORS. Không dùng cookie nên không có `Allow-Credentials`.
+- `POST /v1/upstream`: header `Authorization: Ticket <resume>`, body là `Frame(UPSTREAM)`. Gateway verify ticket, kiểm tra c–e của §4.6 (cell, revoke, blocked) rồi produce vào Kafka, không tra cứu session (`conn_id` rỗng). Luật type, telemetry và shed giống §5.5.
+  - Mã trả: `202` (với `cmd`/`cmd_result` chỉ sau khi Kafka ack); `400` body hỏng, frame không phải UPSTREAM, type lạ hoặc thiếu `msg_id`; `401` thiếu, sai hoặc hết hạn ticket; `403` revoked hoặc sai cell; `405`; `413` body > `frame-max`; `415`; `429` kèm `Retry-After: 300` khi tenant bị block; `503` Kafka không nhận.
+  - Rate limit theo principal: token bucket `inbound-rate`/`inbound-burst` của tenant (mặc định 50/s, burst 100), cục bộ trên node; vượt → `429` kèm `Retry-After: 1`.
+  - Mỗi kết nối một request (`Connection: close`); request gửi nối tiếp trên cùng kết nối bị bỏ. Kafka chưa trả lời sau 5 s → `503`. Kết nối vẫn qua `AcceptGate` và các luật 503 của `UpgradeGuard`; nếu gateway đóng kết nối (deadline, drain) thì client nhận một mã HTTP (mặc định `503`), không phải frame WS.
 
 ### 4.4 FrameCodec
 
@@ -345,7 +352,7 @@ Các bổ sung so với tài liệu gốc, đều additive:
 | f | `sdk_version` < bản tối thiểu của tenant | 4010 |
 | g | `Origin` (chỉ WS từ trình duyệt) không thuộc allowlist của tenant; allowlist rỗng nghĩa là cho phép tất cả | 4001 |
 | h | Quá 20 handshake/phút/principal (đếm local trên node, cửa sổ trượt 60 s) | 4009 |
-| i | Tenant cap: node có quota local `ceil(maxConns × 1.1 / nodesInCell)`; vượt thì `INCR tenantconns:{t}` trên Redis state (async) để mượn thêm; Redis trả vượt `maxConns` | 4013 (`retry_after_ms` ngẫu nhiên 5–30 s) |
+| i | Tenant cap (khi `maxConns > 0`): node có quota local `ceil(maxConns × 1.1 / nodesInCell)` (`nodesInCell` = số node trong `nodes:live` 30 s gần nhất). Vượt thì mượn qua Redis state: hash `tenantconns:{t}`, field = node id, value `"<tổng>|<hết hạn ms>"`; Lua cộng tổng còn hạn của các node khác với tổng mới của node này, ≤ `maxConns` thì ghi và cho qua. Mỗi node ghi lại tổng của mình mỗi 10 s với hạn 30 s (tenant về 0 thì xoá field), nên entry của node chết tự hết hiệu lực. Bật cap cho một tenant đang có kết nối thì các session đang mở được tính ngay. Vượt `maxConns`, Redis lỗi hoặc quá 200 ms → từ chối | 4013 (`retry_after_ms` ngẫu nhiên 5–30 s) |
 
 4. Kích hoạt session: sinh `connId`, state → `ACTIVE`, đưa vào `sessions` và `PrincipalIndex`, đặt deadline heartbeat, expiry và recycle (`random(min, max)`, chỉ khi tenant bật `recycle.enabled`), gỡ `HelloAuthHandler`.
 5. Ba việc async chạy song song:
@@ -474,7 +481,7 @@ Mọi đường đóng đều đi qua `Session.close(code, reason)`, idempotent,
 1. State → `CLOSED`; gửi close frame (WS) hoặc `ERROR fatal` (TCP) rồi `close()`. Riêng kết nối lạm dụng (fuzz hoặc flood) dùng `SO_LINGER=0`.
 2. Gỡ khỏi `sessions`, `PrincipalIndex`, `TopicIndex` và wheel; giảm `IpConnectionCounter`.
 3. NACK pending (§5.4).
-4. Async: `RegistryWriter.unregister` (`HDEL reg:{p} connId`); lifecycle `DISCONNECTED{close_code}` (hoặc `HEARTBEAT_TIMEOUT`, `KICKED`); `DECR tenantconns:{t}` nếu session đã mượn quota từ Redis.
+4. Async: `RegistryWriter.unregister` (`HDEL reg:{p} connId`); lifecycle `DISCONNECTED{close_code}` (hoặc `HEARTBEAT_TIMEOUT`, `KICKED`); trả slot tenant cap về bộ đếm local (Redis nhận tổng mới ở lần ghi 10 s kế tiếp, §4.6 i).
 
 `channelInactive` khi chưa gọi `close()` (client tự đóng hoặc RST) sẽ gọi `close(1006 nội bộ)`; code ghi vào lifecycle là 1006.
 
@@ -599,6 +606,14 @@ Khi Lua registry trả về entry cũ và tenant đặt `singleSession=true`:
 - Entry cũ thuộc node này (`nodeId` trùng, `epoch` trùng): kick local qua `PrincipalIndex`.
 - Entry cũ thuộc node khác: `KickClient` gửi `PushRequest{kind=CONTROL, target=principal, control=KICK{new_conn_id, connected_at_ms}}` qua một stream `PushService.SendStream` dùng lâu dài tới Push API (mTLS). Retry 2 lần (100 ms, 400 ms) rồi bỏ, đếm `gw_kick_failures_total`.
 
+**Thứ tự "cũ hơn"** (cập nhật sau review M2b):
+- So theo `(connectedAtMs, connId)`: session nào kết nối sớm hơn là session cũ hơn. Nếu cùng millisecond, session có `connId` nhỏ hơn (theo thứ tự chữ) là cũ hơn. Thứ tự này là toàn phần, nên không có cặp session nào cùng được giữ lại.
+- KICK đóng mọi session cũ hơn `(connected_at_ms, new_conn_id)`.
+- Lần register có thể đến Redis không theo thứ tự kết nối, vì retry hoặc độ trễ giữa các node. Khi đó, nếu Lua trả về một entry mới hơn chính session đang register:
+  - Gateway ghi lại entry mới hơn đó (`HSET`).
+  - Gateway đóng chính session của mình với code 4012.
+  - Chỉ các entry cũ hơn mới bị kick.
+
 Ở dev, đích là `gateway-devtools fake-pushapi`. Ở local, `gateway.push-api.enabled=false`: chỉ kick các entry cũ nằm trên chính node (luôn đúng vì local chỉ có một node); entry thuộc node khác bị bỏ qua kèm WARN.
 
 ### 6.7 SeqReader và seqepochs
@@ -649,17 +664,18 @@ Khi Lua registry trả về entry cũ và tenant đặt `singleSession=true`:
 |---|---|---|---|
 | 1 | budget > 70% · lag p99 > 50 ms · CPU > 70% | Drop EPHEMERAL tới channel unwritable; dừng pacer BULK | budget < 60% và lag < 30 ms và CPU < 60%, liên tục 30 s |
 | 2 | Buffer của một Kafka producer > 70% | Drop upstream telemetry | Buffer < 50% |
-| 3 | CPU > 80% · số session HANDSHAKING tăng liên tục 5 s | Admission × 0,5; tạm dừng recycling; `UpgradeGuard` trả 503 | CPU < 70% liên tục 60 s |
+| 3 | CPU > 80% · số session HANDSHAKING tăng liên tục 5 s | Admission × 0,5; tạm dừng recycling; `UpgradeGuard` trả 503 (WS); listener TCP đóng kết nối mới ngay ở `AcceptGate`, trước TLS | CPU < 70% liên tục 60 s |
 | 4 | budget > 90% | Ngừng `request(n)`; RELIABLE mới tới → `NACK_SHED` | budget < 80% |
 | 5 | budget ≥ 100% · direct memory > 85% `MaxDirectMemorySize` | Mỗi loop đóng 4008 các session có pending lớn nhất cho tới khi loop < 90% `budgetShare` | Tự hạ khi điều kiện hết |
 
 Nguồn tín hiệu:
 - Lag: `EventLoopLagProbe`, mỗi 100 ms lên lịch một no-op trên từng loop, đo độ trễ; lấy p99 trên cửa sổ trượt 10 s.
-- CPU: `OperatingSystemMXBean.getProcessCpuLoad()`.
+- CPU: `OperatingSystemMXBean.getProcessCpuLoad()`, lấy trung bình trên cửa sổ trượt 10 s (100 mẫu, giống lag), để một đỉnh JIT hoặc GC không đẩy node lên L3 trong 60 s. Có thể tắt tín hiệu CPU bằng `gateway.shed.cpu=false`; profile `local` và `dev` tắt sẵn vì máy dev dùng chung CPU với IDE và test.
+- Trước khi warm-up xong (`warmedUp=false`), ladder bỏ qua tín hiệu CPU và xu hướng handshake: CPU lúc Spring khởi động, JIT và handshake TLS của warm-up là nhiễu khởi động, không được giữ node vừa ready ở L3. Tín hiệu bộ nhớ (budget, direct memory) luôn được tính.
 - Kafka: metric `buffer-available-bytes` / `buffer-total-bytes`.
 - Direct memory: `PlatformDependent.usedDirectMemory()`.
 
-Level 6 là kill switch do operator bật (§7.8). `shedLevel` được publish vào `NodeState` và metric `gw_shed_level`.
+Level 6 là kill switch do operator bật (§7.8). **Hoãn lại:** `KillSwitches` trong `control.proto` chưa có field cho level 6. `shedLevel` được publish vào `NodeState` và metric `gw_shed_level`.
 
 ### 7.4 Slow consumer
 
@@ -675,6 +691,8 @@ Kích hoạt bởi `NettyGatewayServer.stop()` hoặc `POST /admin/drain` (chỉ
 3. Kết thúc khi tổng session = 0 hoặc hết `maxDuration` (10 phút) → force close 1001 phần còn lại (pending → `NACK_CLOSED`).
 4. Trả `CompletableFuture` để `stop()` tiếp tục các phase sau (§3.7).
 
+Profile `local` và `dev` đặt `drain.max-duration=5s`, `listener-close-delay=0s`, `interval=1s`, để SIGTERM vẫn thoát trong ≤ 15 s (R3) khi đang có client kết nối. Prod giữ 10 phút và đặt `spring.lifecycle.timeout-per-shutdown-phase=11m`. `POST /admin/drain` chỉ drain, không dừng process: SIGTERM đến sau sẽ chờ đúng lần drain đó.
+
 ### 7.6 Warm-up (`WarmUpRunner`)
 
 - Chạy sau khi bind và trước `ready`.
@@ -685,7 +703,8 @@ Kích hoạt bởi `NettyGatewayServer.stop()` hoặc `POST /admin/drain` (chỉ
 ### 7.7 TLS
 
 - `SslContextProvider` đọc `gateway.tls.cert-file` và `key-file` (PEM, ECDSA P-256), kiểm thay đổi mỗi 30 s; có thay đổi thì dựng `SslContext` mới (`SslProvider.OPENSSL_REFCNT`, TLS 1.3, cipher mặc định của BoringSSL) và swap qua `AtomicReference`. Context cũ được `release()` sau 60 s.
-- Session ticket key: `SecretSource` cung cấp `tls-ticket-keys/{prev,current,next}` (mỗi key 48 byte); nạp bằng `OpenSslSessionContext.setTicketKeys(...)`, reload mỗi 60 s.
+- Session ticket key: `SecretSource` cung cấp `tls-ticket-keys/{prev,current,next}`, mỗi file một dòng base64 của 48 byte (`name 16 | hmac 16 | aes 16`); nạp bằng `OpenSslSessionContext.setTicketKeys(current, next, prev)` vào mọi context (cả context dựng lại khi đổi cert), reload mỗi 60 s. Thiếu lúc khởi động thì fail-fast; profile local/dev tự sinh.
+- Resume ticket key (`ticket-keys/…`, §4.7) cũng được đọc lại mỗi 60 s. Đọc lỗi thì giữ key cũ và tăng `gw_secrets_reload_total{name,result=failed}`; cert hỏng thì giữ context cũ và tăng `gw_tls_reloads_total{result=failed}`.
 - mTLS cho gRPC: cert riêng (`gateway.grpc.tls.*`), trust bundle SPIFFE.
 
 ### 7.8 Kill switch
@@ -699,8 +718,8 @@ Kích hoạt bởi `NettyGatewayServer.stop()` hoặc `POST /admin/drain` (chỉ
 | `upstream.telemetry.enabled` | fleet, cell, tenant | `false` → drop telemetry |
 | `tenant.blocked` | tenant | HELLO → 4009; session đang mở → close 4013 với `retryAfter` 300 s |
 | `sse.fallback.enabled` | tenant | Bật hoặc tắt `/v1/sse` |
-| `recycle.enabled` | tenant | Bật hoặc tắt recycling |
-| `trace.principal` (TTL 15 phút) | fleet | Log DEBUG và trace 100% cho session của principal đó |
+| `recycle.enabled` | tenant | Bật hoặc tắt recycling (mặc định bật) |
+| `trace.principal` (TTL 15 phút) | fleet | Control key `trace:<principal>` → `TracePrincipal{principal_id, expires_at_ms}`, hiệu lực tới `min(expires_at_ms, issued_at_ms + 15 phút)`; tombstone thì tắt. Logger `pangate.trace` (INFO) ghi activation, từng frame vào/ra (type, `msg_id`, số byte) và close của mọi session của principal đó; mọi push của nó có span |
 
 ### 7.9 Endpoint quản trị (:8081)
 
@@ -731,7 +750,7 @@ Kích hoạt bởi `NettyGatewayServer.stop()` hoặc `POST /admin/drain` (chỉ
 - `LifecycleLogSampler`: log connect lấy mẫu 1%; close với code ≥ 4000, trừ 4009/4013, ghi 100%; giới hạn 1k dòng/s mỗi node (token bucket), phần vượt bị bỏ nhưng counter vẫn chính xác.
 - `principalId` luôn được hash; payload và token không bao giờ xuất hiện trong log.
 
-**Trace.** OTel span `gw.push.handoff` và `gw.push.write` chỉ khi `frame.headers.traceparent` có cờ sampled, hoặc khi có lỗi. `trace.principal` bật 100% cho principal đó.
+**Trace.** OTel span `gw.push.handoff` (từ `enqueued_at_ms` của router tới lúc gateway ghi) và `gw.push.write` (từ lúc ghi tới khi flush xong) chỉ khi `frame.headers.traceparent` có cờ sampled, hoặc session đang bị `trace.principal`. Push bị NACK luôn có một span `gw.push.handoff` status ERROR (attribute `pangate.nack`), kể cả NACK từ pending window (`NACK_TIMEOUT`, `NACK_CLOSED`, `NACK_SLOW_CONSUMER`). Span kết thúc trên `gw-io` được chuyển qua một hàng đợi CAS có giới hạn (đầy thì bỏ và đếm) tới thread `gw-otel` export theo lô, không bao giờ park event loop. Log `pangate.trace` giới hạn 1000 dòng/s mỗi node. Attribute: `pangate.msg_id`, `pangate.delivery_class`, `pangate.tenant`, `pangate.principal_hash`. Export OTLP/HTTP tới `gateway.tracing.otlp-endpoint`; rỗng (mặc định) thì tắt.
 
 ---
 
@@ -754,6 +773,7 @@ gateway:
     proxy-protocol: { enabled: false, trusted-cidrs: [] }
   io: { threads: 0, transport: auto }                     # auto = epoll, fallback NIO
   tls: { cert-file: /etc/pangate/tls/gateway.crt, key-file: /etc/pangate/tls/gateway.key, reload-interval: 30s }
+  tracing: { otlp-endpoint: "" }                          # vd. http://otel-collector:4318/v1/traces
   limits:
     hard-cap: 700000
     soft-cap: 550000
@@ -765,14 +785,16 @@ gateway:
     inbound-rate: 50
     inbound-burst: 100
     handshakes-per-principal-per-min: 20
-    pending-ack: { msgs: 32, bytes: 65536, timeout: 5s }
+    pending-ack: { msgs: 32, bytes: 65536, timeout: 5s }   # timeout ≥ 1s
+    slow-consumer-timeout: 30s
     topics-per-conn: 100
     heartbeat-interval: 30s
   admission: { rate: 5000, burst: 10000, ramp-from: 500, ramp-duration: 2m }
   outbound-budget: 4GB
   broadcast: { rate-per-loop: 10000 }
   recycling: { min: 30m, max: 90m, grace: 30s }
-  drain: { batch-percent: 2, interval: 5s, max-delay: 60s, max-duration: 10m }
+  drain: { batch-percent: 2, interval: 5s, max-delay: 60s, max-duration: 10m, listener-close-delay: 10s }
+  shed: { cpu: true }
   warmup: { iterations: 2000, concurrency: 32, timeout: 60s }
   grpc:
     port: 9090
@@ -849,7 +871,7 @@ Topic Kafka: profile `local` và `dev` đặt `gateway.kafka.create-topics=true`
 | Push API | Tắt | `fake-pushapi` | Push API |
 | Giới hạn | hard-cap 100k, soft-cap 80k, per-IP 100k (để load test từ loopback), budget 256 MB, warm-up 50 vòng | hard-cap 200k, budget 1 GB, warm-up 200 vòng | Như §9 |
 | Leak detection | `simple` | `simple` | `disabled` |
-| JVM | Mặc định của IDE | `-Xmx1g -XX:MaxDirectMemorySize=1g` | Flags §4.1 tài liệu gốc (chỉ đặt trong image và Helm prod) |
+| JVM | Mặc định của IDE | Flags của image + `JAVA_TOOL_OPTIONS="-Xmx1g -XX:MaxDirectMemorySize=1g"` | Flags của image (ZGC generational, heap 50% bộ nhớ container, `AlwaysPreTouch`, `ExitOnOutOfMemoryError`, xem README gateway) + `JAVA_TOOL_OPTIONS=-XX:MaxDirectMemorySize=<25% bộ nhớ container>`; thiếu flag này thì không start |
 
 Đường dẫn secret ở local nằm trong thư mục home (`~/.pangate-dev`), nên dù IDE đặt working directory ở đâu, gateway vẫn tìm thấy cùng một bộ key và resume ticket vẫn hợp lệ qua các lần chạy.
 
@@ -867,7 +889,7 @@ Topic Kafka: profile `local` và `dev` đặt `gateway.kafka.create-topics=true`
 
 | Target | Việc |
 |---|---|
-| `make doctor` | Kiểm Java 21, Docker, các port 8443, 8883, 9090, 8081 còn trống và (từ M2) Kafka, Redis trên `localhost` có kết nối được không |
+| `make doctor` | Kiểm Java 21, Docker, các port 8443, 8883, 9090, 8081 (và 9443 của `fake-pushapi` ở dev) còn trống và (từ M2) Kafka, Redis trên `localhost` có kết nối được không |
 | `make bootstrap` | `./mvnw install -DskipITs` theo thứ tự parent → contracts → starter → devtools → gateway (IT của gateway dùng client trong devtools) |
 | `make infra-up` / `make infra-down` | Bật hoặc tắt Kafka + Redis (compose, nhóm mặc định) trên `localhost` cho local |
 | `make run-local` | `./mvnw -f gateway-service spring-boot:run -Dspring-boot.run.profiles=local` (tương đương chạy từ IDE) |
@@ -903,7 +925,7 @@ Cấu hình IDE: chạy `com.pangate.gateway.GatewayApplication`, đặt active 
 | `gw.control` consumer lỗi sau khi đã catch-up | Giữ state hiện tại, alert | Không ảnh hưởng |
 | `gw.control` chưa catch-up được lúc boot | Chưa ready, retry; quá 5 phút → exit | — |
 | Exception trong handler | `exceptionCaught` → `close(4500)`, tăng metric, log mẫu | Chỉ kết nối đó |
-| `OutOfMemoryError` | `-XX:+ExitOnOutOfMemoryError` | Process restart |
+| `OutOfMemoryError` | `-XX:+ExitOnOutOfMemoryError` (heap dump vào `/tmp`), đặt trong image | Process restart |
 | Lease bị process khác giữ (cùng nodeId) | Fence, exit (§6.1) | Process exit |
 
 ---
@@ -915,7 +937,7 @@ Cấu hình IDE: chạy `com.pangate.gateway.GatewayApplication`, đặt active 
 | Unit | Từng handler với `EmbeddedChannel`: `AcceptGate`, `UpgradeGuard`, `FrameCodec`, `HelloAuthHandler`, `SessionHandler`. Logic thuần với `FakeClock`: `DeadlineWheel`, `PendingAckWindow`, `ResumeTicketService`, `ConnId`, `LoadShedLadder`, `AdmissionController`, `RevocationList`, `BroadcastPacer`, `AckBatcher` | JUnit 5, AssertJ |
 | Kỷ luật thread | Bật BlockHound cho thread `gw-io-*` trong mọi test; `Session` assert `loop.inEventLoop()` khi `-Dpangate.assertLoop=true` (bật trong test) | BlockHound |
 | Integration (`src/it/java`, failsafe) | Boot gateway thật bằng Spring context trên port ngẫu nhiên, cộng Testcontainers Kafka và Redis, dùng client và fake-router của devtools (dùng như thư viện). Kịch bản: HELLO JWT → CONNECTED; reconnect bằng ticket (không gọi issuer); toàn bộ close code ở §4.6; push RELIABLE → ACK → `DeliveryAck ACKED`; không ACK → `NACK_TIMEOUT`; EPHEMERAL tới channel unwritable bị drop; upstream `cmd` → record Kafka + `UPSTREAM_ACK`; Revoke trên `gw.control` → 4003; KICK single-session qua fake-pushapi; lease, epoch và resync sau khi Redis bị pause; drain; broadcast tới nhiều loop | Testcontainers, Docker |
-| Bộ nhớ | IT mở 10k session idle, đo heap qua `MemoryMXBean` trước và sau, assert < 5 KB heap/session (không tính TLS native; đo thực tế M1: 4,7 KB) | |
+| Bộ nhớ | Mở 10k session idle, đo heap trước và sau, assert < 5 KB heap/session (không tính TLS native). Baseline chụp sau một vòng warm-up 1000 session để các pool cố định của node (Kafka producer, Lettuce) không bị chia cho N. Đo thực tế: M1 4,7 KB, M2a 4,9 KB, M2b 4,9 KB | |
 | Fuzz (M3) | `FrameCodec.decode` và `HelloAuthHandler` với input ngẫu nhiên; chạy 10 phút không crash và không leak `ByteBuf` (leak detection `paranoid`) | Jazzer |
 | Benchmark (M3) | `FrameCodec` encode/decode, `PrincipalIndex`, `DeadlineWheel.tick` | JMH (profile `-Pjmh`) |
 | Smoke tải local | `make up` rồi `gateway-devtools client --load 50000 --ramp 2000`; kiểm lag p99 < 20 ms trên `/actuator/prometheus` | devenv |
@@ -933,11 +955,13 @@ Leak detection: `paranoid` trong unit test và IT, `disabled` trong cấu hình 
 | **M2 Cluster** | contracts `router`, `lifecycle`, `control`, `upstream`, `push`; `NodeIdentity`, lease, `RegistryWriter`, `RegistryResync`, `SeqReader`; `UpstreamPublisher` (2 producer) + lifecycle; `PushStreamService`, `AckBatcher`, `PendingAckWindow`; `TopicIndex`, `BroadcastPacer`; control push; `ControlEventConsumer` (revoke, cellmap, tenantcfg); `KickClient`; devtools `fake-router` + `fake-pushapi`; devenv có Kafka (listener INTERNAL/EXTERNAL), Redis standalone, `fake-pushapi`, `make infra-up`; retry dependency trong `InfraLifecycle`; `create-topics` | **R1 với Kafka + Redis trên `localhost` và R2 đầy đủ đạt**; E2E connect → push → ack → disconnect trên devenv (`make smoke`); diễn tập kill node: lease hết hạn sau ≤ 15 s, khởi động lại nhận epoch mới; Revoke đóng session trong < 10 s; IT M2 xanh |
 | **M3 Hardening** | `OutboundBudget`, `LoadShedLadder`, `SlowConsumerPolicy`; `DrainCoordinator`, recycling, `WarmUpRunner` + ramp đầy đủ; TLS hot-reload + session ticket key; toàn bộ kill switch; SSE fallback + `/v1/upstream`; PROXY protocol; mượn tenant cap; `KernelStatsReader`; `trace.principal`; Jazzer, JMH; image prod (flags JVM §4.1 tài liệu gốc); tài liệu ADR | IT drain, shed và slow consumer xanh; fuzz 10 phút sạch; image build và chạy trong devenv; release `0.1.0` |
 
-Mỗi milestone là một implementation plan riêng (writing-plans).
+**Trạng thái (2026-11-05):** M1, M2 và M3 hoàn thành; bản `0.1.0`. Số đo khi chốt M3: 567 unit + 97 IT xanh; heap/session 4808 B (10k session); 18k session idle, lag p99 1,68 ms; fuzz 10 phút mỗi target sạch (`FrameCodec` 12,1 triệu lần chạy, `HelloAuthHandler` 4,3 triệu; input là pooled buffer, leak `paranoid`); `make images up smoke` xanh với image prod (ZGC). Còn mở: bài 50k session (§14.6).
+
+Mỗi milestone là một implementation plan riêng (writing-plans). M2 được hiện thực qua hai plan: **M2a** (infra, registry, upstream, control) và **M2b** (push, broadcast, kick, `fake-router`/`fake-pushapi`, smoke push → ack).
 
 ---
 
-## 13. ADR sẽ được ghi vào `docs/adr/`
+## 13. ADR (đã ghi vào `docs/adr/` ở M3c)
 
 | ADR | Quyết định | Nguồn |
 |---|---|---|
@@ -951,6 +975,8 @@ Mỗi milestone là một implementation plan riêng (writing-plans).
 | 0008 | Monorepo tạm thời, giữ build độc lập cho từng thư mục (polyrepo-ready) | Spec §2 |
 | 0009 | local = infra thật trên `localhost` + gateway từ IDE; dev = toàn bộ trong compose; Redis standalone ở cả hai | Spec §9.1 |
 | 0010 | Lease "epoch lớn hơn thắng" để restart nhanh không bị fence | Spec §6.1 |
+| 0011 | Span OTel qua `LoopSafeSpanProcessor` thay vì `BatchSpanProcessor` | Spec §8, plan M3b |
+| 0012 | `tenantconns:{t}` là hash tổng theo node, hạn 30 s | Spec §4.6 bước i, §14.11 |
 
 ---
 
@@ -966,6 +992,9 @@ Mỗi milestone là một implementation plan riêng (writing-plans).
 7. Môi trường local và dev (§9.1) cùng Redis standalone: tài liệu gốc chỉ mô tả prod; phần này phục vụ yêu cầu "code phải start được ở local và dev".
 8. Lease theo quy tắc "epoch lớn hơn thắng" (§6.1), thay cho "lease còn sống thì chặn", để restart nhanh không bị fence.
 9. Cổng quản trị dùng Spring MVC + Tomcat + Actuator thay vì WebFlux hoặc JDK HttpServer (§1). Tài liệu gốc §4 chỉ cấm Tomcat trên data path; WebFlux xung đột version Netty. Các phase lifecycle của gateway được dời lên `MAX − 1900…MAX − 100` để nằm trong vòng đời của web server (§3.7).
+
+10. SSE ack ngay khi ghi (§4.3): client SSE không có kênh gửi ACK, nên RELIABLE trên SSE được coi như `downgradeReliable`. Đã được xác nhận (plan M3b R1).
+11. `tenantconns:{t}` là hash tổng theo node có hạn 30 s thay cho `INCR`/`DECR` (§4.6 i): `INCR`/`DECR` để lại số đếm thừa vĩnh viễn khi một node bị kill. Đã được xác nhận (plan M3b R2).
 
 **Câu hỏi còn mở** (không chặn M1):
 1. **Contract `seqepochs` với Push API** (§6.7): key, định dạng và người ghi cần Push API xác nhận trước M2. Nếu bị từ chối, phương án dự phòng là gửi `seq_epoch=0` và để SDK dựa vào `seq_epoch` trên từng PUSH.

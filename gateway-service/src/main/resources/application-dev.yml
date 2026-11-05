@@ -5,6 +5,13 @@ pangate:
     dir: ${gateway.dev.dir}
 
 gateway:
+  netty: { leak-detection: simple }
+  outbound-budget: 1GB
+  warmup: { iterations: 200 }
+  drain: { interval: 1s, max-duration: 5s, listener-close-delay: 0s }
+  shed: { cpu: false }
+  grpc: { plaintext: true }
+  push-api: { enabled: true, target: "dns:///fake-pushapi:9443", plaintext: true }
   node-id: gateway-dev-1
   dev:
     bootstrap-secrets: true
@@ -17,3 +24,10 @@ gateway:
   limits:
     hard-cap: 200000
   startup: { dependency-timeout: 60s }
+  redis:
+    topology: standalone
+    registry-uri: redis://redis:6379
+    state-uri: redis://redis:6379
+  kafka:
+    bootstrap: kafka:29092
+    create-topics: true

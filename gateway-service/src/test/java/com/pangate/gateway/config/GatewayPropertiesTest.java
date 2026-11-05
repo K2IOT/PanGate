@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import org.springframework.util.unit.DataSize;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
@@ -19,6 +21,12 @@ class GatewayPropertiesTest {
   private final ApplicationContextRunner runner = new ApplicationContextRunner()
       .withInitializer(new ConfigDataApplicationContextInitializer())
       .withUserConfiguration(Config.class);
+
+  @Test
+  void tlsReloadIntervalDefaults30s() {
+    runner.run(ctx -> assertThat(ctx.getBean(GatewayProperties.class).tls().reloadInterval())
+        .isEqualTo(Duration.ofSeconds(30)));
+  }
 
   @Test
   void prodDefaultsMatchSpec() {
@@ -84,5 +92,148 @@ class GatewayPropertiesTest {
       assertThat(p.nodeId()).isEqualTo("gateway-dev-1");
       assertThat(p.dev().dir()).isEqualTo(Path.of("/dev-secrets"));
     });
+  }
+  @Test
+  void localProfileBindsStandaloneRedisAndLocalKafka() {
+    runner.withPropertyValues("spring.profiles.active=local").run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      assertThat(p.redis().topology()).isEqualTo(RedisTopology.STANDALONE);
+      assertThat(p.redis().registryUri()).isEqualTo("redis://localhost:6379");
+      assertThat(p.redis().stateUri()).isEqualTo("redis://localhost:6379");
+      assertThat(p.kafka().bootstrap()).isEqualTo("localhost:9092");
+      assertThat(p.kafka().createTopics()).isTrue();
+      assertThat(p.kafka().upstreamTypes()).containsExactly("telemetry", "cmd", "cmd_result", "read", "sdk.metrics");
+      assertThat(p.limits().inboundRate()).isEqualTo(50);
+    });
+  }
+
+  @Test
+  void devProfileUsesComposeHosts() {
+    runner.withPropertyValues("spring.profiles.active=dev").run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      assertThat(p.redis().registryUri()).isEqualTo("redis://redis:6379");
+      assertThat(p.kafka().bootstrap()).isEqualTo("kafka:29092");
+      assertThat(p.kafka().createTopics()).isTrue();
+    });
+  }
+
+  @Test
+  void prodDefaultsDoNotCreateTopics() {
+    runner.run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      assertThat(p.kafka().createTopics()).isFalse();
+      assertThat(p.kafka().topicPrefix()).isEqualTo("c1");
+      assertThat(p.kafka().reliableBuffer()).isEqualTo(DataSize.ofMegabytes(128));
+      assertThat(p.kafka().telemetryBuffer()).isEqualTo(DataSize.ofMegabytes(128));
+      assertThat(p.redis().topology()).isEqualTo(RedisTopology.CLUSTER);
+      assertThat(p.redis().commandTimeout()).isEqualTo(Duration.ofSeconds(2));
+      GatewayLimits l = GatewayLimits.from(p);
+      assertThat(l.inboundRate()).isEqualTo(50);
+      assertThat(l.inboundBurst()).isEqualTo(100);
+      assertThat(l.topicsPerConn()).isEqualTo(100);
+    });
+  }
+
+  @Test
+  void bindsPushSettings() {
+    runner.run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      assertThat(p.grpc().port()).isEqualTo(9090);
+      assertThat(p.grpc().plaintext()).isFalse();
+      assertThat(p.grpc().allowedSpiffe()).containsExactly("spiffe://pangate/cell-1/push-router");
+      assertThat(p.grpc().tls().trustFile()).isEqualTo(Path.of("/etc/pangate/grpc/spiffe-bundle.pem"));
+      assertThat(p.pushApi().enabled()).isTrue();
+      assertThat(p.pushApi().target()).isEqualTo("dns:///push-api:9443");
+      assertThat(p.pushApi().plaintext()).isFalse();
+      assertThat(p.broadcast().ratePerLoop()).isEqualTo(10_000);
+      assertThat(p.limits().pendingAck().msgs()).isEqualTo(32);
+      assertThat(p.limits().pendingAck().bytes()).isEqualTo(DataSize.ofKilobytes(64));
+      assertThat(p.limits().pendingAck().timeout()).isEqualTo(Duration.ofSeconds(5));
+      GatewayLimits l = GatewayLimits.from(p);
+      assertThat(l.pendingAckMsgs()).isEqualTo(32);
+      assertThat(l.pendingAckBytes()).isEqualTo(65_536);
+      assertThat(l.pendingAckTimeout()).isEqualTo(Duration.ofSeconds(5));
+      assertThat(l.broadcastRatePerLoop()).isEqualTo(10_000);
+    });
+  }
+
+  @Test
+  void localProfileUsesPlaintextAndNoPushApi() {
+    runner.withPropertyValues("spring.profiles.active=local").run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      assertThat(p.grpc().plaintext()).isTrue();
+      assertThat(p.pushApi().enabled()).isFalse();
+    });
+  }
+
+  @Test
+  void devProfileUsesFakePushApi() {
+    runner.withPropertyValues("spring.profiles.active=dev").run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      assertThat(p.grpc().plaintext()).isTrue();
+      assertThat(p.pushApi().enabled()).isTrue();
+      assertThat(p.pushApi().target()).isEqualTo("dns:///fake-pushapi:9443");
+      assertThat(p.pushApi().plaintext()).isTrue();
+    });
+  }
+
+  @Test
+  void pendingAckTimeoutBelowOneSecondIsRejected() {
+    runner.withPropertyValues("gateway.limits.pending-ack.timeout=500ms").run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      org.assertj.core.api.Assertions.assertThatThrownBy(() -> GatewayLimits.from(p))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("gateway.limits.pending-ack.timeout");
+    });
+  }
+
+  @Test
+  void bindsProtectionDefaults() {
+    runner.run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      assertThat(p.outboundBudget()).isEqualTo(DataSize.ofGigabytes(4));
+      assertThat(p.recycling().min()).isEqualTo(Duration.ofMinutes(30));
+      assertThat(p.recycling().max()).isEqualTo(Duration.ofMinutes(90));
+      assertThat(p.recycling().grace()).isEqualTo(Duration.ofSeconds(30));
+      assertThat(p.drain().batchPercent()).isEqualTo(2);
+      assertThat(p.drain().interval()).isEqualTo(Duration.ofSeconds(5));
+      assertThat(p.drain().maxDelay()).isEqualTo(Duration.ofSeconds(60));
+      assertThat(p.drain().maxDuration()).isEqualTo(Duration.ofMinutes(10));
+      assertThat(p.drain().listenerCloseDelay()).isEqualTo(Duration.ofSeconds(10));
+      assertThat(p.warmup().iterations()).isEqualTo(2000);
+      assertThat(p.warmup().concurrency()).isEqualTo(32);
+      assertThat(p.warmup().timeout()).isEqualTo(Duration.ofSeconds(60));
+      assertThat(p.limits().slowConsumerTimeout()).isEqualTo(Duration.ofSeconds(30));
+      assertThat(GatewayLimits.from(p).slowConsumerTimeout()).isEqualTo(Duration.ofSeconds(30));
+      assertThat(ctx.getEnvironment().getProperty("spring.lifecycle.timeout-per-shutdown-phase")).isEqualTo("11m");
+    });
+  }
+
+  @Test
+  void localAndDevKeepShutdownUnder15s() {
+    runner.withPropertyValues("spring.profiles.active=local").run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      assertThat(p.drain().maxDuration()).isEqualTo(Duration.ofSeconds(5));
+      assertThat(p.drain().listenerCloseDelay()).isEqualTo(Duration.ZERO);
+      assertThat(p.drain().interval()).isEqualTo(Duration.ofSeconds(1));
+      assertThat(p.outboundBudget()).isEqualTo(DataSize.ofMegabytes(256));
+      assertThat(p.warmup().iterations()).isEqualTo(50);
+    });
+    runner.withPropertyValues("spring.profiles.active=dev").run(ctx -> {
+      GatewayProperties p = ctx.getBean(GatewayProperties.class);
+      assertThat(p.drain().maxDuration()).isEqualTo(Duration.ofSeconds(5));
+      assertThat(p.drain().listenerCloseDelay()).isEqualTo(Duration.ZERO);
+      assertThat(p.outboundBudget()).isEqualTo(DataSize.ofGigabytes(1));
+      assertThat(p.warmup().iterations()).isEqualTo(200);
+    });
+  }
+
+  @Test
+  void cpuShedSignalOnInProdOffInLocalAndDev() {
+    runner.run(ctx -> assertThat(ctx.getBean(GatewayProperties.class).shed().cpu()).isTrue());
+    runner.withPropertyValues("spring.profiles.active=local")
+        .run(ctx -> assertThat(ctx.getBean(GatewayProperties.class).shed().cpu()).isFalse());
+    runner.withPropertyValues("spring.profiles.active=dev")
+        .run(ctx -> assertThat(ctx.getBean(GatewayProperties.class).shed().cpu()).isFalse());
   }
 }

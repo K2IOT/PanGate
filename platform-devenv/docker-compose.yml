@@ -1,6 +1,6 @@
 # PanGate dev environment (spec §2.4, §9.1). One file, compose profiles:
-#   (default)  infrastructure (Kafka, Redis) — arrives with M2; `make infra-up` exposes it on localhost
-#   app        issuer + gateway, built with `make images`
+#   (default)  infrastructure (Kafka, Redis); `make infra-up` exposes it on localhost for the IDE (profile local)
+#   app        issuer + fake-pushapi + gateway, built with `make images`
 #   tools      devtools container for `make smoke`
 name: pangate
 
@@ -11,6 +11,55 @@ x-healthcheck: &hc
   start_period: 10s
 
 services:
+  kafka:
+    image: apache/kafka:3.9.1
+    environment:
+      CLUSTER_ID: pangate-dev-kafka-0001
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # INTERNAL for containers (kafka:29092), EXTERNAL for JVMs on the host (localhost:9092).
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    ports:
+      - "9092:9092"
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "kafka:29092", "--list"]
+
+  kafka-init:
+    image: apache/kafka:3.9.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        t=/opt/kafka/bin/kafka-topics.sh
+        b=kafka:29092
+        $$t --bootstrap-server $$b --create --if-not-exists --topic c1.gw.lifecycle --partitions 32
+        for ty in telemetry cmd cmd_result read sdk.metrics; do
+          $$t --bootstrap-server $$b --create --if-not-exists --topic c1.gw.upstream.$$ty --partitions 64
+        done
+        $$t --bootstrap-server $$b --create --if-not-exists --topic gw.control --partitions 8 --config cleanup.policy=compact
+        echo topics ready
+
+  redis:
+    image: redis:7.4.2
+    ports:
+      - "6379:6379"
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "redis-cli", "ping"]
+
   issuer:
     profiles: ["app"]
     image: pangate/gateway-devtools:dev
@@ -25,10 +74,25 @@ services:
       test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.devtools.Main", "health",
              "http://127.0.0.1:8090/.well-known/jwks.json"]
 
+  # Push API stand-in (spec §2.4, §6.6): receives the gateway's KICK and sends it back as a CONTROL item.
+  # It dials gateway:9090 only when a KICK arrives, so it can start before the gateway.
+  fake-pushapi:
+    profiles: ["app"]
+    image: pangate/gateway-devtools:dev
+    command: ["fake-pushapi", "--port", "9443", "--router", "gateway:9090"]
+    ports:
+      - "9443:9443"
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.devtools.Main", "health",
+             "--grpc", "localhost:9443"]
+
   gateway:
     profiles: ["app"]
     image: pangate/gateway-service:dev
     user: "0"
+    # drain (profile dev: max 5 s) + loop shutdown must fit before SIGKILL (spec §7.5, §9.1 R3)
+    stop_grace_period: 20s
     environment:
       SPRING_PROFILES_ACTIVE: dev
       JAVA_TOOL_OPTIONS: "-Xmx1g -XX:MaxDirectMemorySize=1g"
@@ -37,9 +101,16 @@ services:
     ports:
       - "8443:8443"
       - "8883:8883"
+      - "9090:9090"
       - "8081:8081"
     depends_on:
       issuer:
+        condition: service_healthy
+      fake-pushapi:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      redis:
         condition: service_healthy
     healthcheck:
       <<: *hc

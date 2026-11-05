@@ -35,9 +35,9 @@ class SessionHandlerTest {
     f.channel.attr(ChannelAttrs.PROTOCOL_READY).set(true);
     f.channel.attr(ChannelAttrs.AUTHENTICATED).set(true);
     session = f.tracker.admit(f.channel, f.loop, InetAddress.getLoopbackAddress());
-    session.activate(new Session.Identity("t1", "t1:u1", "d1", "ios", "1.0", Set.of()), "CONN",
+    session.activate(new Session.Identity("t1", "t1:u1", "d1", "ios", "1.0", Set.of()), "CONN", 0L,
         f.now() - 100, f.now() + 3_600, 7, List.of("t1:news.*"));
-    f.channel.pipeline().addLast(new SessionHandler(auth.tickets, auth.flow, limiter, f.limits, "cell-1"), new ErrorTerminator());
+    f.channel.pipeline().addLast(new SessionHandler(auth.tickets, auth.flow, limiter, f.policy(limiter), f.limits, "cell-1", f.upstream, f.delivery, f.clientTopics), new ErrorTerminator());
   }
 
   private Frame in(Frame frame) {
@@ -89,6 +89,19 @@ class SessionHandlerTest {
   }
 
   @Test
+  void reauthWithNarrowerTopicsDropsSubscriptionsTheNewJwtNoLongerAllows() {
+    assertThat(topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s1", "t1:news.a", "t1:news.b")).isNull();
+
+    Frame out = in(Frame.newBuilder().setType(FrameType.FRAME_TYPE_REAUTH).setPayload(Reauth.newBuilder()
+        .setJwt(auth.jwt("t1:u1", "d1", f.now(), List.of("t1:news.a"))).build().toByteString()).build());
+
+    assertThat(out.getType()).isEqualTo(FrameType.FRAME_TYPE_REAUTH);
+    assertThat(f.loop.topics().snapshot("t1:news.a")).containsExactly(session);
+    assertThat(f.loop.topics().snapshot("t1:news.b")).isEmpty();
+    assertThat(session.hasTopic("t1:news.b")).isFalse();
+  }
+
+  @Test
   void reauthForOtherPrincipalAuthFailed() throws Exception {
     Frame req = Frame.newBuilder().setType(FrameType.FRAME_TYPE_REAUTH)
         .setPayload(Reauth.newBuilder().setJwt(auth.jwt("t1:other", "d1", f.now())).build().toByteString()).build();
@@ -124,10 +137,12 @@ class SessionHandlerTest {
     g.channel.attr(ChannelAttrs.TRANSPORT).set(ChannelAttrs.TransportKind.TCP);
     g.channel.attr(ChannelAttrs.PROTOCOL_READY).set(true);
     Session s = g.tracker.admit(g.channel, g.loop, InetAddress.getLoopbackAddress());
-    s.activate(new Session.Identity("t0", "t1:u1", "d1", "ios", "1.0", Set.of()), "CONN", g.now(), g.now() + 3_600,
+    s.activate(new Session.Identity("t0", "t1:u1", "d1", "ios", "1.0", Set.of()), "CONN", 0L, g.now(), g.now() + 3_600,
         0, List.of());
-    g.channel.pipeline().addLast(new SessionHandler(a.tickets, a.flow,
-        new com.pangate.gateway.auth.PrincipalHandshakeLimiter(20, () -> g.now() * 1000), g.limits, "cell-1"),
+    com.pangate.gateway.auth.PrincipalHandshakeLimiter gl =
+        new com.pangate.gateway.auth.PrincipalHandshakeLimiter(20, () -> g.now() * 1000);
+    g.channel.pipeline().addLast(new SessionHandler(a.tickets, a.flow, gl, g.policy(gl), g.limits, "cell-1",
+        g.upstream, g.delivery, g.clientTopics),
         new ErrorTerminator());
 
     g.channel.writeInbound(Frame.newBuilder().setType(FrameType.FRAME_TYPE_REAUTH)
@@ -137,24 +152,111 @@ class SessionHandlerTest {
     assertThat(s.closeCode()).isEqualTo(CloseCode.AUTH_FAILED);
   }
 
+  private Frame topics(FrameType t, String msgId, String... topics) {
+    return in(Frame.newBuilder().setType(t).setMsgId(msgId).setPayload(
+        com.pangate.contracts.v1.Subscribe.newBuilder().addAllTopics(List.of(topics)).build().toByteString()).build());
+  }
+
   @Test
-  void unsupportedFramesGetNonFatalError() throws Exception {
-    for (FrameType t : List.of(FrameType.FRAME_TYPE_UPSTREAM, FrameType.FRAME_TYPE_SUBSCRIBE,
-        FrameType.FRAME_TYPE_UNSUBSCRIBE, FrameType.FRAME_TYPE_RPC_RES)) {
-      Frame out = in(frame(t));
-      ErrorInfo e = ErrorInfo.parseFrom(out.getPayload());
-      assertThat(e.getCode()).isEqualTo(4500);
-      assertThat(e.getMessage()).isEqualTo("UNSUPPORTED");
-      assertThat(e.getFatal()).isFalse();
-      assertThat(e.getRetryable()).isFalse();
-    }
+  void subscribeAllowedTopicsIndexesThem() {
+    assertThat(topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s1", "t1:news.a", "t1:news.b")).isNull();
+    assertThat(f.loop.topics().snapshot("t1:news.a")).containsExactly(session);
+    assertThat(f.loop.topics().snapshot("t1:news.b")).containsExactly(session);
+  }
+
+  @Test
+  void subscribeWithOneForbiddenTopicAppliesNoneAndErrors4000WithMsgId() throws Exception {
+    Frame out = topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s1", "t1:news.a", "t1:other");
+    ErrorInfo e = ErrorInfo.parseFrom(out.getPayload());
+    assertThat(e.getCode()).isEqualTo(4000);
+    assertThat(e.getMessage()).isEqualTo("topic not allowed: t1:other");
+    assertThat(e.getFatal()).isFalse();
+    assertThat(e.getRetryable()).isFalse();
+    assertThat(out.getMsgId()).isEqualTo("s1");
+    assertThat(f.loop.topics().topicCount()).isZero();
+    assertThat(f.meters.counter("gw.subscribe.rejected", "reason", "not_allowed").count()).isEqualTo(1);
     assertThat(f.channel.isOpen()).isTrue();
   }
 
   @Test
-  void ackIsIgnored() {
-    assertThat(in(frame(FrameType.FRAME_TYPE_ACK))).isNull();
+  void subscribeOtherTenantTopicIsNotAllowedEvenIfPatternMatches() throws Exception {
+    session.reauth(f.now(), f.now() + 3_600, 7, List.of("*"));
+    Frame out = topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s1", "t2:x");
+    assertThat(ErrorInfo.parseFrom(out.getPayload()).getCode()).isEqualTo(4000);
+  }
+
+  @Test
+  void subscribeBeyondTopicsPerConnErrors() throws Exception {
+    f.tenants.apply(com.pangate.contracts.v1.TenantCfg.newBuilder()
+        .setScope(com.pangate.contracts.v1.Scope.SCOPE_TENANT).setScopeId("t1")
+        .setLimits(com.pangate.contracts.v1.TenantLimits.newBuilder().setTopicsPerConn(2)).build());
+    assertThat(topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s1", "t1:news.a", "t1:news.b")).isNull();
+    Frame out = topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s2", "t1:news.c");
+    ErrorInfo e = ErrorInfo.parseFrom(out.getPayload());
+    assertThat(e.getMessage()).isEqualTo("too many topics");
+    assertThat(f.loop.topics().snapshot("t1:news.c")).isEmpty();
+    assertThat(f.meters.counter("gw.subscribe.rejected", "reason", "limit").count()).isEqualTo(1);
+    // re-subscribing topics already held does not count twice
+    assertThat(topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s3", "t1:news.a")).isNull();
+  }
+
+  @Test
+  void subscribeTopicLongerThan256IsRejected() throws Exception {
+    session.reauth(f.now(), f.now() + 3_600, 7, List.of("t1:*"));
+    Frame out = topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s1", "t1:" + "x".repeat(254));
+    ErrorInfo e = ErrorInfo.parseFrom(out.getPayload());
+    assertThat(e.getCode()).isEqualTo(4000);
+    assertThat(e.getMessage()).isEqualTo("topic too long");
+    assertThat(f.loop.topics().topicCount()).isZero();
+    assertThat(f.meters.counter("gw.subscribe.rejected", "reason", "invalid").count()).isEqualTo(1);
+    assertThat(topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s2", "t1:" + "x".repeat(253))).isNull();  // 256 is fine
+  }
+
+  @Test
+  void unsubscribeRemovesAndUnknownIsIgnored() {
+    topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s1", "t1:news.a");
+    assertThat(topics(FrameType.FRAME_TYPE_UNSUBSCRIBE, "u1", "t1:news.a", "t1:never")).isNull();
+    assertThat(f.loop.topics().topicCount()).isZero();
+  }
+
+  @Test
+  void malformedSubscribeIsBadFrame() {
+    in(Frame.newBuilder().setType(FrameType.FRAME_TYPE_SUBSCRIBE)
+        .setPayload(com.google.protobuf.ByteString.copyFrom(new byte[] {(byte) 0xff})).build());
+    assertThat(f.channel.isOpen()).isFalse();
+  }
+
+  @Test
+  void closeRemovesSessionFromTopicIndex() {
+    topics(FrameType.FRAME_TYPE_SUBSCRIBE, "s1", "t1:news.a");
+    f.channel.close();
+    f.channel.runPendingTasks();
+    assertThat(f.loop.topics().topicCount()).isZero();
+  }
+
+  @Test
+  void ackFrameIsRoutedToDelivery() {
+    java.util.List<com.pangate.contracts.v1.AckItem> acks = new java.util.ArrayList<>();
+    var window = session.pendingOrCreate(f.limits.current());
+    session.addPending(new com.pangate.gateway.session.PendingEntry("m1", 5,
+        new com.pangate.gateway.downstream.StreamRef(acks::add), f.now(), 1));
+
+    assertThat(in(Frame.newBuilder().setType(FrameType.FRAME_TYPE_ACK).setPayload(
+        com.pangate.contracts.v1.Ack.newBuilder().addMsgIds("m1").build().toByteString()).build())).isNull();
+
+    assertThat(acks).extracting(com.pangate.contracts.v1.AckItem::getDeliveryId).containsExactly(5L);
+    assertThat(window.size()).isZero();
     assertThat(f.channel.isOpen()).isTrue();
+  }
+
+  @Test
+  void ackWithMoreThan32IdsClosesBadFrame() {
+    var b = com.pangate.contracts.v1.Ack.newBuilder();
+    for (int i = 0; i < 33; i++) {
+      b.addMsgIds("m" + i);
+    }
+    in(Frame.newBuilder().setType(FrameType.FRAME_TYPE_ACK).setPayload(b.build().toByteString()).build());
+    assertThat(f.channel.isOpen()).isFalse();
   }
 
   @Test
@@ -186,7 +288,35 @@ class SessionHandlerTest {
     f.channel.runPendingTasks();
 
     assertThat(result.get()).isInstanceOf(JwtResult.Verified.class);
-    assertThat(autoReadDuringCallback.get()).isFalse();
+    // Reads resume before the callback, so a callback that must wait again (HELLO's seq read) can re-pause them.
+    assertThat(autoReadDuringCallback.get()).isTrue();
     assertThat(f.channel.config().isAutoRead()).isTrue();
+  }
+
+  @Test
+  void jwtAuthFlowCallbackMayPauseReadsAgain() throws Exception {
+    ECKey rotated = AuthFixture.newKey();
+    String jwt = auth.jwt(rotated, "t1:u1", "d1", f.now());
+    auth.published.add(rotated);
+
+    auth.flow.verify(f.channel, jwt, f.now(), r -> f.channel.config().setAutoRead(false));
+    f.channel.runPendingTasks();
+
+    assertThat(f.channel.config().isAutoRead()).isFalse();
+  }
+  @Test
+  void reauthWithUnknownKidKeepsPressurePausedSessionPaused() throws Exception {
+    ECKey rotated = AuthFixture.newKey();
+    auth.published.add(rotated);
+    session.upstreamPaused(true);
+    f.channel.config().setAutoRead(false);
+
+    f.channel.writeInbound(Frame.newBuilder().setType(FrameType.FRAME_TYPE_REAUTH)
+        .setPayload(Reauth.newBuilder().setJwt(auth.jwt(rotated, "t1:u1", "d1", f.now())).build().toByteString())
+        .build());
+    f.channel.runPendingTasks();
+
+    assertThat(f.channel.config().isAutoRead()).isFalse();
+    assertThat(session.upstreamPaused()).isTrue();
   }
 }

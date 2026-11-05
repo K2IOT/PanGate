@@ -94,4 +94,19 @@ class AcceptGateTest {
     assertThat(f.loop.activeCount()).isZero();
     assertThat(f.ips.trackedKeys()).isZero();
   }
+
+  @Test
+  void tcpGateRejectsAtShedLevel3ButWsGateLeavesItToTheUpgradeGuard() {
+    node.shedLevel(3);
+    f.channel.pipeline().addLast(gate().forTcp());
+    f.channel.pipeline().fireChannelActive();
+    f.channel.runPendingTasks();
+    assertThat(f.channel.isOpen()).isFalse();
+    assertThat(rejected("shed")).isEqualTo(1);
+
+    io.netty.channel.embedded.EmbeddedChannel ws = new io.netty.channel.embedded.EmbeddedChannel();
+    ws.pipeline().addLast(gate());
+    ws.pipeline().fireChannelActive();
+    assertThat(ws.isOpen()).isTrue();
+  }
 }
