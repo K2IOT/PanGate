@@ -89,3 +89,9 @@ fuzz:
 .PHONY: release-check
 release-check:
 	platform-devenv/scripts/release-check.sh $(VERSION:-SNAPSHOT=)
+
+## JMH benchmarks (spec §11): FrameCodec, PrincipalIndex, DeadlineWheel. Results in gateway-service/target/jmh.json.
+JMH_ARGS ?= -f 1 -wi 3 -i 5 -rf json -rff target/jmh.json
+.PHONY: bench
+bench:
+	$(MVNW) -q -f gateway-service/pom.xml -Pjmh test-compile exec:exec -Djmh.args="$(JMH_ARGS)"

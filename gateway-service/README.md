@@ -88,6 +88,21 @@ leak at leak level `paranoid`.
   coverage guides the fuzzer through the Frame wire format.
 - CI workflow `fuzz` runs both targets nightly and on demand.
 
+## Benchmarks
+
+JMH benchmarks (spec §11) live in `src/jmh/java` and run with the `jmh` profile: `make bench` (results in
+`gateway-service/target/jmh.json`; pass `JMH_ARGS=...` for other JMH options, e.g. `JMH_ARGS=-l` to list).
+
+Baseline, 2026-11-05 (cloud dev container, 1 fork, 3 warm-up + 5 measured iterations of 10 s):
+
+| Benchmark | Setup | Score |
+|---|---|---|
+| `FrameCodecBench.decodeUpstream` | UPSTREAM frame, 256 B payload | 217.6 ± 4.3 ns/op |
+| `FrameCodecBench.encodePush` | PUSH frame, 256 B payload | 139.2 ± 3.0 ns/op |
+| `PrincipalIndexBench.get` | 100k principals | 55.7 ± 7.5 ns/op |
+| `PrincipalIndexBench.addRemove` | second device added and removed, 100k principals | 192.5 ± 17.9 ns/op |
+| `DeadlineWheelBench.tick` | 100k sessions, deadlines over 60 s (~1.7k due per tick) | 13.7 ± 1.4 µs/op |
+
 ## Edge features (M3b)
 
 - **Certificate rotation:** replace `gateway.crt`/`gateway.key` on disk; new connections get the new certificate within `gateway.tls.reload-interval` (30 s). A broken pair is ignored (`gw_tls_reloads_total{result="failed"}`). TLS session ticket keys and resume ticket keys are re-read every 60 s.

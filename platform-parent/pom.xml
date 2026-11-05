@@ -33,6 +33,8 @@
     <picocli.version>4.7.7</picocli.version>
     <blockhound.version>1.0.18.RELEASE</blockhound.version>
     <jazzer.version>0.24.0</jazzer.version>
+    <jmh.version>1.37</jmh.version>
+    <exec-maven-plugin.version>3.5.0</exec-maven-plugin.version>
     <jib-maven-plugin.version>3.5.2</jib-maven-plugin.version>
     <jib.base.image>gcr.io/distroless/java21-debian12:nonroot</jib.base.image>
   </properties>
@@ -116,6 +118,11 @@
           <groupId>io.github.ascopes</groupId>
           <artifactId>protobuf-maven-plugin</artifactId>
           <version>${protobuf-maven-plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.codehaus.mojo</groupId>
+          <artifactId>exec-maven-plugin</artifactId>
+          <version>${exec-maven-plugin.version}</version>
         </plugin>
         <plugin>
           <groupId>com.google.cloud.tools</groupId>
