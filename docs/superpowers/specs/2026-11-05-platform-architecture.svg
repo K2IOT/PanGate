@@ -1,0 +1,219 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1080" width="1600" height="1080" font-family="Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif">
+<defs><marker id="a-60a5fa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#60a5fa"/></marker><marker id="a-a78bfa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#a78bfa"/></marker><marker id="a-f472b6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#f472b6"/></marker><marker id="a-4ade80" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#4ade80"/></marker><marker id="a-fb923c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#fb923c"/></marker><marker id="a-8b9bb4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#8b9bb4"/></marker><marker id="a-fbbf24" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#fbbf24"/></marker><marker id="a-2dd4bf" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#2dd4bf"/></marker></defs>
+<rect width="1600" height="1080" fill="#0b1220"/>
+<text x="20" y="32" font-size="20" font-weight="700" fill="#e2e8f0" text-anchor="start">PanGate platform — hướng kiến trúc sau gateway 0.1.0 (lộ trình 2026-11-05)</text>
+<text x="20" y="52" font-size="12" font-weight="normal" fill="#a3b1c6" text-anchor="start">1 cell chi tiết · monorepo, mỗi service một thư mục build độc lập · gateway và domain service chỉ gặp nhau ở Kafka và Push API (Push API là đường duy nhất xuống client)</text>
+<text x="20" y="92" font-size="11" font-weight="700" fill="#a3b1c6" text-anchor="start">CLIENT / TENANT</text>
+<rect x="20" y="104" width="200" height="70" rx="7" fill="#111827" stroke="#475569" stroke-width="1.3"/>
+<text x="33" y="123" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Web / Mobile SDK</text>
+<text x="33" y="139" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">WSS :8443 · pangate.v1</text>
+<text x="33" y="153" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">HELLO {connect JWT | ticket}</text>
+<rect x="20" y="188" width="200" height="56" rx="7" fill="#111827" stroke="#475569" stroke-width="1.3"/>
+<text x="33" y="207" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">IoT device</text>
+<text x="33" y="223" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">TLS raw TCP :8883</text>
+<rect x="20" y="520" width="200" height="98" rx="7" fill="#111827" stroke="#475569" stroke-width="1.3"/>
+<text x="33" y="539" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Tenant backend</text>
+<text x="33" y="555" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">OAuth2 client credentials</text>
+<text x="33" y="569" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">mint connect token cho user</text>
+<text x="33" y="583" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">push · revoke</text>
+<text x="33" y="597" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">(token API aud=pangate-api)</text>
+<rect x="250" y="104" width="90" height="140" rx="7" fill="#111827" stroke="#475569" stroke-width="1.3"/>
+<text x="263" y="123" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">L4 NLB</text>
+<text x="263" y="139" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">per cell</text>
+<text x="263" y="153" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">TCP pass-</text>
+<text x="263" y="167" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">through,</text>
+<text x="263" y="181" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">giữ client IP</text>
+<rect x="372" y="92" width="300" height="236" rx="7" fill="#111827" stroke="#0f766e" stroke-width="1.3"/>
+<rect x="372" y="92" width="5" height="236" rx="2" fill="#2dd4bf"/>
+<text x="385" y="111" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">gateway-service · 0.1.0</text>
+<text x="385" y="127" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">Netty data plane · Spring Boot lifecycle</text>
+<text x="385" y="141" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">HELLO: JWT (JWKS cache 5 m) | resume ticket</text>
+<text x="385" y="155" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">SessionHandler · TopicIndex · BroadcastPacer</text>
+<text x="385" y="169" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">PushStream gRPC :9090 ← router</text>
+<text x="385" y="183" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">UpstreamPublisher → Kafka (2 producer)</text>
+<text x="385" y="197" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">ControlEventConsumer ← gw.control</text>
+<text x="385" y="211" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">RegistryWriter · lease epoch → Redis</text>
+<text x="385" y="225" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">KickClient → Push API (single-session)</text>
+<text x="385" y="239" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">shed ladder · drain · recycle · SSE</text>
+<text x="385" y="253" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">đã xong: M1–M3, CI xanh</text>
+<rect x="372" y="352" width="172" height="92" rx="7" fill="#111827" stroke="#6d28d9" stroke-width="1.3"/>
+<text x="385" y="371" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Redis registry (cell)</text>
+<text x="385" y="387" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">node:{id} lease</text>
+<text x="385" y="401" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">nodes:live (+ địa chỉ</text>
+<text x="385" y="415" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">gRPC) · reg:{p}</text>
+<rect x="716" y="192" width="250" height="224" rx="7" fill="#111827" stroke="#15803d" stroke-width="1.3"/>
+<rect x="716" y="192" width="5" height="224" rx="2" fill="#4ade80"/>
+<text x="729" y="211" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">push-router-service ③</text>
+<text x="729" y="227" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">đọc c{N}.push.requests (64 partition)</text>
+<text x="729" y="241" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">watermark commit · ≤ 20k in-flight</text>
+<text x="729" y="255" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">HGETALL reg:{p} · lọc epoch sống</text>
+<text x="729" y="269" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">1 MESSAGE / conn_id (ADR 0007)</text>
+<text x="729" y="283" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">PushBatcher 256 msg / 2 ms</text>
+<text x="729" y="297" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">BroadcastFanout: 1 / node</text>
+<text x="729" y="311" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">retry ×2 (100/400 ms) → push.offline</text>
+<text x="729" y="325" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">lease hết hạn → NODE_DOWN</text>
+<text x="729" y="339" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">local/dev: tìm gateway qua nodes:live</text>
+<text x="729" y="353" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">prod: + EndpointSlice</text>
+<rect x="1022" y="80" width="300" height="210" rx="7" fill="#111827" stroke="#be185d" stroke-width="1.3"/>
+<rect x="1022" y="80" width="5" height="210" rx="2" fill="#f472b6"/>
+<text x="1035" y="99" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">auth-service ① (A1 · spec đã duyệt)</text>
+<text x="1035" y="115" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">:8090 POST /oauth2/token (client credentials)</text>
+<text x="1035" y="129" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">:8090 POST /v1/tokens → connect JWT 10 m</text>
+<text x="1035" y="143" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">:8090 POST /v1/revocations → outbox</text>
+<text x="1035" y="157" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">:8090 GET /.well-known/jwks.json</text>
+<text x="1035" y="171" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">:8081 /admin/v1 tenants · clients (scope admin)</text>
+<text x="1035" y="185" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">ES256 · key 30 d · publish trước 1 h</text>
+<text x="1035" y="199" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">chồng lấn 7 d · advisory lock</text>
+<text x="1035" y="213" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">token API aud=pangate-api</text>
+<text x="1035" y="227" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">connect token aud=pangate-gw</text>
+<text x="1035" y="241" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">JWKS vẫn phục vụ khi Postgres sập</text>
+<rect x="1360" y="80" width="220" height="82" rx="7" fill="#111827" stroke="#475569" stroke-width="1.3"/>
+<text x="1373" y="99" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">PostgreSQL (schema auth)</text>
+<text x="1373" y="115" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">tenants · clients (Argon2id)</text>
+<text x="1373" y="129" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">signing_keys (AES-GCM)</text>
+<text x="1373" y="143" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">revocations · outbox</text>
+<rect x="1360" y="176" width="220" height="66" rx="7" fill="#111827" stroke="#475569" stroke-width="1.3"/>
+<text x="1373" y="195" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">SecretSource</text>
+<text x="1373" y="211" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">KEK auth.kek.&lt;id&gt; · ticket keys</text>
+<text x="1373" y="225" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">dev: file · prod: Vault</text>
+<rect x="1022" y="318" width="300" height="182" rx="7" fill="#111827" stroke="#c2410c" stroke-width="1.3"/>
+<rect x="1022" y="318" width="5" height="182" rx="2" fill="#fb923c"/>
+<text x="1035" y="337" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">push-api-service ④</text>
+<text x="1035" y="353" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">POST /v1/push · /v1/push:batch (207)</text>
+<text x="1035" y="367" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">gRPC PushService.SendStream (+ KICK)</text>
+<text x="1035" y="381" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">xác thực token API qua JWKS (offline)</text>
+<text x="1035" y="395" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">1 Lua: idem SET NX + INCR seq/topic_seq</text>
+<text x="1035" y="409" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">seqEpoch (Postgres) · WAIT cho ORDERED</text>
+<text x="1035" y="423" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">quota 50/s/principal · 10/s/topic</text>
+<text x="1035" y="437" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">CellResolver ← gw.control CELLMAP</text>
+<text x="1035" y="451" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">→ c{N}.push.requests · push.audit</text>
+<rect x="1360" y="318" width="220" height="82" rx="7" fill="#111827" stroke="#6d28d9" stroke-width="1.3"/>
+<text x="1373" y="337" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Redis state (cell)</text>
+<text x="1373" y="353" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">seq:{p} · topicseq:{t}</text>
+<text x="1373" y="367" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">idem:{tenant}:{key} 1 h</text>
+<text x="1373" y="381" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">seqepochs · tenantconns:{t}</text>
+<rect x="1360" y="414" width="220" height="50" rx="7" fill="#111827" stroke="#475569" stroke-width="1.3"/>
+<text x="1373" y="433" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">PostgreSQL (push-api)</text>
+<text x="1373" y="449" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">seqEpoch theo slot Redis</text>
+<rect x="372" y="560" width="1208" height="150" rx="9" fill="#0b1f3a" stroke="#2563eb" stroke-width="1.3"/>
+<text x="386" y="580" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Kafka (KRaft) · topic theo cell c{N}. · gw.control toàn cục</text>
+<rect x="386" y="594" width="228" height="48" rx="6" fill="#111827" stroke="#1e40af" stroke-width="1.2"/>
+<text x="395" y="613" font-size="10.5" font-weight="700" fill="#e2e8f0" text-anchor="start">c{N}.gw.upstream.&lt;type&gt;</text>
+<text x="395" y="629" font-size="9.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">gateway → domain services</text>
+<rect x="622" y="594" width="228" height="48" rx="6" fill="#111827" stroke="#1e40af" stroke-width="1.2"/>
+<text x="631" y="613" font-size="10.5" font-weight="700" fill="#e2e8f0" text-anchor="start">c{N}.gw.lifecycle</text>
+<text x="631" y="629" font-size="9.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">gateway · router (NODE_DOWN) → presence</text>
+<rect x="858" y="594" width="228" height="48" rx="6" fill="#111827" stroke="#1e40af" stroke-width="1.2"/>
+<text x="867" y="613" font-size="10.5" font-weight="700" fill="#e2e8f0" text-anchor="start">gw.control (compacted)</text>
+<text x="867" y="629" font-size="9.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">auth REVOKE · CELLMAP · TENANTCFG</text>
+<rect x="1094" y="594" width="228" height="48" rx="6" fill="#111827" stroke="#1e40af" stroke-width="1.2"/>
+<text x="1103" y="613" font-size="10.5" font-weight="700" fill="#e2e8f0" text-anchor="start">c{N}.push.requests</text>
+<text x="1103" y="629" font-size="9.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">push-api → router · inbox</text>
+<rect x="1330" y="594" width="228" height="48" rx="6" fill="#111827" stroke="#1e40af" stroke-width="1.2"/>
+<text x="1339" y="613" font-size="10.5" font-weight="700" fill="#e2e8f0" text-anchor="start">c{N}.push.offline · .delivered · .audit</text>
+<text x="1339" y="629" font-size="9.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">router / push-api → offline, receipts, audit</text>
+<text x="386" y="664" font-size="10" font-weight="normal" fill="#8b9bb4" text-anchor="start" font-style="italic">PushRequest đầy đủ (target · class · ttl · priority · collapseKey · seq/topic_seq) và các record offline/delivered/audit: sub-project ②</text>
+<text x="386" y="680" font-size="10" font-weight="normal" fill="#8b9bb4" text-anchor="start" font-style="italic">Revoke.client_id + khoá revoke:c:&lt;client_id&gt; (thêm ở A1; gateway bỏ qua có chủ đích)</text>
+<rect x="372" y="728" width="1208" height="64" rx="7" fill="#0f172a" stroke="#a16207" stroke-width="1.3"/>
+<rect x="372" y="728" width="5" height="64" rx="2" fill="#fbbf24"/>
+<text x="385" y="747" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">platform-contracts ② · Protobuf + OpenAPI · chỉ thêm vào (buf breaking)</text>
+<text x="385" y="763" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">frame.proto · router.proto (PushStream) · control.proto · lifecycle.proto · upstream.proto: đã có    |    push.proto (PushRequest đầy đủ, PushService) · openapi/push-api.yaml: sub-project ②</text>
+<text x="20" y="822" font-size="11" font-weight="700" fill="#a3b1c6" text-anchor="start">SAU LỘ TRÌNH NÀY (Phase 1 còn lại, Phase 2) — chỉ nối qua Kafka và Push API, gateway không đổi</text>
+<rect x="20" y="834" width="250" height="52" rx="7" fill="#0f172a" stroke="#64748b" stroke-width="1.3" stroke-dasharray="5 4"/>
+<text x="33" y="853" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">Bootstrap / Cell Map</text>
+<text x="33" y="869" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">GET /v1/bootstrap · CELLMAP</text>
+<rect x="282" y="834" width="250" height="52" rx="7" fill="#0f172a" stroke="#64748b" stroke-width="1.3" stroke-dasharray="5 4"/>
+<text x="295" y="853" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">Presence</text>
+<text x="295" y="869" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">lifecycle · NODE_DOWN</text>
+<rect x="544" y="834" width="250" height="52" rx="7" fill="#0f172a" stroke="#64748b" stroke-width="1.3" stroke-dasharray="5 4"/>
+<text x="557" y="853" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">Device Registry</text>
+<text x="557" y="869" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">PUT /v1/devices · push token</text>
+<rect x="806" y="834" width="250" height="52" rx="7" fill="#0f172a" stroke="#64748b" stroke-width="1.3" stroke-dasharray="5 4"/>
+<text x="819" y="853" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">Offline Delivery</text>
+<text x="819" y="869" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">push.offline → FCM/APNs</text>
+<rect x="1068" y="834" width="250" height="52" rx="7" fill="#0f172a" stroke="#64748b" stroke-width="1.3" stroke-dasharray="5 4"/>
+<text x="1081" y="853" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">Inbox &amp; Sync</text>
+<text x="1081" y="869" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">ScyllaDB · topic_log · /v1/sync</text>
+<rect x="1330" y="834" width="250" height="52" rx="7" fill="#0f172a" stroke="#64748b" stroke-width="1.3" stroke-dasharray="5 4"/>
+<text x="1343" y="853" font-size="11" font-weight="700" fill="#e2e8f0" text-anchor="start">Subscription</text>
+<text x="1343" y="869" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">SUBSCRIBE control push</text>
+<path d="M 220 140 L 250 140" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 220 140 L 250 140" fill="none" stroke="#60a5fa" stroke-width="1.8" marker-end="url(#a-60a5fa)"/>
+<path d="M 220 216 L 250 216" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 220 216 L 250 216" fill="none" stroke="#60a5fa" stroke-width="1.8" marker-end="url(#a-60a5fa)"/>
+<path d="M 340 160 L 372 160" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 340 160 L 372 160" fill="none" stroke="#60a5fa" stroke-width="1.8" marker-end="url(#a-60a5fa)"/>
+<text x="356" y="152" font-size="10" font-weight="700" fill="#60a5fa" text-anchor="middle">①</text>
+<path d="M 458 328 L 458 352" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 458 328 L 458 352" fill="none" stroke="#a78bfa" stroke-width="1.8" marker-end="url(#a-a78bfa)"/>
+<path d="M 716 400 L 544 400" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 716 400 L 544 400" fill="none" stroke="#a78bfa" stroke-width="1.8" marker-end="url(#a-a78bfa)"/>
+<path d="M 716 262 L 672 262" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 716 262 L 672 262" fill="none" stroke="#4ade80" stroke-width="1.8" marker-end="url(#a-4ade80)"/>
+<text x="694" y="254" font-size="10" font-weight="700" fill="#4ade80" text-anchor="middle">③</text>
+<path d="M 672 292 L 716 292" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 672 292 L 716 292" fill="none" stroke="#4ade80" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a-4ade80)"/>
+<path d="M 1022 120 L 672 120" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 1022 120 L 672 120" fill="none" stroke="#f472b6" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a-f472b6)"/>
+<text x="846" y="112" font-size="10" font-weight="700" fill="#f472b6" text-anchor="middle">JWKS (cache 5 m)</text>
+<path d="M 672 176 L 1012 176 L 1012 304 L 1100 304 L 1100 318" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 672 176 L 1012 176 L 1012 304 L 1100 304 L 1100 318" fill="none" stroke="#fb923c" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a-fb923c)"/>
+<text x="840" y="170" font-size="10" font-weight="700" fill="#fb923c" text-anchor="middle">KICK (SendStream)</text>
+<path d="M 220 532 L 994 532 L 994 250 L 1022 250" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 220 532 L 994 532 L 994 250 L 1022 250" fill="none" stroke="#f472b6" stroke-width="1.8" marker-end="url(#a-f472b6)"/>
+<text x="230" y="525" font-size="10" font-weight="700" fill="#f472b6" text-anchor="start">① token API · /v1/tokens · revoke</text>
+<path d="M 220 548 L 1006 548 L 1006 470 L 1022 470" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 220 548 L 1006 548 L 1006 470 L 1022 470" fill="none" stroke="#fb923c" stroke-width="1.8" marker-end="url(#a-fb923c)"/>
+<text x="230" y="541" font-size="10" font-weight="700" fill="#fb923c" text-anchor="start">④ POST /v1/push (Bearer token API)</text>
+<path d="M 1322 140 L 1360 140" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 1322 140 L 1360 140" fill="none" stroke="#8b9bb4" stroke-width="1.8" marker-end="url(#a-8b9bb4)"/>
+<path d="M 1322 210 L 1360 210" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 1322 210 L 1360 210" fill="none" stroke="#8b9bb4" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a-8b9bb4)"/>
+<path d="M 1322 360 L 1360 360" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 1322 360 L 1360 360" fill="none" stroke="#a78bfa" stroke-width="1.8" marker-end="url(#a-a78bfa)"/>
+<path d="M 1322 440 L 1360 440" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 1322 440 L 1360 440" fill="none" stroke="#8b9bb4" stroke-width="1.8" marker-end="url(#a-8b9bb4)"/>
+<path d="M 1172 290 L 1172 318" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 1172 290 L 1172 318" fill="none" stroke="#f472b6" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a-f472b6)"/>
+<text x="1180" y="308" font-size="10" font-weight="700" fill="#f472b6" text-anchor="start">JWKS</text>
+<path d="M 1172 500 L 1172 560" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 1172 500 L 1172 560" fill="none" stroke="#fb923c" stroke-width="1.8" marker-end="url(#a-fb923c)"/>
+<text x="1180" y="548" font-size="10" font-weight="700" fill="#fb923c" text-anchor="start">produce</text>
+<path d="M 1322 270 L 1341 270 L 1341 512 L 1050 512 L 1050 560" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 1322 270 L 1341 270 L 1341 512 L 1050 512 L 1050 560" fill="none" stroke="#f472b6" stroke-width="1.8" marker-end="url(#a-f472b6)"/>
+<text x="1336" y="528" font-size="10" font-weight="700" fill="#f472b6" text-anchor="end">outbox → REVOKE</text>
+<path d="M 847 560 L 847 416" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 847 560 L 847 416" fill="none" stroke="#4ade80" stroke-width="1.8" marker-end="url(#a-4ade80)"/>
+<text x="855" y="470" font-size="10" font-weight="700" fill="#4ade80" text-anchor="start">consume</text>
+<path d="M 580 560 L 580 328" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 580 560 L 580 328" fill="none" stroke="#60a5fa" stroke-width="1.8" marker-end="url(#a-60a5fa)"/>
+<text x="574" y="470" font-size="10" font-weight="700" fill="#60a5fa" text-anchor="end">② upstream · lifecycle</text>
+<path d="M 640 560 L 640 328" fill="none" stroke="#0b1220" stroke-width="6"/>
+<path d="M 640 560 L 640 328" fill="none" stroke="#fb923c" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a-fb923c)"/>
+<text x="646" y="470" font-size="10" font-weight="700" fill="#fb923c" text-anchor="start">control</text>
+<text x="20" y="916" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Trạng thái và thứ tự (vạch màu bên trái hộp)</text>
+<rect x="20" y="930" width="14" height="14" rx="2" fill="#2dd4bf"/>
+<text x="40" y="941" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">gateway-service 0.1.0 — đã merge vào main</text>
+<rect x="420" y="930" width="14" height="14" rx="2" fill="#f472b6"/>
+<text x="440" y="941" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">① auth-service — spec đã duyệt, plan A1 chờ duyệt</text>
+<rect x="820" y="930" width="14" height="14" rx="2" fill="#fbbf24"/>
+<text x="840" y="941" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">② contracts cho đường push</text>
+<rect x="20" y="954" width="14" height="14" rx="2" fill="#4ade80"/>
+<text x="40" y="965" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">③ push-router-service</text>
+<rect x="420" y="954" width="14" height="14" rx="2" fill="#fb923c"/>
+<text x="440" y="965" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">④ push-api-service (đủ: unicast · device · topic · topic_seq · control · KICK)</text>
+<rect x="1220" y="954" width="14" height="14" rx="2" fill="#0f172a" stroke="#64748b" stroke-dasharray="3 2"/>
+<text x="1240" y="965" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">nét đứt: sau lộ trình này</text>
+<text x="20" y="992" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Luồng</text>
+<path d="M 70 988 L 100 988" stroke="#60a5fa" stroke-width="1.8" marker-end="url(#a-60a5fa)"/>
+<text x="108" y="992" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">① kết nối client · ② upstream/lifecycle → Kafka</text>
+<path d="M 370 988 L 400 988" stroke="#f472b6" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#a-f472b6)"/>
+<text x="408" y="992" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">token · JWKS · revoke (auth)</text>
+<path d="M 670 988 L 700 988" stroke="#fb923c" stroke-width="1.8" marker-end="url(#a-fb923c)"/>
+<text x="708" y="992" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">④ push vào / KICK</text>
+<path d="M 970 988 L 1000 988" stroke="#4ade80" stroke-width="1.8" marker-end="url(#a-4ade80)"/>
+<text x="1008" y="992" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">③ PushBatch ↓ · DeliveryAck ↑</text>
+<path d="M 1270 988 L 1300 988" stroke="#a78bfa" stroke-width="1.8" marker-end="url(#a-a78bfa)"/>
+<text x="1308" y="992" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">registry · state (Redis)</text>
+<text x="20" y="1030" font-size="10" font-weight="normal" fill="#8b9bb4" text-anchor="start" font-style="italic">Nguồn: tài liệu gốc §3, §3.1, §3.2, §6, §13 · specs/2026-11-03-gateway-service-design.md · specs/2026-11-05-auth-service-design.md · quyết định lộ trình 2026-11-05: monorepo, discovery qua nodes:live, Auth trước Push API, làm đủ phạm vi</text>
+</svg>

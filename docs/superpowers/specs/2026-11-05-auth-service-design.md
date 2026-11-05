@@ -5,6 +5,8 @@
 - **Nguồn kiến trúc:** *Netty Gateway — 10M Active Connections* (Nov 2, 2026, @Kuu Kuu), gọi tắt là "tài liệu gốc"; mục số trong ngoặc, ví dụ (§3.6), là mục của tài liệu gốc. "Spec gateway" là `docs/superpowers/specs/2026-11-03-gateway-service-design.md`.
 - **Vị trí trong lộ trình:** sub-project 1/4 sau bản `0.1.0` của gateway: (1) `auth-service`, (2) contracts cho đường push, (3) `push-router-service`, (4) `push-api-service`. Mỗi sub-project có spec, plan và hiện thực riêng.
 
+![Kiến trúc nền tảng sau gateway 0.1.0](2026-11-05-platform-architecture.svg)
+
 ---
 
 ## 0. Mục tiêu, tiêu chí thành công, phạm vi
