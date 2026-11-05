@@ -28,6 +28,11 @@ public final class BlockHoundExtension implements BeforeAllCallback {
       // contention it parks for microseconds. Caught by GatewayProtectionIT (HDEL on close under load).
       builder.allowBlockingCallsInside("io.lettuce.core.protocol.SharedLock", "incrementWriters");
       builder.allowBlockingCallsInside("io.lettuce.core.protocol.SharedLock", "decrementWriters");
+      // Close/reconnect take the same lock exclusively on Lettuce's event loop (a Netty thread, so non-blocking for
+      // BlockHound); contention with a thread closing the same connection parks briefly. Flaked TenantCapBorrowerIT
+      // teardown once (M3b); reproduced by io.lettuce.core.protocol.SharedLockBlockHoundTest.
+      builder.allowBlockingCallsInside("io.lettuce.core.protocol.SharedLock", "doExclusive");
+      builder.allowBlockingCallsInside("io.lettuce.core.protocol.SharedLock", "lockWritersExclusive");
       builder.nonBlockingThreadPredicate(p -> p.or(t -> t.getName().startsWith("gw-io-"))).install();
       installed = true;
     }
