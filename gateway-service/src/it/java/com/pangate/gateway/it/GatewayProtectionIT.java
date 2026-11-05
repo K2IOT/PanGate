@@ -309,18 +309,17 @@ class GatewayProtectionIT {
         }
       }
     });
-    int maxLevel = 0;
     try {
       long end = System.nanoTime() + Duration.ofSeconds(40).toNanos();
       while (System.nanoTime() < end && gw.metric("gw_slow_consumer_closes_total", "reason=\"shed\"") < 1) {
-        maxLevel = Math.max(maxLevel, node.shedLevel());
         Thread.sleep(20);
       }
-      maxLevel = Math.max(maxLevel, node.shedLevel());
     } finally {
       pusher.interrupt();
     }
-    assertThat(maxLevel).isGreaterThanOrEqualTo(4);
+    // A SHED close proves level 5: the sampler relieves the node only in a sample that evaluated L5
+    // (ShedSamplerTest). Polling node.shedLevel() here instead missed it on a slow runner: L5 lasts one 100 ms
+    // sample, the relief closes the paused clients, and the next sample can already be back at L1.
     assertThat(gw.metric("gw_slow_consumer_closes_total", "reason=\"shed\"")).isGreaterThanOrEqualTo(1);
     assertThat(gw.metric("gw_closes_total", "code=\"4008\"")).isGreaterThanOrEqualTo(1);
     reader.ping(T);
