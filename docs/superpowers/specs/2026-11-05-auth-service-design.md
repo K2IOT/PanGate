@@ -332,8 +332,8 @@ Seed (idempotent): tenant `pangate` + client `pangate-admin` (scope `admin`); te
 |---|---|
 | `platform-contracts` | `Revoke.client_id` + khoá `revoke:c:` (§4.6) |
 | `platform-devenv/docker-compose.yml` | Thêm `postgres` (16, healthcheck), thêm `auth` (profile `app`), gỡ `issuer` khỏi profile `app` |
-| `gateway-service` (code) | `ControlKeys` nhận `revoke:c:` và consumer bỏ qua nó (§4.6); `pom.xml` publish `test-jar` (cho contract test của Auth) |
-| `Makefile` | `MODULES` thêm `auth-service` **sau** `gateway-service` (contract test cần test-jar của gateway); `infra-up` khởi động cả `postgres`; thêm `auth-local`, `auth-local-check`; `images` build cả image auth |
+| `gateway-service` (code) | `ControlKeys` nhận `revoke:c:` và consumer bỏ qua nó (§4.6); `pom.xml` publish jar phụ classifier `verifier` gồm `com/pangate/gateway/auth/**` (cho contract test của Auth) |
+| `Makefile` | `MODULES` thêm `auth-service` **sau** `gateway-service` (contract test cần jar `verifier` của gateway); `infra-up` khởi động cả `postgres`; thêm `auth-local`, `auth-local-check`; `images` build cả image auth |
 | `gateway-service` (chỉ cấu hình) | `application-dev.yml`: `jwks-uri: http://auth:8090/.well-known/jwks.json`, `issuer: http://auth:8090`; `application.yml` (prod): `issuer: https://auth.pangate`. Profile `local` giữ JWKS từ file của `DevBootstrap`, để gateway vẫn chạy được khi không có Auth |
 | `gateway-devtools` | `smoke` và `token` thêm `--auth-url` và `--client-file` (đọc `.dev/auth/clients.json`): lấy token API rồi gọi `/v1/tokens`; `smoke` thêm bước revoke. `issuer` giữ lại cho IT của gateway và profile `local` |
 | `.github/workflows/ci.yml` | Job `build` chạy `make verify` (đã gồm module mới); `dev-start` chạy smoke qua Auth |
@@ -347,7 +347,7 @@ Seed (idempotent): tenant `pangate` + client `pangate-admin` (scope `admin`); te
 | Mức | Nội dung tối thiểu |
 |---|---|
 | Unit (không Spring) | `ClaimLimits` (mọi luật ở §4.3, biên đúng/sai); scope (subset, `admin` chỉ cho tenant `pangate`); máy trạng thái key với đồng hồ giả (lần đầu, publish trước, kích hoạt, retire, xoá); `AesGcmKeyCipher` (khứ hồi, sai KEK, sai AAD); `Argon2SecretHasher`; token bucket; `ControlEventMapper` (khoá và payload cho cả bốn kind, tombstone) |
-| Contract | Connect token do `Es256TokenSigner` mint được `JwtVerifier` của gateway chấp nhận, và token API bị nó từ chối (`wrong audience`). Gateway publish `test-jar` chứa `JwtVerifier` và `JwksCache`; `auth-service` dùng nó ở scope `test` (không phải phụ thuộc runtime, nên không vi phạm §13.7) |
+| Contract | Connect token do `Es256TokenSigner` mint được `JwtVerifier` của gateway chấp nhận, và token API bị nó từ chối (`wrong audience`). Gateway publish thêm một jar phụ classifier `verifier` chỉ chứa package `com.pangate.gateway.auth` (package này chỉ phụ thuộc Nimbus và SLF4J); `auth-service` dùng nó ở scope `test` (không phải phụ thuộc runtime, nên không vi phạm §13.7) |
 | Integration (Testcontainers Postgres 16 + Kafka) | Mọi endpoint với mã lỗi ở §4 và §6; outbox → `gw.control` đúng thứ tự, Kafka tạm dừng rồi chạy lại vẫn đủ và đúng thứ tự; tombstone khi hết hạn; hai context Spring cùng DB chỉ một bên xoay key; Postgres dừng thì `/.well-known/jwks.json` vẫn 200 và `/oauth2/token` trả 503; rate limit trả 429 |
 | E2E (devenv, `make smoke`) | Token API → `/v1/tokens` → HELLO vào gateway → push → ACK; sau đó `POST /v1/revocations` principal đó → gateway đóng session 4003 trong < 10 s |
 
