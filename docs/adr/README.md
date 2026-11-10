@@ -19,3 +19,6 @@ Quyết định kiến trúc của gateway-service (spec §13). Mỗi ADR gồm:
 | [0013](0013-auth-managed-signing-keys.md) | Auth tự quản lý khoá ES256 trong PostgreSQL (KEK qua `SecretSource`, publish trước 1 h, chồng lấn 7 ngày, advisory lock) |
 | [0014](0014-shared-keys-split-by-audience.md) | Token API và connect token dùng chung khoá, tách bằng `aud` (`pangate-api` / `pangate-gw`) |
 | [0015](0015-revocation-outbox.md) | Thu hồi qua transactional outbox lên `gw.control`; tombstone khi hết hạn |
+| [0016](0016-single-push-record-envelope.md) | Một envelope `PushRecord` trên `cN.push.requests`; key là principal hoặc `topic:<t>` |
+| [0017](0017-push-api-builds-the-frame.md) | Push API dựng sẵn `Frame`; router không đọc payload |
+| [0018](0018-registry-value-v2.md) | Value registry v2 có device ở cuối; router phân giải target device |

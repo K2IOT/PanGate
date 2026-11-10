@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Push-path contracts (sub-project 2)
+- `platform-contracts`, spec `docs/superpowers/specs/2026-11-10-push-contracts-design.md`:
+  - `PushRecord`, `OfflineRecord` and `DeliveredRecord` for `cN.push.requests`, `cN.push.offline` and `cN.push.delivered`;
+  - `PushService.SendStream` accepts MESSAGE, device MESSAGE, BROADCAST and CONTROL, and returns typed responses (`code`, `msg_id`, `seq`, `topic_seq`, `duplicate`);
+  - `ConnectionEvent.event_id` and `EVENT_TYPE_NODE_DOWN`.
+- New module `platform-contracts-testkit`:
+  - topic, key and header conventions;
+  - deterministic fixtures and golden files;
+  - validation cases V1–V9;
+  - registry value reference cases;
+  - `PushPathScenario` on real Kafka.
+- Gateway:
+  - registry value v2 `nodeId|epoch|connectedAtMs|platform|device`, while still reading v1;
+  - lifecycle events carry a ULID `event_id`.
+- Devenv: `kafka-init` creates `c1.push.requests` (64 partitions), `c1.push.offline` (16) and `c1.push.delivered` (16).
+- ADR 0016–0018.
+
 ### auth-service (sub-project 1 after 0.1.0)
 - New module `auth-service` (spec `docs/superpowers/specs/2026-11-05-auth-service-design.md`):
   - OAuth2 client credentials, giving ES256 API tokens with `aud=pangate-api`;
