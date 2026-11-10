@@ -24,7 +24,7 @@ GATEWAY_JAR := gateway-service/target/gateway-service-$(VERSION)-exec.jar
 DEVTOOLS_JAR := gateway-devtools/target/gateway-devtools-$(VERSION)-exec.jar
 
 .PHONY: doctor infra-up infra-down run-local images up down logs smoke local-check memory-check load-check \
-  auth-local auth-local-check
+  auth-local auth-local-check router-local
 
 ## Check JDK 21, Docker, free ports and Kafka/Redis on localhost.
 doctor:
@@ -52,9 +52,10 @@ run-local:
 
 ## Build dev images with Jib (needs a local Docker daemon).
 images:
-	$(MVNW) -q -f gateway-devtools/pom.xml jib:dockerBuild
-	$(MVNW) -q -f gateway-service/pom.xml jib:dockerBuild
-	$(MVNW) -q -f auth-service/pom.xml jib:dockerBuild
+	$(MVNW) -q -f gateway-devtools/pom.xml compile jib:dockerBuild
+	$(MVNW) -q -f gateway-service/pom.xml compile jib:dockerBuild
+	$(MVNW) -q -f push-router-service/pom.xml compile jib:dockerBuild
+	$(MVNW) -q -f auth-service/pom.xml compile jib:dockerBuild
 
 up:
 	$(COMPOSE) --profile app up -d --wait --wait-timeout 90
@@ -68,9 +69,15 @@ logs:
 smoke:
 	$(COMPOSE) --profile tools run --rm devtools smoke --url wss://gateway:8443/v1/ws \
 	  --auth-url http://auth:8090 --client-file /dev-secrets/auth/clients.json --ca /dev-secrets/ca.crt \
-	  --router gateway:9090
+	  --kafka kafka:29092 --redis redis://redis:6379
 
 AUTH_JAR := auth-service/target/auth-service-$(VERSION)-exec.jar
+ROUTER_JAR := push-router-service/target/push-router-service-$(VERSION)-exec.jar
+
+## push-router from source with profile local (Kafka/Redis from `make infra-up`, a gateway from `make run-local`).
+.PHONY: router-local
+router-local:
+	java -jar $(ROUTER_JAR) --spring.profiles.active=local
 
 ## auth-service from source with profile local (Postgres/Kafka from `make infra-up`; secrets in .dev/auth/).
 auth-local:

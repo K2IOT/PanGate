@@ -99,14 +99,17 @@ services:
       test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.auth.tools.HealthCheck",
              "http://127.0.0.1:8081/ready"]
 
-  # Push API stand-in (spec §2.4, §6.6): receives the gateway's KICK and sends it back as a CONTROL item.
-  # It dials gateway:9090 only when a KICK arrives, so it can start before the gateway.
+  # Push API stand-in (spec §2.4, §6.6): receives the gateway's KICK and produces it as PushRecord CONTROL to
+  # c1.push.requests; the router delivers it to the gateways (push-router spec §6).
   fake-pushapi:
     profiles: ["app"]
     image: pangate/gateway-devtools:dev
-    command: ["fake-pushapi", "--port", "9443", "--router", "gateway:9090"]
+    command: ["fake-pushapi", "--port", "9443", "--kafka", "kafka:29092"]
     ports:
       - "9443:9443"
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
     healthcheck:
       <<: *hc
       test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.devtools.Main", "health",
@@ -140,6 +143,28 @@ services:
     healthcheck:
       <<: *hc
       test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.gateway.tools.HealthCheck",
+             "http://127.0.0.1:8081/ready"]
+
+  # push-router (docs/superpowers/specs/2026-11-10-push-router-design.md): c1.push.requests → gateway gRPC.
+  router:
+    profiles: ["app"]
+    image: pangate/push-router-service:dev
+    stop_grace_period: 20s
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      JAVA_TOOL_OPTIONS: "-Xmx512m"
+    ports:
+      - "8083:8081"
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.router.tools.HealthCheck",
              "http://127.0.0.1:8081/ready"]
 
   devtools:

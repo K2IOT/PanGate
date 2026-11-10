@@ -54,6 +54,17 @@
       <artifactId>grpc-services</artifactId>
     </dependency>
     <dependency>
+      <!-- PushRecordRules / PushKeys / PushHeaders / PushTopics for `push` and fake-pushapi (push-router plan Task 7) -->
+      <groupId>com.pangate</groupId><artifactId>platform-contracts-testkit</artifactId><version>${project.version}</version>
+      <exclusions>
+        <exclusion><groupId>org.testcontainers</groupId><artifactId>*</artifactId></exclusion>
+        <exclusion><groupId>org.junit.jupiter</groupId><artifactId>*</artifactId></exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>io.lettuce</groupId><artifactId>lettuce-core</artifactId>
+    </dependency>
+    <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-simple</artifactId>
       <scope>runtime</scope>

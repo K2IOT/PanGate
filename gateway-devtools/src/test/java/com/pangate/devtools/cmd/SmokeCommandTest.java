@@ -21,6 +21,24 @@ class SmokeCommandTest {
     assertThat(err.toString()).contains("--router");
   }
 
+  @Test
+  void kafkaReplacesTheRouterOption() {
+    StringWriter err = new StringWriter();
+    int code = run(err, "smoke", "--url", "wss://localhost:1/v1/ws", "--issuer", "http://localhost:1", "--insecure",
+        "--kafka", "localhost:1");
+    assertThat(code).isEqualTo(1);   // ran (and failed to reach the issuer), no usage error
+    assertThat(err.toString()).doesNotContain("--router");
+  }
+
+  @Test
+  void noRouterFlagNeedsTheRouterOptionAgain() {
+    StringWriter err = new StringWriter();
+    int code = run(err, "smoke", "--url", "wss://localhost:1/v1/ws", "--issuer", "http://localhost:1", "--insecure",
+        "--kafka", "localhost:1", "--no-router");
+    assertThat(code).isEqualTo(2);
+    assertThat(err.toString()).contains("--router");
+  }
+
   private static int run(StringWriter err, String... args) {
     CommandLine cmd = new CommandLine(new Main());
     cmd.setErr(new PrintWriter(err));
