@@ -2,6 +2,7 @@ package com.pangate.auth.config;
 
 import com.pangate.auth.api.ApiAuthFilter;
 import com.pangate.auth.api.PortRoutingFilter;
+import com.pangate.auth.application.IssueClientToken;
 import com.pangate.auth.application.KeyRing;
 import com.pangate.auth.application.ManageClients;
 import com.pangate.auth.application.ManageTenants;
@@ -53,6 +54,12 @@ public class WebConfig {
   @Bean
   ManageClients manageClients(ClientStore clients, TenantStore tenants, SecretHasher hasher) {
     return new ManageClients(clients, tenants, hasher);
+  }
+
+  @Bean
+  IssueClientToken issueClientToken(ClientStore clients, TenantStore tenants, SecretHasher hasher, TokenSigner signer,
+      KeyRing keys, Clock clock, AuthProperties props) {
+    return new IssueClientToken(clients, tenants, hasher, signer, keys, clock, props.issuer(), props.apiTokenTtl());
   }
 
   @Bean
