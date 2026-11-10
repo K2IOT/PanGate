@@ -130,7 +130,7 @@ message DeliveredRecord {
 ### 1.2 `lifecycle.proto` (additive)
 
 - `ConnectionEvent.event_id = 13`: ULID; consumer dedup theo trường này.
-- `EventType.NODE_DOWN`, giá trị kế tiếp còn trống:
+- `EVENT_TYPE_NODE_DOWN = 5`:
   - Router phát khi lease `node:{id}` hết hạn (§3.5).
   - Chỉ có `node_id`, `epoch`, `cell_id`, `at_ms` và `event_id`.
   - Mọi router đều phát, nên consumer dedup theo `node_id:epoch`.
