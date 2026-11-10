@@ -262,4 +262,27 @@ class DeliveryJobTest {
         .setFrame(msg().getFrame().toBuilder().setClass_(DeliveryClass.DELIVERY_CLASS_ORDERED)).build();
     assertThat(job().run(o)).isEqualTo(DeliveryResult.OFFLINE);
   }
+
+  /** Shutdown interrupts the worker: the record must stay unfinished (no outcome), so it is redelivered (spec §4). */
+  @Test
+  void interruptedWhileWaitingRecordsNoOutcome() throws Exception {
+    rounds.add(List.of(conn("C1", "n1")));
+    answer = (n, i) -> new CompletableFuture<>();
+    DeliveryJob j = new DeliveryJob(conns, links, () -> nodes.values(), recorder, () -> now, Duration.ofSeconds(30),
+        List.of(Duration.ofMillis(100), Duration.ofMillis(400)), sleeps::add);
+    java.util.concurrent.atomic.AtomicReference<Throwable> thrown = new java.util.concurrent.atomic.AtomicReference<>();
+    Thread t = Thread.ofVirtual().start(() -> {
+      try {
+        j.run(msg());
+      } catch (Throwable e) {
+        thrown.set(e);
+      }
+    });
+    org.awaitility.Awaitility.await().until(() -> !sent.isEmpty());
+    t.interrupt();
+    t.join(5_000);
+    assertThat(t.isAlive()).isFalse();
+    assertThat(thrown.get()).isNotNull();
+    assertThat(outcomes).isEmpty();
+  }
 }

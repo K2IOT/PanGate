@@ -292,6 +292,8 @@
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
+        <!-- the plain jar stays the main artifact: push-router-service's IT runs a real gateway from it -->
+        <configuration><classifier>exec</classifier></configuration>
         <executions>
           <execution>
             <goals>

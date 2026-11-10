@@ -36,7 +36,7 @@ management:
         enabled: true
       group:
         readiness:
-          include: readinessState
+          include: readinessState,router
           additional-path: "server:/ready"
           show-details: always
         liveness:

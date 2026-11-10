@@ -20,7 +20,7 @@ verify:
 	done
 
 COMPOSE := docker compose -f platform-devenv/docker-compose.yml
-GATEWAY_JAR := gateway-service/target/gateway-service-$(VERSION).jar
+GATEWAY_JAR := gateway-service/target/gateway-service-$(VERSION)-exec.jar
 DEVTOOLS_JAR := gateway-devtools/target/gateway-devtools-$(VERSION)-exec.jar
 
 .PHONY: doctor infra-up infra-down run-local images up down logs smoke local-check memory-check load-check \

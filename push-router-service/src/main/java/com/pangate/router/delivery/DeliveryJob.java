@@ -213,8 +213,7 @@ public final class DeliveryJob {
     } catch (TimeoutException e) {
       return Status.STATUS_NACK_TIMEOUT;
     } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      return Status.STATUS_NACK_CLOSED;
+      throw interrupted(e);
     } catch (Exception e) {
       return Status.STATUS_NACK_CLOSED;
     }
@@ -224,7 +223,13 @@ public final class DeliveryJob {
     try {
       sleeper.sleep(d);
     } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
+      throw interrupted(e);
     }
+  }
+
+  /** Shutdown: leave the record unfinished (no outcome) so it is processed again after restart (spec §4). */
+  private static IllegalStateException interrupted(InterruptedException e) {
+    Thread.currentThread().interrupt();
+    return new IllegalStateException("interrupted: record left unfinished", e);
   }
 }
