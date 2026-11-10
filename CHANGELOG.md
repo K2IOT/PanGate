@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### push-router-service (sub-project 3)
+- New module `push-router-service` (spec `docs/superpowers/specs/2026-11-10-push-router-design.md`):
+  - consumes `cN.push.requests` with Confluent Parallel Consumer 0.5.3.3 (`KEY` order, virtual-thread workers);
+  - `DeliveryJob` applies the delivery outcome table: ACK wait, two retries, offline reasons, receipts, BROADCAST to every live node, CONTROL once per node;
+  - one gRPC `PushStream` per gateway with batching, back-pressure and ACK matching;
+  - `NODE_DOWN` on `cN.gw.lifecycle`; `/ready` includes the `router` indicator; metrics `router.*`;
+  - config in `router.yml`; `RouterIT` runs a real gateway in the same JVM.
+- Gateway: publishes `node:addr:{id}` (`gateway.grpc.advertise-host`); `gateway-service`'s executable jar is now `-exec.jar` and the main artifact is a plain jar.
+- devtools: `push` (also `--count`/`--principals` load loops) and `await-offline`; `fake-pushapi --kafka`; `smoke --kafka --redis` adds PUSH via Kafka and OFFLINE (`--no-router` keeps the fake-router step).
+- Devenv: compose service `router`; `fake-pushapi` produces to Kafka; `make images` compiles before Jib and builds the router; `make router-local`.
+- Measurement (dev machine): 10 000 EPHEMERAL to 1 000 sessions, all delivered; ≈ 2.5–4 k records/s on a cold JVM; p50 1.2–1.7 s / p99 1.8–2.3 s under a single burst.
+- ADR 0019–0021.
+
 ### Push-path contracts (sub-project 2)
 - `platform-contracts`, spec `docs/superpowers/specs/2026-11-10-push-contracts-design.md`:
   - `PushRecord`, `OfflineRecord` and `DeliveredRecord` for `cN.push.requests`, `cN.push.offline` and `cN.push.delivered`;

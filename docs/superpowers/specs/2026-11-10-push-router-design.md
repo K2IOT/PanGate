@@ -1,7 +1,7 @@
 # push-router-service — Design Spec
 
 - **Ngày:** 2026-11-10
-- **Trạng thái:** Draft, chờ duyệt
+- **Trạng thái:** Implemented (R1, plan `docs/superpowers/plans/2026-11-10-push-router-r1.md`). Đo trên máy dev: 10 000 EPHEMERAL tới 1 000 phiên, giao đủ 10 000; ≈ 2,5–4 k record/s (JVM lạnh); `router.delivery.latency` p50 1,2–1,7 s, p99 1,8–2,3 s khi bắn một loạt (chủ yếu là thời gian xếp hàng)
 - **Nguồn kiến trúc:** *Netty Gateway — 10M Active Connections* ("tài liệu gốc"); số mục trong ngoặc, ví dụ (§6), là mục của tài liệu gốc.
 - **Các spec liên quan:**
   - "spec contracts": `docs/superpowers/specs/2026-11-10-push-contracts-design.md` (C1). Spec này dựa trên nó, đặc biệt là bảng kết quả giao ở §1.1a.

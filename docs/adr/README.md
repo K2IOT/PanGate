@@ -22,3 +22,6 @@ Quyết định kiến trúc của gateway-service (spec §13). Mỗi ADR gồm:
 | [0016](0016-single-push-record-envelope.md) | Một envelope `PushRecord` trên `cN.push.requests`; key là principal hoặc `topic:<t>` |
 | [0017](0017-push-api-builds-the-frame.md) | Push API dựng sẵn `Frame`; router không đọc payload |
 | [0018](0018-registry-value-v2.md) | Value registry v2 có device ở cuối; router phân giải target device |
+| [0019](0019-router-parallel-consumer-virtual-threads.md) | Router dùng Confluent Parallel Consumer (`KEY`), imperative trên virtual threads |
+| [0020](0020-node-addr-key.md) | Gateway công bố `node:addr:{id}` để router tìm địa chỉ gRPC |
+| [0021](0021-devenv-kafka-front-door.md) | Devenv dùng Kafka (`devtools push`, `fake-pushapi --kafka`) làm cửa vào cho tới khi có Push API |
