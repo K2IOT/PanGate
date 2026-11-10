@@ -34,7 +34,7 @@ curl -s -H "Authorization: Bearer $TOKEN" localhost:8085/v1/messages/<msgId>
 | 8080 | `POST /v1/push:batch` | same; `{items: [...]}` ≤ 100, ≤ 1 MB | `200 {results: [{index, status, …}]}`; one principal's items in index order |
 | 8080 | `GET /v1/messages/{msgId}` | `push:send` or `push:broadcast` | `{state: accepted \| delivered \| offline, …}`; `delivered` only with `receipt=true` |
 | 9443 | gRPC `PushService.SendStream` | gateway, push-router (SPIFFE allowlist) | `PushResponse` per `request_id`, out of order |
-| 8081 | `POST /admin/v1/seqepochs:bump` `{slots}` / `{all:true}` | API token with `admin` of tenant `pangate` | `{bumped}` |
+| 8081 | `POST /admin/v1/seqepochs:bump` `{slots}` / `{all:true}` | API token with `admin` of tenant `pangate` | `{bumped, epochs}`; `{bumped, maxEpoch}` for `all` |
 | 8081 | `/ready`, `/live`, `/actuator/prometheus` | operations | readiness includes `pushapi`: `gw.control` replayed and JWKS loaded |
 
 Errors are `application/problem+json` with `code`: `invalid_request`, `rule_V1`…`rule_V14`, `payload_too_large`,

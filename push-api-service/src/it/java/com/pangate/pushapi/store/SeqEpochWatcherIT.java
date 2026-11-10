@@ -147,4 +147,43 @@ class SeqEpochWatcherIT {
       Thread.currentThread().interrupt();
     }
   }
+
+  /** Final review minor (spec §3.2): a range that no longer exists (resharding) loses its runids field. */
+  @Test
+  void rangesThatNoLongerExistAreDeleted() throws Exception {
+    a.async().hset(PushApiKeys.RUNIDS, "0-100", "old").get();
+    new SeqEpochWatcher(a, new RedisSeqEpochs(a), s -> { }).checkNow();
+    assertThat(a.async().hgetall(PushApiKeys.RUNIDS).get()).containsOnlyKeys("0-16383");
+  }
+
+  /** Final review minor (spec §3.1): a bump started by a seq regression counts as reason=regression. */
+  @Test
+  void aBumpAfterARegressionCountsAsRegression() throws Exception {
+    RedisSeqEpochs ep = new RedisSeqEpochs(a);
+    List<String> bumps = new CopyOnWriteArrayList<>();
+    SeqEpochWatcher w = new SeqEpochWatcher(a, ep, bumps::add);
+    SeqAllocator alloc = new SeqAllocator(new RedisSeqStore(a), ep, () -> w.checkNow("regression"));
+    w.checkNow();
+    alloc.forPrincipal("t1:u3");
+    restartRedis();
+    alloc.forPrincipal("t1:u3");
+    assertThat(bumps).containsExactly("regression");
+  }
+
+  /** Final review minor (spec §3.2): a cluster topology change triggers a check at once. */
+  @Test
+  void aTopologyChangeTriggersACheck() throws Exception {
+    List<String> bumps = new CopyOnWriteArrayList<>();
+    SeqEpochWatcher w = new SeqEpochWatcher(a, new RedisSeqEpochs(a), bumps::add);
+    w.start(Duration.ofHours(1));
+    try {
+      await().atMost(Duration.ofSeconds(10)).until(() -> a.async().hexists(PushApiKeys.RUNIDS, "0-16383").get());
+      a.async().hset(PushApiKeys.RUNIDS, "0-16383", "another-run").get();   // as if the shard's master changed
+      a.resources().eventBus().publish(new io.lettuce.core.cluster.event.ClusterTopologyChangedEvent(List.of(),
+          List.of()));
+      await().atMost(Duration.ofSeconds(10)).until(() -> !bumps.isEmpty());
+    } finally {
+      w.close();
+    }
+  }
 }

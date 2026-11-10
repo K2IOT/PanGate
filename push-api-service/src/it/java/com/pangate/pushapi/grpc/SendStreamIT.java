@@ -179,4 +179,19 @@ class SendStreamIT {
       assertThat(denied.responses).isEmpty();
     }
   }
+
+  /** Final review minor: gateway streams never half-close, so stopping waited the full 10 s every time. */
+  @Test
+  void stopCompletesOpenStreamsAfterTheirInFlightRequests() throws Exception {
+    String redisUri = "redis://" + redis.getHost() + ":" + redis.getMappedPort(6379);
+    try (PushApiHarness own = new PushApiHarness(scenario.bootstrapServers(), redisUri);
+        Client c = new Client(NettyChannelBuilder.forAddress("127.0.0.1", own.grpc).usePlaintext().build())) {
+      c.out.onNext(message("s1", "t1:stop-1"));
+      await().atMost(Duration.ofSeconds(10)).until(() -> c.responses.containsKey("s1"));
+      long t0 = System.nanoTime();
+      own.ctx.getBean(GrpcServerLifecycle.class).stop();
+      assertThat(Duration.ofNanos(System.nanoTime() - t0)).isLessThan(Duration.ofSeconds(3));
+      assertThat(c.ended.get(5, TimeUnit.SECONDS).getCode()).isEqualTo(io.grpc.Status.Code.OK);
+    }
+  }
 }

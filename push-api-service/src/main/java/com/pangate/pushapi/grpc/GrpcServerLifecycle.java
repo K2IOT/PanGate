@@ -52,7 +52,8 @@ public final class GrpcServerLifecycle implements SmartLifecycle {
     if (s == null) {
       return;
     }
-    s.shutdown();
+    s.shutdown();          // GOAWAY: no new streams
+    service.drain();       // open streams finish what is in flight, then complete
     try {
       if (!s.awaitTermination(10, TimeUnit.SECONDS)) {
         s.shutdownNow();

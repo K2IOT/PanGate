@@ -89,7 +89,7 @@ public class PushApiConfig {
       ControlState control, KafkaRecordProducer producer, MessageStatus status, MeterRegistry meters) {
     SeqAllocator seq = new SeqAllocator(new RedisSeqStore(redis), epochs, () -> {
       meters.counter("pushapi.seq.regressions").increment();
-      watcher.checkNow();
+      watcher.checkNow("regression");
     });
     Idempotency idem = new Idempotency(new RedisIdemStore(redis), p.idempotency().ttl(), p.idempotency().pendingTtl(),
         p.idempotency().waitFor(), d -> Thread.sleep(d), PushApiConfig::monoMs);

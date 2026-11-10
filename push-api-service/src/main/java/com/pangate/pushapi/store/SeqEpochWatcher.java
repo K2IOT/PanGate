@@ -62,14 +62,20 @@ public final class SeqEpochWatcher implements AutoCloseable {
    * seq regression after a failover) share it. Errors are logged and the pass is retried on the next tick.
    */
   public void checkNow() {
-    flight.run(this::pass);
+    checkNow("failover");
   }
 
-  private void pass() {
+  /** {@code reason} labels a bump this pass makes ({@code failover}, or {@code regression} from a seq regression). */
+  public void checkNow(String reason) {
+    flight.run(() -> pass(reason));
+  }
+
+  private void pass(String reason) {
     boolean bumped = false;
     boolean changed = false;
     try {
-      for (RedisState.Shard s : redis.shards()) {
+      java.util.List<RedisState.Shard> shards = redis.shards();
+      for (RedisState.Shard s : shards) {
         String prev = known.getOrDefault(s.range(), "");
         Long r = redis.await(redis.async().<Long>eval(BUMP, ScriptOutputType.INTEGER,
             new String[] {PushApiKeys.RUNIDS, SeqKeys.SEQ_EPOCHS}, s.range(), s.runId(), Integer.toString(s.start()),
@@ -82,6 +88,7 @@ public final class SeqEpochWatcher implements AutoCloseable {
               prev.isEmpty() ? "?" : prev, s.runId());
         }
       }
+      dropGoneRanges(shards);
     } catch (RuntimeException e) {
       log.warn("seqepochs check failed: {}", e.toString());
       return;
@@ -90,7 +97,19 @@ public final class SeqEpochWatcher implements AutoCloseable {
       epochs.refreshNow();
     }
     if (bumped) {
-      onBump.accept("failover");
+      onBump.accept(reason);
+    }
+  }
+
+  /** Spec §3.2: a range that no longer exists (resharding) loses its {@code runids} field. */
+  private void dropGoneRanges(java.util.List<RedisState.Shard> shards) {
+    Set<String> current = new java.util.HashSet<>();
+    shards.forEach(s -> current.add(s.range()));
+    String[] gone = redis.await(redis.async().hkeys(PushApiKeys.RUNIDS), "HKEYS runids").stream()
+        .filter(f -> !current.contains(f)).toArray(String[]::new);
+    if (gone.length > 0) {
+      redis.await(redis.async().hdel(PushApiKeys.RUNIDS, gone), "HDEL runids");
+      java.util.Arrays.stream(gone).forEach(known::remove);
     }
   }
 
@@ -116,11 +135,12 @@ public final class SeqEpochWatcher implements AutoCloseable {
     return bump(all);
   }
 
-  /** Checks every {@code every} and right after Lettuce (re)connects. */
+  /** Checks every {@code every}, right after Lettuce (re)connects, and when the cluster topology changes. */
   public synchronized void start(Duration every) {
     timer = Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().daemon().name("seqepochs").factory());
     timer.scheduleWithFixedDelay(this::checkNow, 0, every.toMillis(), TimeUnit.MILLISECONDS);
-    events = redis.resources().eventBus().get().filter(e -> e instanceof ConnectionActivatedEvent)
+    events = redis.resources().eventBus().get().filter(e -> e instanceof ConnectionActivatedEvent
+        || e instanceof io.lettuce.core.cluster.event.ClusterTopologyChangedEvent)
         .subscribe(e -> timer.execute(this::checkNow));
   }
 

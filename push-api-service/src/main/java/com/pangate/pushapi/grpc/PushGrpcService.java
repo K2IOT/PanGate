@@ -27,6 +27,9 @@ public final class PushGrpcService extends PushServiceGrpc.PushServiceImplBase {
   private final KeyedSerialExecutor serial;
   private final int maxInFlight;
   private final MeterRegistry meters;
+  private final java.util.concurrent.atomic.AtomicLong streamIds = new java.util.concurrent.atomic.AtomicLong();
+  /** Open streams: id → "finish once idle", used when the server stops (gateway streams never half-close). */
+  private final java.util.Map<Long, Runnable> open = new java.util.concurrent.ConcurrentHashMap<>();
 
   public PushGrpcService(PushAcceptor acceptor, KeyedSerialExecutor serial, int maxInFlight, MeterRegistry meters) {
     this.acceptor = acceptor;
@@ -39,6 +42,14 @@ public final class PushGrpcService extends PushServiceGrpc.PushServiceImplBase {
     return r.getKind() == PushRequest.Kind.KIND_BROADCAST ? "topic:" + r.getTopic() : r.getPrincipalId();
   }
 
+  /**
+   * Server stopping: every open stream answers what is in flight, then completes, so the gateway reconnects to
+   * another pod instead of waiting for the shutdown deadline.
+   */
+  public void drain() {
+    open.values().forEach(Runnable::run);
+  }
+
   @Override
   public StreamObserver<PushRequest> sendStream(StreamObserver<PushResponse> out) {
     ServerCallStreamObserver<PushResponse> so = (ServerCallStreamObserver<PushResponse>) out;
@@ -48,19 +59,28 @@ public final class PushGrpcService extends PushServiceGrpc.PushServiceImplBase {
     AtomicInteger inFlight = new AtomicInteger();
     AtomicBoolean halfClosed = new AtomicBoolean();
     AtomicBoolean done = new AtomicBoolean();
+    long id = streamIds.incrementAndGet();
     Runnable finishIfIdle = () -> {
       if (halfClosed.get() && inFlight.get() == 0 && done.compareAndSet(false, true)) {
+        open.remove(id);
         synchronized (so) {
           so.onCompleted();
         }
       }
     };
-    so.setOnCancelHandler(() -> done.set(true));
+    open.put(id, () -> {
+      halfClosed.set(true);
+      finishIfIdle.run();
+    });
+    so.setOnCancelHandler(() -> {
+      done.set(true);
+      open.remove(id);
+    });
     return new StreamObserver<>() {
       @Override
       public void onNext(PushRequest r) {
         inFlight.incrementAndGet();
-        serial.submit(targetKey(r) + "|" + System.identityHashCode(so), () -> {
+        serial.submit(targetKey(r) + "|" + id, () -> {
           long t0 = System.nanoTime();
           try {
             return acceptor.accept(caller, r);
@@ -91,6 +111,7 @@ public final class PushGrpcService extends PushServiceGrpc.PushServiceImplBase {
       @Override
       public void onError(Throwable t) {
         done.set(true);
+        open.remove(id);
       }
 
       @Override

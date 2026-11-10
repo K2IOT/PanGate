@@ -217,7 +217,11 @@ public final class DeliveryJob {
         .setEnqueuedAtMs(r.getAcceptedAtMs()).build();
     List<CompletableFuture<Status>> written = new ArrayList<>();
     nodes.forEach(n -> written.add(sendTo(n, item)));
-    awaitAll(written);
+    if (!r.getControl().hasKick()) {
+      awaitAll(written);
+    }
+    // a KICK reaches every live node, and its ack changes nothing (no retry, no outcome): waiting would hold the
+    // partition for the slowest node in the fleet; each link still writes it in order before later items
     return DeliveryResult.DELIVERED;
   }
 

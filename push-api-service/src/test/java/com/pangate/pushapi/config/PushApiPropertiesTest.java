@@ -70,4 +70,12 @@ class PushApiPropertiesTest {
     assertThat(p.auth().jwksUri()).isEqualTo("http://localhost:8090/.well-known/jwks.json");
     assertThat(p.kafka().bootstrap()).isEqualTo("localhost:9092");
   }
+
+  /** Final review minor: spec §5 drains in 10 s per phase, inside the compose stop_grace_period of 20 s. */
+  @Test
+  void shutdownPhaseTimeoutIsTenSeconds() {
+    var yaml = new org.springframework.beans.factory.config.YamlPropertiesFactoryBean();
+    yaml.setResources(new org.springframework.core.io.ClassPathResource("push-api.yml"));
+    assertThat(yaml.getObject().getProperty("spring.lifecycle.timeout-per-shutdown-phase")).isEqualTo("10s");
+  }
 }

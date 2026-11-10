@@ -56,6 +56,11 @@ public final class RedisSeqEpochs implements SeqEpochs {
     }
   }
 
+  /** Cached epoch of one slot (admin response). */
+  public int epochAt(int slot) {
+    return epochs[slot];
+  }
+
   /** Highest cached epoch in slots {@code start..end} (the floor of a bump). */
   public int maxEpoch(int start, int end) {
     int[] e = epochs;

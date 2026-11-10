@@ -182,7 +182,7 @@ Từ lúc failover tới lúc bump, thường dưới 1 s nhờ sự kiện reco
 
 ### 3.4 Bump thủ công
 
-`POST /admin/v1/seqepochs:bump` trên cổng quản trị, body `{slots: [int…]}` hoặc `{all: true}`. Cần Bearer token API có scope `admin` của tenant `pangate`. Trả `{bumped, epochs: {slot: epoch}}` (rút gọn khi `all`); ghi log audit.
+`POST /admin/v1/seqepochs:bump` trên cổng quản trị, body `{slots: [int…]}` hoặc `{all: true}`. Cần Bearer token API có scope `admin` của tenant `pangate`. Trả `{bumped, epochs: {slot: epoch}}`; khi `all` thì rút gọn thành `{bumped, maxEpoch}`; ghi log audit.
 
 ---
 

@@ -177,4 +177,11 @@ class ApiTokenVerifierTest {
       fetching.join();
     }
   }
+
+  /** Final review minor: jti is a required claim (spec §2); without it a jti revocation could never apply. */
+  @Test
+  void tokenWithoutJtiIs401() throws Exception {
+    assertThatThrownBy(() -> v.verify(token(k1, ISS, "pangate-api", wall.get() + 900_000, null)))
+        .isInstanceOf(InvalidTokenException.class);
+  }
 }

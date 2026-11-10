@@ -322,6 +322,8 @@ class PushHttpIT {
         api.token("pangate", "pangate-admin", "admin"), body);
     assertThat(ok.statusCode()).as(ok.body()).isEqualTo(200);
     assertThat(json(ok).get("bumped").asInt()).isEqualTo(2);
+    assertThat(json(ok).get("epochs").get("1").asInt()).isPositive();     // spec §3.4: {bumped, epochs}
+    assertThat(json(ok).get("epochs").get("2").asInt()).isPositive();
     assertThat(api.post(api.http, "/admin/v1/seqepochs:bump", api.token("pangate", "pangate-admin", "admin"), body)
         .statusCode()).isEqualTo(404);   // admin is only on the management port
   }

@@ -226,6 +226,16 @@ class PushAcceptorTest {
     assertThat(r.getTopicSeq()).isEqualTo(1);
   }
 
+  /** Final review minor: an unbounded key becomes two unbounded Redis keys for an hour. */
+  @Test
+  void idempotencyKeyOver256BytesIsInvalid() {
+    PushResponse r = acceptor().accept(API, message().toBuilder().setIdempotencyKey("k".repeat(257)).build());
+    assertThat(r.getCode()).isEqualTo(Code.CODE_INVALID);
+    assertThat(produced).isEmpty();
+    assertThat(acceptor().accept(API, message().toBuilder().setIdempotencyKey("é".repeat(128)).build()).getCode())
+        .isEqualTo(Code.CODE_OK);
+  }
+
   @Test
   void duplicateIsReturnedWithoutProducing() {
     PushAcceptor a = acceptor();

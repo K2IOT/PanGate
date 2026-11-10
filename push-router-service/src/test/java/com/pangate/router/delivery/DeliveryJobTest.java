@@ -356,4 +356,16 @@ class DeliveryJobTest {
     assertThat(job().run(c)).isEqualTo(DeliveryResult.DELIVERED);
     assertThat(sent).containsExactlyInAnyOrder("n1/KIND_CONTROL/", "n2/KIND_CONTROL/", "nd/KIND_CONTROL/");
   }
+
+  /** Final review minor: a KICK goes to every node, so it must not wait for the slowest one (ack timeout 30 s here). */
+  @Test
+  void kickDoesNotWaitForASilentNode() {
+    answer = (n, i) -> n.equals("n1") ? new CompletableFuture<>() : done(Status.STATUS_ACKED);
+    DeliveryJob j = new DeliveryJob(conns, links, () -> nodes.values(), recorder, () -> now, Duration.ofSeconds(30),
+        List.of(Duration.ofMillis(100), Duration.ofMillis(400)), sleeps::add);
+    PushRecord c = Fixtures.control("t1:u1", Fixtures.kick("NEW", 1));
+    assertThat(org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(Duration.ofSeconds(2), () -> j.run(c)))
+        .isEqualTo(DeliveryResult.DELIVERED);
+    assertThat(sent).hasSize(3);
+  }
 }

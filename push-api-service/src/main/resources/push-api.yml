@@ -5,6 +5,8 @@ spring:
   threads:
     virtual:
       enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 10s   # spec §5; compose stop_grace_period is 20 s
 
 pangate:
   service: push-api

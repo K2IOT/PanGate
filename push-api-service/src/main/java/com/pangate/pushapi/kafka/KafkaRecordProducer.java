@@ -58,7 +58,9 @@ public final class KafkaRecordProducer implements RecordProducer, AutoCloseable 
     String traceparent = r.hasFrame() ? r.getFrame().getHeadersOrDefault("traceparent", null) : null;
     PushHeaders.write(pr.headers(), r.getTenantId(), cell, traceparent, "PushRecord");
     try {
-      producer.send(pr).get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+      long deadline = System.nanoTime() + timeout.toNanos();     // send() may block on metadata: one budget for both
+      java.util.concurrent.Future<?> acked = producer.send(pr);
+      acked.get(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw new ProduceFailedException("interrupted producing " + r.getMsgId(), e);

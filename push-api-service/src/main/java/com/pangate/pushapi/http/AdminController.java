@@ -1,7 +1,9 @@
 package com.pangate.pushapi.http;
 
 import com.pangate.pushapi.core.Caller;
+import com.pangate.pushapi.store.RedisSeqEpochs;
 import com.pangate.pushapi.store.SeqEpochWatcher;
+import java.util.TreeMap;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.HashSet;
 import java.util.List;
@@ -21,9 +23,11 @@ public class AdminController {
   private static final Logger audit = LoggerFactory.getLogger("pushapi.audit");
 
   private final SeqEpochWatcher watcher;
+  private final RedisSeqEpochs epochs;
 
-  public AdminController(SeqEpochWatcher watcher) {
+  public AdminController(SeqEpochWatcher watcher, RedisSeqEpochs epochs) {
     this.watcher = watcher;
+    this.epochs = epochs;
   }
 
   @PostMapping(path = "/admin/v1/seqepochs:bump", consumes = "application/json")
@@ -33,10 +37,13 @@ public class AdminController {
       return ResponseEntity.status(403).body(Problems.of(403, "forbidden", "scope admin of tenant pangate required"));
     }
     int bumped;
+    Set<Integer> slots = new HashSet<>();
     if (Boolean.TRUE.equals(body.get("all"))) {
       bumped = watcher.bumpAll();
+      audit.info("seqepochs bump by {}: all {} slots", c.clientId(), bumped);
+      // spec §3.4: shortened for all, the highest epoch instead of 16 384 entries
+      return ResponseEntity.ok(Map.of("bumped", bumped, "maxEpoch", epochs.maxEpoch(0, 16_383)));
     } else if (body.get("slots") instanceof List<?> list && !list.isEmpty()) {
-      Set<Integer> slots = new HashSet<>();
       for (Object o : list) {
         if (!(o instanceof Integer i) || i < 0 || i > 16_383) {
           return ResponseEntity.badRequest().body(Problems.of(400, "invalid_request", "slots are integers 0..16383"));
@@ -48,6 +55,8 @@ public class AdminController {
       return ResponseEntity.badRequest().body(Problems.of(400, "invalid_request", "give slots or all=true"));
     }
     audit.info("seqepochs bump by {}: {} slots", c.clientId(), bumped);
-    return ResponseEntity.ok(Map.of("bumped", bumped));
+    Map<String, Integer> now = new TreeMap<>();
+    slots.forEach(s -> now.put(Integer.toString(s), epochs.epochAt(s)));
+    return ResponseEntity.ok(Map.of("bumped", bumped, "epochs", now));
   }
 }

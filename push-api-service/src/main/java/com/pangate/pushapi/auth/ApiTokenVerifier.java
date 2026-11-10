@@ -152,7 +152,10 @@ public final class ApiTokenVerifier {
       throw new InvalidTokenException("tenant and client_id are required");
     }
     String jti = c.getJWTID();
-    if (jti != null && control.jtiRevoked(jti)) {
+    if (jti == null || jti.isEmpty()) {
+      throw new InvalidTokenException("jti is required");
+    }
+    if (control.jtiRevoked(jti)) {
       throw new RevokedTokenException("token revoked");
     }
     long iat = c.getIssueTime() == null ? 0 : c.getIssueTime().getTime();

@@ -20,6 +20,8 @@ public final class PushAcceptor {
   private static final Logger log = LoggerFactory.getLogger(PushAcceptor.class);
   static final int RETRY_PRODUCE_MS = 500;
   static final int RETRY_STORE_MS = 200;
+  /** Bounds the two Redis keys a client key makes for an hour (same bound as {@code collapse_key}). */
+  static final int MAX_IDEMPOTENCY_KEY_BYTES = 256;
 
   private final SeqAllocator seq;
   private final RecordBuilder builder;
@@ -49,6 +51,9 @@ public final class PushAcceptor {
     Optional<Violation> v = PushRequests.violation(r);
     if (v.isPresent()) {
       return fail(res, Code.CODE_INVALID, v.get().rule() + ": " + v.get().message());
+    }
+    if (r.getIdempotencyKey().getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_IDEMPOTENCY_KEY_BYTES) {
+      return fail(res, Code.CODE_INVALID, "idempotency_key: at most 256 bytes");
     }
     boolean internalControl = caller instanceof Caller.InternalCaller && r.getKind() == PushRequest.Kind.KIND_CONTROL;
     Optional<String> forbidden = forbidden(caller, r);
