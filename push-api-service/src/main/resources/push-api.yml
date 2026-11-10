@@ -46,7 +46,7 @@ management:
         enabled: true
       group:
         readiness:
-          include: readinessState
+          include: readinessState,pushapi
           additional-path: "server:/ready"
           show-details: always
         liveness:

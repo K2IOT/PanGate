@@ -158,6 +158,24 @@ public class PushApiConfig {
     return b;
   }
 
+  @Bean
+  com.pangate.pushapi.grpc.PushGrpcService pushGrpcService(PushApiProperties p, PushAcceptor acceptor,
+      KeyedSerialExecutor serial, MeterRegistry meters) {
+    return new com.pangate.pushapi.grpc.PushGrpcService(acceptor, serial, p.grpc().maxInFlightPerStream(), meters);
+  }
+
+  @Bean
+  com.pangate.pushapi.grpc.GrpcServerLifecycle grpcServer(PushApiProperties p,
+      com.pangate.pushapi.grpc.PushGrpcService service, ExecutorService pushWorkers) {
+    return new com.pangate.pushapi.grpc.GrpcServerLifecycle(p.grpc(), service, pushWorkers);
+  }
+
+  /** Bean name {@code pushapiHealthIndicator} → health contributor {@code pushapi} (readiness group). */
+  @Bean
+  PushApiHealth pushapiHealthIndicator(ControlListener control, ApiTokenVerifier verifier) {
+    return new PushApiHealth(control, verifier);
+  }
+
   /** Starts the background parts after the context; stops them in reverse order (push-api spec §5 SIGTERM). */
   @Bean
   SmartLifecycle pushApiBackground(PushApiProperties p, RedisState redis, RedisSeqEpochs epochs,
@@ -174,7 +192,12 @@ public class PushApiConfig {
         long every = p.seqepochs().refresh().toMillis();
         timers.scheduleWithFixedDelay(epochs::refreshNow, every, every, TimeUnit.MILLISECONDS);
         timers.scheduleWithFixedDelay(control::prune, 60, 60, TimeUnit.SECONDS);
-        timers.scheduleWithFixedDelay(() -> verifier.refresh(false), 0, 300, TimeUnit.SECONDS);
+        timers.scheduleWithFixedDelay(() -> verifier.refresh(true), 0, 300, TimeUnit.SECONDS);
+        timers.scheduleWithFixedDelay(() -> {
+          if (!verifier.loaded()) {
+            verifier.refresh(false);   // until the first JWKS arrives (readiness)
+          }
+        }, 2, 2, TimeUnit.SECONDS);
         meters.gauge("pushapi.revocations.active", control, ControlState::revocations);
         meters.gauge("pushapi.seqepoch.cache_age_seconds", epochs,
             e -> (System.currentTimeMillis() - e.refreshedAtMs()) / 1000.0);
@@ -200,9 +223,10 @@ public class PushApiConfig {
         return running;
       }
 
+      /** Below the web server and gRPC phases: starts before they serve, stops after they drained. */
       @Override
       public int getPhase() {
-        return Integer.MAX_VALUE - 1000;   // stops after the web server finished its graceful shutdown
+        return 0;
       }
     };
   }
