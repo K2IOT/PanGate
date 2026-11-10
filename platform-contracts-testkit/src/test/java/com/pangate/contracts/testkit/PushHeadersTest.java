@@ -28,4 +28,14 @@ class PushHeadersTest {
     assertThatThrownBy(() -> PushHeaders.assertConventions(record(missing), "PushRecord"))
         .isInstanceOf(AssertionError.class).hasMessageContaining("cell-id");
   }
+
+  @Test
+  void onlyNodeDownMayHaveAnEmptyTenant() {
+    RecordHeaders h = new RecordHeaders();
+    PushHeaders.write(h, "", "c1", null, "ConnectionEvent");
+    assertThatCode(() -> PushHeaders.assertConventions(record(h), "ConnectionEvent")).doesNotThrowAnyException();
+    RecordHeaders p = new RecordHeaders();
+    PushHeaders.write(p, "", "c1", null, "PushRecord");
+    assertThatThrownBy(() -> PushHeaders.assertConventions(record(p), "PushRecord")).hasMessageContaining("tenant-id");
+  }
 }
