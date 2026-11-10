@@ -238,7 +238,7 @@ router:
 1. Unit và IT của router xanh; `make verify` xanh trên mọi module.
 2. Gateway ghi `node:addr:{id}`; test cũ không phải sửa.
 3. Router chạy được ở `local` (`make router-local`) và trong compose `dev`.
-4. `make smoke` xanh với `PUSH via Kafka`, `OFFLINE`, và KICK đi qua router.
+4. `make smoke` xanh với `PUSH via Kafka` và `OFFLINE`. KICK đi qua Kafka và router được chứng minh bằng `RouterIT` (gateway thật) và test của `fake-pushapi` → Kafka.
 5. IT chứng minh: restart router không mất message; dừng gateway sinh `NODE_DOWN`.
 6. Đã viết ADR 0019–0021; `make release-check` xanh; CI xanh.
 
