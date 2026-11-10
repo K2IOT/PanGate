@@ -16,3 +16,6 @@ Quyết định kiến trúc của gateway-service (spec §13). Mỗi ADR gồm:
 | [0010](0010-higher-epoch-wins-lease.md) | Lease "epoch lớn hơn thắng" để restart nhanh không bị fence |
 | [0011](0011-loop-safe-span-processor.md) | Span OTel qua `LoopSafeSpanProcessor` thay vì `BatchSpanProcessor` |
 | [0012](0012-tenantconns-hash-with-expiry.md) | `tenantconns:{t}` là hash tổng theo node, hạn 30 s |
+| [0013](0013-auth-managed-signing-keys.md) | Auth tự quản lý khoá ES256 trong PostgreSQL (KEK qua `SecretSource`, publish trước 1 h, chồng lấn 7 ngày, advisory lock) |
+| [0014](0014-shared-keys-split-by-audience.md) | Token API và connect token dùng chung khoá, tách bằng `aud` (`pangate-api` / `pangate-gw`) |
+| [0015](0015-revocation-outbox.md) | Thu hồi qua transactional outbox lên `gw.control`; tombstone khi hết hạn |

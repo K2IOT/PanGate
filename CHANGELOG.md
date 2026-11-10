@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### auth-service (sub-project 1 after 0.1.0)
+- New module `auth-service` (spec `docs/superpowers/specs/2026-11-05-auth-service-design.md`):
+  - OAuth2 client credentials, giving ES256 API tokens with `aud=pangate-api`;
+  - `POST /v1/tokens`, giving gateway connect tokens with `aud=pangate-gw`;
+  - JWKS with publish-ahead key rotation (30 d lifetime, 7 d overlap, 1 h publish-ahead) under a PostgreSQL advisory lock;
+  - `POST /v1/revocations` through a transactional outbox to `gw.control`, with tombstones on expiry;
+  - internal Admin API on the management port;
+  - rate limits, 503 when PostgreSQL is down while JWKS keeps serving, KEK fail-fast, metrics.
+- Contracts: `Revoke.client_id = 5`, key `revoke:c:<client_id>`. The gateway ignores these keys without counting a bad record.
+- `gateway-service` publishes a `verifier` classifier jar (package `com.pangate.gateway.auth`) for Auth's contract test.
+- Gateway issuer by profile:
+  - profile `dev` reads JWKS from `http://auth:8090`;
+  - prod issuer defaults to `https://auth.pangate`;
+  - profile `local` keeps devtools-signed tokens.
+- Devenv: compose adds `postgres` and `auth` and drops the `issuer` container. `make smoke` mints through Auth and ends with revoke → close 4003. New targets: `make auth-local`, `make auth-local-check`.
+- devtools: `AuthClient`; `smoke`/`token` accept `--auth-url --client-file [--client]`.
+- ADR 0013–0015.
+
 ## 0.1.0 — 2026-11-05
 
 First release of `gateway-service` and its base project (`platform-parent`, `platform-contracts`,

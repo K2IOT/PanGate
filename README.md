@@ -5,7 +5,7 @@ Connection gateway (Netty on Spring Boot) for 10M long-lived client connections.
 ## Requirements
 
 - JDK 21
-- Docker with Compose: Kafka and Redis for `local` (`make infra-up`), everything for `dev`, Testcontainers for
+- Docker with Compose: Kafka, Redis and PostgreSQL for `local` (`make infra-up`), everything for `dev`, Testcontainers for
   `make verify`
 
 ## Build
@@ -14,14 +14,15 @@ Connection gateway (Netty on Spring Boot) for 10M long-lived client connections.
 make bootstrap
 ```
 
-Modules build in order: `platform-parent` → `platform-contracts` → `platform-spring-starter` → `gateway-devtools` → `gateway-service`.
+Modules build in order: `platform-parent` → `platform-contracts` → `platform-spring-starter` → `gateway-devtools` → `gateway-service` → `auth-service`.
 
 - Design spec: [docs/superpowers/specs/2026-11-03-gateway-service-design.md](docs/superpowers/specs/2026-11-03-gateway-service-design.md)
+- Auth service: [auth-service/README.md](auth-service/README.md) (spec [docs/superpowers/specs/2026-11-05-auth-service-design.md](docs/superpowers/specs/2026-11-05-auth-service-design.md))
 - Dev environment: [platform-devenv/README.md](platform-devenv/README.md)
 
 ## Run
 
-- **Local (IDE):** `make infra-up` (Kafka `localhost:9092`, Redis `localhost:6379`), then see
+- **Local (IDE):** `make infra-up` (Kafka `localhost:9092`, Redis `localhost:6379`, PostgreSQL `localhost:5432`), then see
   [gateway-service/README.md](gateway-service/README.md) — profile `local`, secrets auto-generated in `~/.pangate-dev`.
 - **Dev (Docker):** `make bootstrap images up smoke`, then `make down`.
-- Checks: `make doctor`, `make local-check`, `make memory-check` (< 5 KB/session), `make load-check N=18000` (TODO: `N=50000` on a machine with `ulimit -n` ≥ 120000).
+- Checks: `make doctor`, `make local-check`, `make auth-local-check`, `make memory-check` (< 5 KB/session), `make load-check N=18000` (TODO: `N=50000` on a machine with `ulimit -n` ≥ 120000).

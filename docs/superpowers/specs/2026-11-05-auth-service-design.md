@@ -1,7 +1,7 @@
 # auth-service — Design Spec
 
 - **Ngày:** 2026-11-05
-- **Trạng thái:** Draft, chờ duyệt
+- **Trạng thái:** Đã hiện thực (milestone A1, plan `docs/superpowers/plans/2026-11-05-auth-service-a1.md`, 2026-11-10). Số đo trên máy dev: 98 test của `auth-service` (unit + contract + IT) xanh; `make smoke` qua Auth, revoke → close 4003 trong 134–636 ms (yêu cầu < 10 s); `make auth-local-check` và `make local-check` xanh
 - **Nguồn kiến trúc:** *Netty Gateway — 10M Active Connections* (Nov 2, 2026, @Kuu Kuu), gọi tắt là "tài liệu gốc"; mục số trong ngoặc, ví dụ (§3.6), là mục của tài liệu gốc. "Spec gateway" là `docs/superpowers/specs/2026-11-03-gateway-service-design.md`.
 - **Vị trí trong lộ trình:** sub-project 1/4 sau bản `0.1.0` của gateway: (1) `auth-service`, (2) contracts cho đường push, (3) `push-router-service`, (4) `push-api-service`. Mỗi sub-project có spec, plan và hiện thực riêng.
 
