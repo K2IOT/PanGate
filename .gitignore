@@ -3,6 +3,7 @@ target/
 *.iml
 .vscode/
 .pangate-dev/
+.dev/
 .gitnexus/
 .superpowers/
 

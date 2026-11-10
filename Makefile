@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 VERSION := 0.1.0
 MVNW := $(CURDIR)/mvnw
-MODULES := platform-parent platform-contracts platform-spring-starter gateway-devtools gateway-service
+MODULES := platform-parent platform-contracts platform-spring-starter gateway-devtools gateway-service auth-service
 
 .PHONY: bootstrap verify
 

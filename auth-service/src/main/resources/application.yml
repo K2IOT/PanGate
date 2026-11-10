@@ -1,0 +1,59 @@
+# Production defaults (spec §8). Profiles local and dev override selected values.
+spring:
+  application:
+    name: auth-service
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://postgres:5432/pangate
+    username: pangate
+    password: ${AUTH_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 16
+      connection-timeout: 2000   # ms
+  flyway:
+    schemas: auth
+    default-schema: auth
+  jdbc:
+    template:
+      query-timeout: 5s
+
+pangate:
+  service: auth
+
+auth:
+  issuer: https://auth.pangate
+  api-token-ttl: 15m
+  connect-token-max-ttl: 10m
+  revocation-ttl: 24h
+  keys: { lifetime: 30d, overlap: 7d, publish-ahead: 1h, kek-id: v1, cache-refresh: 60s }
+  outbox: { interval: 200ms, batch: 500, keep-sent: 7d }
+  kafka: { control-topic: gw.control, bootstrap-servers: "kafka:9092" }
+  seed: { enabled: false }
+
+# Public API on :8090; actuator, /ready, /live and /admin/v1 on the management port :8081 (spec §1).
+server:
+  port: 8090
+  shutdown: graceful
+  max-http-request-header-size: 16KB
+
+management:
+  server:
+    port: 8081
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db
+          additional-path: "management:/ready"
+          show-details: always
+        liveness:
+          include: livenessState
+          additional-path: "management:/live"

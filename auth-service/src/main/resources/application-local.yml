@@ -1,0 +1,10 @@
+# Run from the IDE or `make auth-local` (from the repo root) against `make infra-up`.
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/pangate
+    username: pangate
+    password: pangate
+auth:
+  issuer: http://localhost:8090
+  kafka: { bootstrap-servers: "localhost:9092" }
+  seed: { enabled: true, dir: .dev/auth }
