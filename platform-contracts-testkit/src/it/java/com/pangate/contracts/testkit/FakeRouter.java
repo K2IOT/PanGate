@@ -43,7 +43,7 @@ final class FakeRouter implements AutoCloseable {
           if (r.getKind() != PushRecord.Kind.KIND_MESSAGE) {
             continue;
           }
-          OfflineRecord o = Fixtures.offline(r, OfflineRecord.Reason.REASON_NO_SESSION);
+          OfflineRecord o = Fixtures.offline(r, OfflineRecord.Reason.REASON_NO_SESSION, 0);
           var out = new ProducerRecord<>(PushTopics.offline(cell).name(), PushKeys.of(o), o.toByteArray());
           PushHeaders.write(out.headers(), r.getTenantId(), cell, null, "OfflineRecord");
           producer.send(out);

@@ -14,8 +14,6 @@ expires_at_ms: 1762819200000
 frame {
   type: FRAME_TYPE_PUSH
   msg_id: "01JC0000000000000000000000"
-  seq: 1
-  seq_epoch: 1
   class: DELIVERY_CLASS_RELIABLE
   payload: "{\"hello\":\"world\"}"
   headers {

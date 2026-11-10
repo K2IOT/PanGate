@@ -10,7 +10,7 @@ import java.util.List;
 
 /**
  * Validation cases for {@code PushService.SendStream} (push contracts spec §3.1, rules V1–V9). Push API must answer each
- * request with the expected code; this class holds data only, the validator lives in push-api-service.
+ * request with the expected code (rules V1–V11); this class holds data only, the validator lives in push-api-service.
  */
 public final class PushRequestCases {
 
@@ -91,6 +91,15 @@ public final class PushRequestCases {
         Code.CODE_INVALID));
 
     c.add(new Case("V9 gateway 0.1.0 KICK", "V9", Fixtures.kickRequest010(), Code.CODE_OK));
+
+    c.add(new Case("V10 receipt with RELIABLE", "V10", message().setReceipt(true).build(), Code.CODE_OK));
+    c.add(new Case("V10 receipt with EPHEMERAL", "V10", message().setReceipt(true)
+        .setClass_(com.pangate.contracts.v1.DeliveryClass.DELIVERY_CLASS_EPHEMERAL).build(), Code.CODE_INVALID));
+    c.add(new Case("V10 receipt on BROADCAST", "V10", broadcast().setReceipt(true).build(), Code.CODE_INVALID));
+
+    c.add(new Case("V11 device with RELIABLE", "V11", message().setDeviceId("d1").build(), Code.CODE_OK));
+    c.add(new Case("V11 device with ORDERED", "V11", message().setDeviceId("d1")
+        .setClass_(com.pangate.contracts.v1.DeliveryClass.DELIVERY_CLASS_ORDERED).build(), Code.CODE_INVALID));
     return List.copyOf(c);
   }
 }

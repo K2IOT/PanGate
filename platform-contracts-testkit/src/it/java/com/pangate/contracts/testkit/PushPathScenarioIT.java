@@ -43,7 +43,7 @@ class PushPathScenarioIT {
 
   @Test
   void messageGoesOfflineWithConventions() {
-    PushRecord m = Fixtures.message(principal()).toBuilder().setMsgId(id()).build();
+    PushRecord m = Fixtures.withMsgId(Fixtures.message(principal()), id());
     scenario.produce(m);
     OfflineRecord o = scenario.awaitOffline(m.getMsgId(), OfflineRecord.Reason.REASON_NO_SESSION);
     assertThat(o.getRecord()).isEqualTo(m);
@@ -51,7 +51,7 @@ class PushPathScenarioIT {
 
   @Test
   void receiptProducesADeliveredRecord() {
-    PushRecord m = Fixtures.message(principal()).toBuilder().setMsgId(id()).setReceipt(true)
+    PushRecord m = Fixtures.withMsgId(Fixtures.message(principal()), id()).toBuilder().setReceipt(true)
         .setSenderPrincipalId("t1:sender").build();
     scenario.produce(m);
     assertThat(scenario.awaitDelivered(m.getMsgId()).getSenderPrincipalId()).isEqualTo("t1:sender");
@@ -62,7 +62,7 @@ class PushPathScenarioIT {
     String p = principal();
     List<String> ids = new ArrayList<>();
     for (int i = 0; i < 5; i++) {
-      PushRecord m = Fixtures.message(p).toBuilder().setMsgId(id()).build();
+      PushRecord m = Fixtures.withMsgId(Fixtures.message(p), id());
       ids.add(m.getMsgId());
       scenario.produce(m);
     }
@@ -74,7 +74,7 @@ class PushPathScenarioIT {
   @Test
   void broadcastIsKeyedByTopic() {
     String topic = "t1:news-" + UUID.randomUUID().toString().substring(0, 6);
-    PushRecord b = Fixtures.broadcast(topic).toBuilder().setMsgId(id()).build();
+    PushRecord b = Fixtures.withMsgId(Fixtures.broadcast(topic), id());
     scenario.produce(b);
     assertThat(scenario.awaitRequest(b.getMsgId())).isEqualTo(b);
     assertThat(scenario.drain(PushTopics.requests("c1").name()))
@@ -90,7 +90,7 @@ class PushPathScenarioIT {
 
   @Test
   void conventionViolationFailsTheAwait() {
-    PushRecord m = Fixtures.message(principal()).toBuilder().setMsgId(id()).build();
+    PushRecord m = Fixtures.withMsgId(Fixtures.message(principal()), id());
     RecordHeaders noCell = new RecordHeaders();
     noCell.add("tenant-id", "t1".getBytes());
     noCell.add("content-type", PushHeaders.contentType("PushRecord").getBytes());

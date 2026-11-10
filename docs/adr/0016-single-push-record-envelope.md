@@ -6,7 +6,7 @@ Accepted, 2026-11-10.
 
 ## Bối cảnh
 
-Push API, Push Router và Inbox (Phase 2) cần chung một định dạng cho mọi push đi xuống: unicast tới principal, tới một device, broadcast theo topic, và control (SUBSCRIBE, KICK…). Thứ tự giữa CONTROL và MESSAGE của cùng một principal phải được giữ, ví dụ SUBSCRIBE phải tới trước push đầu tiên của topic đó.
+Push API, Push Router và Inbox (Phase 2) cần chung một định dạng cho mọi push đi xuống: unicast tới principal, tới một device, broadcast theo topic, và control (SUBSCRIBE, KICK…). Thứ tự giữa CONTROL và MESSAGE của cùng một principal phải được giữ, ví dụ KICK hoặc REFRESH_CONFIG phải tới trước các MESSAGE gửi sau nó cho principal đó.
 
 ## Quyết định
 
@@ -19,7 +19,7 @@ Push API, Push Router và Inbox (Phase 2) cần chung một định dạng cho m
 
 ## Hệ quả
 
-- Cùng key nên cùng partition, vì vậy thứ tự theo principal được giữ.
+- Cùng key nên cùng partition, vì vậy thứ tự giữa MESSAGE và CONTROL của một principal được giữ. BROADCAST (key `topic:<t>`) **không** có thứ tự so với CONTROL như SUBSCRIBE: một SUBSCRIBE và broadcast đầu tiên của topic đó có thể tới gateway theo thứ tự bất kỳ.
 - Mỗi luồng chỉ cần một consumer group: một cho router, sau này thêm một cho inbox.
 - Broadcast dùng chung partition với unicast, nhưng key `topic:<t>` rải chúng ra nhiều partition.
 - Tách topic theo kind đã bị loại, vì sẽ mất thứ tự giữa CONTROL và MESSAGE.

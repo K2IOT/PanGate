@@ -120,12 +120,40 @@ message DeliveredRecord {
 |---|---|
 | `kind` ↔ `target` | MESSAGE: `principal_id` hoặc `device`. BROADCAST: `topic`. CONTROL: `principal_id` |
 | `frame` | Có với MESSAGE và BROADCAST, không có với CONTROL. `frame.type = FRAME_TYPE_PUSH`, `frame.msg_id = msg_id`, `frame.class = class` |
-| `frame.seq`, `seq_epoch` | Chỉ có với MESSAGE RELIABLE/ORDERED (do Push API cấp, §3.2) |
+| `frame.seq`, `seq_epoch` | Chỉ có với MESSAGE RELIABLE/ORDERED tới **principal** (do Push API cấp, §3.3). MESSAGE tới **device** không bao giờ có `seq` (một device-push không được tiêu `seq` của principal mà các device khác không nhận, vì như thế các device đó thấy gap giả) và không được là ORDERED (V11) |
 | `frame.topic`, `topic_seq` | `frame.topic = topic` với BROADCAST. `topic_seq` chỉ có với BROADCAST RELIABLE/ORDERED (quyết định C3) |
 | `expires_at_ms` | Router không giao record đã quá hạn: RELIABLE/ORDERED MESSAGE chuyển sang `push.offline` với `REASON_EXPIRED`; còn lại thì bỏ, có metric |
 | EPHEMERAL | Không bao giờ vào `push.offline`; miss thì bỏ, có metric (§3.5) |
 | BROADCAST và CONTROL | Không vào `push.offline`; không có `DeliveredRecord` |
-| `receipt` | Chỉ có nghĩa với MESSAGE. Mỗi kết nối nhận ACK (hoặc WRITTEN với EPHEMERAL) sinh một `DeliveredRecord` |
+| `receipt` | Chỉ cho MESSAGE RELIABLE/ORDERED (V10: EPHEMERAL hay BROADCAST kèm `receipt` bị từ chối, vì gateway không ack EPHEMERAL). Mỗi kết nối trả `AckItem` `STATUS_ACKED` hoặc `STATUS_WRITTEN` (giao không cần client ack: phiên SSE, kill switch `delivery.downgradeReliable`) sinh một `DeliveredRecord` với đúng status đó |
+
+### 1.1a Kết quả giao của router (router ③ thực thi)
+
+**Phạm vi.** MESSAGE tới principal được fan-out tới mọi kết nối còn sống của principal (mỗi kết nối một `PushItem` với `conn_id`). MESSAGE tới device chỉ gửi tới kết nối của device đó.
+
+**Một record đã "giao"** khi ít nhất một kết nối trả `STATUS_ACKED` hoặc `STATUS_WRITTEN`. Kết nối nào thất bại thì device đó bù lại qua sync (Inbox, Phase 2), không qua `push.offline`, để Offline Delivery không đẩy lại cho device đã nhận.
+
+**Một record "offline"** (chỉ RELIABLE/ORDERED MESSAGE): khi không kết nối nào giao được sau các retry dưới đây. Mỗi record sinh đúng một `OfflineRecord`, với `reason` là lý do của lần thử cuối.
+
+**Bảng xử lý từng `AckItem.Status`:**
+
+| `AckItem.Status` | Retry? | Khi hết cách |
+|---|---|---|
+| `STATUS_ACKED`, `STATUS_WRITTEN` | — | Kết nối đó đã giao |
+| `STATUS_NACK_TIMEOUT` | Có: tra lại registry và gửi lại sau 100 ms, rồi sau 400 ms (2 retry, §3.5 tài liệu gốc). Gửi lại thì dùng `delivery_id` mới; gateway bỏ qua `msg_id` đã có trong window, nên không có bản trùng trên cùng một kết nối | `REASON_NACK_TIMEOUT` |
+| `STATUS_NACK_CLOSED`, `STATUS_NACK_NOT_FOUND` | Có: tra lại registry (phiên có thể đã chuyển node) rồi gửi lại, tối đa 2 lần | `REASON_CLOSED`; không còn entry sống thì `REASON_NO_SESSION` |
+| `STATUS_NACK_OVERFLOW`, `STATUS_NACK_SLOW_CONSUMER`, `STATUS_NACK_SHED` | Không (gateway đang quá tải hoặc client không đọc) | `REASON_OVERFLOW`, `REASON_SLOW_CONSUMER`, `REASON_SHED` |
+| Lease node mất trong lúc chờ ack | Như `NACK_CLOSED` | `REASON_NODE_GONE` |
+| Không có entry sống ngay từ đầu | — | `REASON_NO_SESSION` |
+| `now > expires_at_ms` trước khi gửi | — | `REASON_EXPIRED` |
+
+**`attempts`:** số `PushItem` router đã gửi cho record đó, tính cả mọi kết nối và mọi retry. Bằng 0 với `REASON_NO_SESSION` / `REASON_EXPIRED` khi chưa gửi lần nào.
+
+**Các trường hợp còn lại:**
+- EPHEMERAL được coi là đã giao khi đã ghi vào stream tới node (gateway không ack EPHEMERAL); không có retry, offline hay receipt.
+- BROADCAST và CONTROL: gửi một lần tới mỗi node có liên quan, không có offline hay receipt.
+
+**Thứ tự.** Thứ tự chỉ được giữ giữa MESSAGE và CONTROL của **cùng một principal** (cùng key). BROADCAST (key `topic:<t>`) không có thứ tự so với CONTROL (ví dụ SUBSCRIBE) hay MESSAGE.
 
 ### 1.2 `lifecycle.proto` (additive)
 
@@ -215,8 +243,21 @@ message PushResponse {
 | V7 | `payload` ≤ 65 536 B; `ttl_sec` ≤ 604 800 | `CODE_INVALID` |
 | V8 | `tenant_id` không rỗng, không phải `__warmup` | `CODE_INVALID` |
 | V9 | Request KICK 5-field của gateway 0.1.0 (CONTROL + `control.kick`) hợp lệ | — (phải `CODE_OK`) |
+| V10 | `receipt` chỉ cho MESSAGE RELIABLE/ORDERED | `CODE_INVALID` |
+| V11 | MESSAGE tới device (`device_id` có giá trị) không được là ORDERED | `CODE_INVALID` |
 
 Quyền của bên gọi: với gRPC nội bộ thì kiểm theo allowlist mTLS, với HTTP thì theo scope `push:send` / `push:broadcast`. Vi phạm trả `CODE_FORBIDDEN`. Đây là việc của ④; spec này chỉ cố định mã lỗi.
+
+### 3.3 State dùng chung với gateway và idempotency
+
+Gateway đọc state mà Push API ghi (spec gateway §6.7, §14.1). Contract này chốt điều đó; `SeqKeys` trong testkit là bản tham chiếu và gateway có test đối chiếu.
+
+| State | Định dạng | Ai ghi / ai đọc |
+|---|---|---|
+| `seq:{<principal>}` (Redis state) | Số thập phân, `INCR` một lần cho mỗi MESSAGE RELIABLE/ORDERED tới **principal**; chưa có key = 0 | Push API ghi; gateway `GET` khi HELLO để điền `CONNECTED.seq` |
+| `seqepochs` (hash, Redis state) | field là slot (thập phân 0..16383), value là `seqEpoch` (thập phân); slot không có = 0. Slot = slot Redis Cluster của chuỗi principal (CRC16-XMODEM mod 16384, có tôn trọng hash tag), như `SlotHash.getSlot` của Lettuce | Push API ghi khi bump epoch sau failover; gateway `HGETALL` mỗi 5 s |
+| `topicseq:{<topic>}` (Redis state) | Như `seq:{p}`, cho mỗi BROADCAST RELIABLE/ORDERED | Chỉ Push API |
+| Idempotency `idem:{<tenant>}:{<idempotency_key>}` | Lưu `PushResponse` đầu tiên, TTL 1 h. Request trùng key trong cùng tenant trả **đúng response đó** với `duplicate = true` và `CODE_OK`, không produce lần nữa. **Không** so sánh body: cùng key với body khác vẫn là duplicate | Chỉ Push API |
 
 ### 3.2 Ánh xạ sang `POST /v1/push` (④)
 
@@ -255,7 +296,8 @@ Quyền của bên gọi: với gRPC nội bộ thì kiểm theo allowlist mTLS,
 |---|---|
 | `registry/RegistryWriter` | Ghi value v2 (§4) với `device` của phiên |
 | `upstream/LifecyclePublisher` | Gán `event_id` (ULID) cho mọi `ConnectionEvent`; gateway không phát `NODE_DOWN` |
-| Test | `RegistryWriterTest` khớp golden v2 của testkit; test lifecycle kiểm tra `event_id` là ULID và không trùng. Không sửa test cũ |
+| Test | `RegistryValueV2Test` khớp golden v2 của testkit; test lifecycle kiểm tra `event_id` là ULID và không trùng. Không sửa test cũ, **trừ** những assertion đang chốt đúng chuỗi value v1 (`RegistryWriterIT`, `GatewayClusterIT`): chúng chuyển sang v2 mà vẫn so đúng từng ký tự |
+| `platform` | `RegistryWriter` thay `|` trong `platform` (do client gửi) bằng `_`, để `device` không bị lệch phần |
 | Không đổi | `PushStream`, `PushItem`, `AckItem`, đường KICK qua `PushService` (5 field cũ), `ControlKeys` |
 
 Gateway có thể lên trước router, vì router ③ đọc được cả v1 lẫn v2.
@@ -264,7 +306,7 @@ Gateway có thể lên trước router, vì router ③ đọc được cả v1 l
 
 ## 6. `platform-contracts-testkit`
 
-Module mới, build ngay sau `platform-contracts`.
+Module mới, build sau `platform-contracts` và `platform-spring-starter` (testkit dùng `PangateHeaders` của starter).
 - **Toạ độ:** `com.pangate:platform-contracts-testkit:0.1.0`, package `com.pangate.contracts.testkit`.
 - **Parent:** `platform-parent`.
 - **Phụ thuộc:** `platform-contracts`, `kafka-clients`, `org.testcontainers:kafka`, `junit-jupiter-api`, `assertj-core`, tất cả ở scope compile của module. Không phụ thuộc Spring.
@@ -276,7 +318,9 @@ Module mới, build ngay sau `platform-contracts`.
 | `PushKeys` | `of(PushRecord)`, `of(OfflineRecord)`, `of(DeliveredRecord)`, `of(ConnectionEvent)` theo §2 |
 | `PushHeaders` | `write(Headers, tenant, cell, traceparent, messageName)` (bọc `PangateHeaders`); `assertConventions(ConsumerRecord<String, byte[]>, String messageName)` |
 | `Fixtures` | `message(principal)`, `deviceMessage(principal, device)`, `broadcast(topic)`, `control(principal, ControlOp)`, `offline(record, reason)`, `delivered(record, connId)`, `nodeDown(nodeId, epoch)`; mặc định hợp lệ theo §1.1, sửa được qua `toBuilder()` |
-| `PushRequestCases` | `List<Case(String name, PushRequest request, PushResponse.Code expected)>`, ít nhất một ca đúng và một ca sai cho mỗi luật V1–V9 |
+| `PushRequestCases` | `List<Case(String name, PushRequest request, PushResponse.Code expected)>`, ít nhất một ca đúng và một ca sai cho mỗi luật V1–V11 |
+| `PushRecordRules` | `assertValid(PushRecord)`: mọi luật §1.1, ném `AssertionError` nêu tên luật. `PushPathScenario.produce` gọi nó; ④ dùng để kiểm record mình produce |
+| `SeqKeys` | `seq(principal)`, `SEQ_EPOCHS`, `slot(principal)` theo §3.3 |
 | `RegistryValues` | `List<Case(String value, Optional<Parsed> expected)>`, với `Parsed(nodeId, epoch, connectedAtMs, platform, Optional<String> device)`: v1, v2, device chứa `|`, device rỗng, thiếu phần, số hỏng; và `v2(nodeId, epoch, connectedAtMs, platform, device)` để dựng chuỗi chuẩn |
 | `golden/v1/<name>.textproto`, `<name>.bin` | Một cặp cho mỗi fixture của `Fixtures` và một request mẫu cho mỗi `kind` của `PushRequest` |
 | `PushPathScenario` | Extension JUnit 5 quản lý một `KafkaContainer` dùng chung trong JVM và tạo topic theo `PushTopics`. API: `bootstrapServers()`, `produce(PushRecord)` (đúng key và header), `awaitRequest(msgId)`, `awaitOffline(msgId, Reason)`, `awaitDelivered(msgId)`, `awaitNodeDown(nodeId, epoch)`, `drain(topic)`; mọi record đọc ra đều qua `assertConventions` |
@@ -305,7 +349,7 @@ Module mới, build ngay sau `platform-contracts`.
 |---|---|
 | `platform-contracts-testkit/` | Module mới (§6) |
 | `gateway-service` | §5; `pom.xml` thêm testkit ở scope `test` |
-| `Makefile` | `MODULES` thêm `platform-contracts-testkit` ngay sau `platform-contracts` |
+| `Makefile` | `MODULES` thêm `platform-contracts-testkit` sau `platform-spring-starter` |
 | `platform-devenv/docker-compose.yml` | `kafka-init` tạo `c1.push.requests`, `c1.push.offline`, `c1.push.delivered` |
 | `platform-devenv/scripts/release-check.sh` | Kiểm version của testkit |
 | `docs/adr/` | ADR 0016–0018 (§9) |
@@ -326,7 +370,7 @@ Module mới, build ngay sau `platform-contracts`.
 
 1. `buf lint` và `buf breaking` xanh với `push_record.proto`, `lifecycle.proto` và `push.proto` đúng §1–§3.
 2. `platform-contracts-testkit` 0.1.0 build được; unit và IT của nó xanh.
-3. Gateway ghi registry v2 và gán `event_id`; mọi test cũ, `make smoke` và `make local-check` xanh mà không sửa test cũ.
+3. Gateway ghi registry v2 và gán `event_id`; mọi test cũ, `make smoke` và `make local-check` xanh. Test cũ chỉ được sửa ở những assertion chốt đúng chuỗi value v1 (§5).
 4. `make up` tạo đủ các topic `c1.push.*`.
 5. Spec có bảng ánh xạ §3.2; ③ và ④ có thể bắt đầu mà không phải hỏi thêm về contract.
 6. ADR 0016–0018 đã viết; `make release-check` xanh; CI xanh.

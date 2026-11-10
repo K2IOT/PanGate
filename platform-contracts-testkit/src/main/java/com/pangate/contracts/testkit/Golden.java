@@ -32,13 +32,38 @@ public final class Golden {
     FIXTURES.put("push_record_control_kick", () -> Fixtures.control("t1:u1",
         Fixtures.kick("01JCNEWCONN0000000000000000", Fixtures.FIXED_NOW_MS)));
     FIXTURES.put("offline_record", () -> Fixtures.offline(Fixtures.message("t1:u1"),
-        OfflineRecord.Reason.REASON_NO_SESSION));
+        OfflineRecord.Reason.REASON_NACK_TIMEOUT, 3));
     FIXTURES.put("delivered_record", () -> Fixtures.delivered(Fixtures.deviceMessage("t1:u1", "d1"), "01JCCONN"));
     FIXTURES.put("connection_event_node_down", () -> Fixtures.nodeDown("gw-1", 7));
     FIXTURES.put("push_request_message", () -> Fixtures.request(PushRequest.Kind.KIND_MESSAGE));
     FIXTURES.put("push_request_broadcast", () -> Fixtures.request(PushRequest.Kind.KIND_BROADCAST));
     FIXTURES.put("push_request_control_kick_010", Fixtures::kickRequest010);
     FIXTURES.put("push_response_ok", Fixtures::okResponse);
+    // Encoding-only goldens that set every field (not valid records), so a type change of any field is caught.
+    FIXTURES.put("push_record_full", Golden::fullRecord);
+    FIXTURES.put("push_request_full", Golden::fullRequest);
+    FIXTURES.put("push_response_full", Golden::fullResponse);
+    FIXTURES.put("delivered_record_with_sender", () -> Fixtures.delivered(fullRecord().toBuilder()
+        .setDevice(com.pangate.contracts.v1.DeviceRef.newBuilder().setPrincipalId("t1:u1").setDeviceId("d1")).build(),
+        "01JCCONN"));
+  }
+
+  static com.pangate.contracts.v1.PushRecord fullRecord() {
+    return Fixtures.message("t1:u1").toBuilder().setPriority(com.pangate.contracts.v1.PushItem.Priority.PRIORITY_CRITICAL)
+        .setCollapseKey("order-42").setReceipt(true).setSenderPrincipalId("t1:sender")
+        .setControl(Fixtures.subscribe("t1:news")).build();
+  }
+
+  static PushRequest fullRequest() {
+    return Fixtures.request(PushRequest.Kind.KIND_MESSAGE).toBuilder().setControl(Fixtures.subscribe("t1:news"))
+        .setDeviceId("d1").setTopic("t1:news").setPriority(com.pangate.contracts.v1.PushItem.Priority.PRIORITY_BULK)
+        .setCollapseKey("order-42").setReceipt(true).setIdempotencyKey("idem-1").setSenderPrincipalId("t1:sender")
+        .build();
+  }
+
+  static com.pangate.contracts.v1.PushResponse fullResponse() {
+    return Fixtures.okResponse().toBuilder().setError("detail").setTopicSeq(9).setDuplicate(true)
+        .setRetryAfterMs(250).build();
   }
 
   public static final List<String> NAMES = List.copyOf(FIXTURES.keySet());

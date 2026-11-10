@@ -57,11 +57,20 @@ public final class Fixtures {
         .build();
   }
 
-  /** RELIABLE MESSAGE to one device. */
+  /** RELIABLE MESSAGE to one device: no seq, a device target never consumes the principal's seq (spec §1.1). */
   public static PushRecord deviceMessage(String principal, String device) {
     return base(PushRecord.Kind.KIND_MESSAGE, tenantOf(principal), DeliveryClass.DELIVERY_CLASS_RELIABLE)
         .setDevice(DeviceRef.newBuilder().setPrincipalId(principal).setDeviceId(device))
-        .setFrame(frame(DeliveryClass.DELIVERY_CLASS_RELIABLE).setSeq(1).setSeqEpoch(1)).build();
+        .setFrame(frame(DeliveryClass.DELIVERY_CLASS_RELIABLE)).build();
+  }
+
+  /** The same record under another msg_id, frame.msg_id included (never set msg_id alone with toBuilder()). */
+  public static PushRecord withMsgId(PushRecord r, String msgId) {
+    PushRecord.Builder b = r.toBuilder().setMsgId(msgId);
+    if (r.hasFrame()) {
+      b.setFrame(r.getFrame().toBuilder().setMsgId(msgId));
+    }
+    return b.build();
   }
 
   /** EPHEMERAL MESSAGE: no seq. */
@@ -93,9 +102,10 @@ public final class Fixtures {
         .build();
   }
 
-  public static OfflineRecord offline(PushRecord r, OfflineRecord.Reason reason) {
-    return OfflineRecord.newBuilder().setRecord(r).setReason(reason).setAttempts(3).setAtMs(FIXED_NOW_MS + 5_000)
-        .build();
+  /** {@code attempts}: deliveries sent to a gateway before giving up (0 for REASON_NO_SESSION; spec §1.3). */
+  public static OfflineRecord offline(PushRecord r, OfflineRecord.Reason reason, int attempts) {
+    return OfflineRecord.newBuilder().setRecord(r).setReason(reason).setAttempts(attempts)
+        .setAtMs(FIXED_NOW_MS + 5_000).build();
   }
 
   public static DeliveredRecord delivered(PushRecord r, String connId) {

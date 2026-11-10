@@ -98,8 +98,12 @@ public final class PushPathScenario implements BeforeAllCallback, AfterAllCallba
     return cell;
   }
 
-  /** As Push API does: key {@link PushKeys#of(PushRecord)}, headers per convention, waits for the ack. */
+  /**
+   * As Push API does: checks {@link PushRecordRules}, key {@link PushKeys#of(PushRecord)}, headers per convention, waits
+   * for the ack. Use {@link #produceRaw} to send a record that breaks the rules on purpose.
+   */
   public void produce(PushRecord r) {
+    PushRecordRules.assertValid(r);
     produce(PushTopics.requests(cell).name(), PushKeys.of(r), r, "PushRecord", r.getTenantId());
   }
 

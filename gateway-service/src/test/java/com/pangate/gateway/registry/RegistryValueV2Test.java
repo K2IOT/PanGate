@@ -24,4 +24,11 @@ class RegistryValueV2Test {
           assertThat(RegistryWriter.connectedAtMs(c.value())).as(c.name()).isEqualTo(p.connectedAtMs()));
     }
   }
+
+  @Test
+  void platformWithPipeCannotShiftTheDevice() {
+    String v = RegistryWriter.value("gw-1", 7, 1000, "ios|x", "d1");
+    assertThat(RegistryValues.parse(v).orElseThrow().device()).hasValue("d1");
+    assertThat(RegistryValues.parse(v).orElseThrow().platform()).doesNotContain("|");
+  }
 }

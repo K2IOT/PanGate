@@ -52,8 +52,9 @@ public final class RegistryWriter implements SessionListener {
   }
 
   static String value(String nodeId, long epoch, long connectedAtMs, String platform, String device) {
-    return nodeId + "|" + epoch + "|" + connectedAtMs + "|" + (platform == null ? "" : platform) + "|"
-        + (device == null ? "" : device);
+    // platform comes from the client's HELLO: a '|' in it would shift the device (push contracts spec §4, §5)
+    return nodeId + "|" + epoch + "|" + connectedAtMs + "|" + (platform == null ? "" : platform.replace('|', '_'))
+        + "|" + (device == null ? "" : device);
   }
 
   /**

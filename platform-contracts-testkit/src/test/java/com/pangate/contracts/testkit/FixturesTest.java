@@ -44,13 +44,17 @@ class FixturesTest {
     assertThat(c.getKind()).isEqualTo(PushRecord.Kind.KIND_CONTROL);
     assertThat(c.hasFrame()).isFalse();
 
-    assertThat(Fixtures.deviceMessage("t1:u1", "d1").getDevice().getDeviceId()).isEqualTo("d1");
+    PushRecord dm = Fixtures.deviceMessage("t1:u1", "d1");
+    assertThat(dm.getDevice().getDeviceId()).isEqualTo("d1");
+    assertThat(dm.getFrame().getSeq()).isZero();     // device targets take no per-principal seq (spec §1.1)
+    assertThat(dm.getFrame().getSeqEpoch()).isZero();
   }
 
   @Test
   void derivedFixtures() {
     PushRecord d = Fixtures.deviceMessage("t1:u1", "d1");
-    assertThat(Fixtures.offline(d, OfflineRecord.Reason.REASON_NO_SESSION).getRecord()).isEqualTo(d);
+    assertThat(Fixtures.offline(d, OfflineRecord.Reason.REASON_NO_SESSION, 0).getRecord()).isEqualTo(d);
+    assertThat(Fixtures.offline(d, OfflineRecord.Reason.REASON_NACK_TIMEOUT, 3).getAttempts()).isEqualTo(3);
     var delivered = Fixtures.delivered(d, "conn-1");
     assertThat(delivered.getPrincipalId()).isEqualTo("t1:u1");
     assertThat(delivered.getDeviceId()).isEqualTo("d1");
