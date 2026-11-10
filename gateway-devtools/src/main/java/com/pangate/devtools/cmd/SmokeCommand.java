@@ -11,6 +11,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import picocli.CommandLine.ArgGroup;
 import picocli.CommandLine.Command;
@@ -61,6 +62,9 @@ public final class SmokeCommand implements Callable<Integer> {
   @Option(names = "--no-router", description = "push via fake-router even when --kafka is given")
   boolean noRouter;
 
+  @Option(names = "--push-api", description = "Push API base URL: push through POST /v1/push (needs --auth-url)")
+  URI pushApi;
+
   @picocli.CommandLine.Spec
   picocli.CommandLine.Model.CommandSpec spec;
 
@@ -68,12 +72,52 @@ public final class SmokeCommand implements Callable<Integer> {
     return kafka != null && !noRouter;
   }
 
+  boolean viaRouter() {
+    return pushApi != null || viaKafka();
+  }
+
+  /** POST /v1/push of a RELIABLE message; returns its msgId. */
+  private String apiPush(String token, String target, boolean receipt) throws Exception {
+    String body = "{\"target\":{\"type\":\"principal\",\"id\":\"" + target + "\"},\"receipt\":" + receipt
+        + (receipt ? ",\"senderPrincipalId\":\"t1:smoke-svc\"" : "") + ",\"payload\":{\"type\":\"smoke\"}}";
+    HttpResponse<String> res = HttpClient.newHttpClient().send(HttpRequest.newBuilder(pushApi.resolve("/v1/push"))
+        .timeout(T).header("Authorization", "Bearer " + token).header("Content-Type", "application/json")
+        .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
+    if (res.statusCode() != 202) {
+      throw new IllegalStateException("POST /v1/push answered " + res.statusCode() + ": " + res.body());
+    }
+    return JSONObjectUtils.parse(res.body()).get("msgId").toString();
+  }
+
+  /** Polls GET /v1/messages/{id} until {@code state}, at most 10 s. */
+  private Map<String, Object> awaitStatus(String token, String msgId, String state) throws Exception {
+    long deadline = System.nanoTime() + T.toNanos();
+    Map<String, Object> last = Map.of();
+    HttpClient http = HttpClient.newHttpClient();
+    while (System.nanoTime() < deadline) {
+      HttpResponse<String> res = http.send(HttpRequest.newBuilder(pushApi.resolve("/v1/messages/" + msgId)).timeout(T)
+          .header("Authorization", "Bearer " + token).GET().build(), HttpResponse.BodyHandlers.ofString());
+      if (res.statusCode() == 200) {
+        last = JSONObjectUtils.parse(res.body());
+        if (state.equals(last.get("state"))) {
+          return last;
+        }
+      }
+      Thread.sleep(200);
+    }
+    throw new IllegalStateException("message " + msgId + " not " + state + " within " + T + " (last " + last + ")");
+  }
+
   @ArgGroup(exclusive = true, multiplicity = "1")
   ClientCommand.Trust trust;
 
   @Override
   public Integer call() {
-    if (!viaKafka() && router == null) {
+    if (pushApi != null && source.auth == null) {
+      throw new picocli.CommandLine.ParameterException(spec.commandLine(),
+          "--push-api needs an API token: use --auth-url and --client-file");
+    }
+    if (pushApi == null && !viaKafka() && router == null) {
       throw new picocli.CommandLine.ParameterException(spec.commandLine(),
           "Missing required option: '--router=<router>' (needed without --kafka, or with --no-router)");
     }
@@ -96,7 +140,31 @@ public final class SmokeCommand implements Callable<Integer> {
           throw new IllegalStateException("expected UPSTREAM_ACK, got " + answer.getType() + " "
               + com.pangate.contracts.v1.ErrorInfo.parseFrom(answer.getPayload()));
         }
-        if (viaKafka()) {
+        if (pushApi != null) {
+          step = "PUSH via API -> router -> ACK";
+          String apiToken = source.auth.client().apiToken();
+          long t0 = System.nanoTime();
+          String pushId = apiPush(apiToken, principal, true);
+          com.pangate.contracts.v1.Frame push = c.awaitPush(T);
+          if (!pushId.equals(push.getMsgId())) {
+            throw new IllegalStateException("expected PUSH " + pushId + ", got " + push.getMsgId());
+          }
+          c.ack(pushId);
+          System.out.printf("PUSH via API: POST -> PUSH in %.1f ms%n", (System.nanoTime() - t0) / 1e6);
+
+          step = "STATUS delivered";
+          Map<String, Object> st = awaitStatus(apiToken, pushId, "delivered");
+          System.out.println("STATUS delivered: " + st.get("lastStatus") + ", connections "
+              + st.get("deliveredConnections"));
+
+          step = "OFFLINE via API (no session -> offline NO_SESSION)";
+          String nobody = "t1:nobody-" + java.util.UUID.randomUUID().toString().substring(0, 8);
+          Map<String, Object> off = awaitStatus(apiToken, apiPush(apiToken, nobody, false), "offline");
+          if (!"no_session".equals(off.get("offlineReason"))) {
+            throw new IllegalStateException("expected offline no_session, got " + off);
+          }
+          System.out.println("OFFLINE: " + off.get("offlineReason") + " attempts=" + off.get("attempts"));
+        } else if (viaKafka()) {
           step = "PUSH via Kafka -> router -> ACK";
           try (com.pangate.devtools.push.PushProducer p =
               com.pangate.devtools.push.PushProducer.connect(kafka, redis, cell)) {
@@ -165,11 +233,11 @@ public final class SmokeCommand implements Callable<Integer> {
           }
           System.out.printf("revoke -> close 4003 in %.1f ms%n", (System.nanoTime() - t0) / 1e6);
         }
-        System.out.println("SMOKE OK (connected, pong, upstream-ack, push-ack, " + (viaKafka() ? "offline, " : "")
+        System.out.println("SMOKE OK (connected, pong, upstream-ack, push-ack, " + (viaRouter() ? "offline, " : "")
             + "resume, revoke)");
         return 0;
       }
-      System.out.println("SMOKE OK (connected, pong, upstream-ack, push-ack, " + (viaKafka() ? "offline, " : "")
+      System.out.println("SMOKE OK (connected, pong, upstream-ack, push-ack, " + (viaRouter() ? "offline, " : "")
           + "resume)");
       return 0;
     } catch (Exception e) {

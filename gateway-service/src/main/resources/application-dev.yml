@@ -11,7 +11,7 @@ gateway:
   drain: { interval: 1s, max-duration: 5s, listener-close-delay: 0s }
   shed: { cpu: false }
   grpc: { plaintext: true, advertise-host: gateway }
-  push-api: { enabled: true, target: "dns:///fake-pushapi:9443", plaintext: true }
+  push-api: { enabled: true, target: "dns:///push-api:9443", plaintext: true }
   node-id: gateway-dev-1
   dev:
     bootstrap-secrets: true

@@ -175,7 +175,7 @@ class GatewayPropertiesTest {
       GatewayProperties p = ctx.getBean(GatewayProperties.class);
       assertThat(p.grpc().plaintext()).isTrue();
       assertThat(p.pushApi().enabled()).isTrue();
-      assertThat(p.pushApi().target()).isEqualTo("dns:///fake-pushapi:9443");
+      assertThat(p.pushApi().target()).isEqualTo("dns:///push-api:9443");
       assertThat(p.pushApi().plaintext()).isTrue();
     });
   }

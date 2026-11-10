@@ -55,6 +55,7 @@ images:
 	$(MVNW) -q -f gateway-devtools/pom.xml compile jib:dockerBuild
 	$(MVNW) -q -f gateway-service/pom.xml compile jib:dockerBuild
 	$(MVNW) -q -f push-router-service/pom.xml compile jib:dockerBuild
+	$(MVNW) -q -f push-api-service/pom.xml compile jib:dockerBuild
 	$(MVNW) -q -f auth-service/pom.xml compile jib:dockerBuild
 
 up:
@@ -69,10 +70,16 @@ logs:
 smoke:
 	$(COMPOSE) --profile tools run --rm devtools smoke --url wss://gateway:8443/v1/ws \
 	  --auth-url http://auth:8090 --client-file /dev-secrets/auth/clients.json --ca /dev-secrets/ca.crt \
-	  --kafka kafka:29092 --redis redis://redis:6379
+	  --push-api http://push-api:8080
 
 AUTH_JAR := auth-service/target/auth-service-$(VERSION)-exec.jar
 ROUTER_JAR := push-router-service/target/push-router-service-$(VERSION)-exec.jar
+PUSH_API_JAR := push-api-service/target/push-api-service-$(VERSION)-exec.jar
+
+## push-api from source with profile local (Kafka/Redis from `make infra-up`, auth from `make auth-local`).
+.PHONY: push-api-local
+push-api-local:
+	java -jar $(PUSH_API_JAR) --spring.profiles.active=local
 
 ## push-router from source with profile local (Kafka/Redis from `make infra-up`, a gateway from `make run-local`).
 .PHONY: router-local
