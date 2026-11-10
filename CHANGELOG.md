@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### push-api-service (sub-project 4, P1)
+- New module `push-api-service` (spec `docs/superpowers/specs/2026-11-10-push-api-design.md`):
+  - `POST /v1/push`, `POST /v1/push:batch` (≤ 100 items, per-principal order), `GET /v1/messages/{msgId}`, with API tokens of auth-service checked offline against its JWKS;
+  - gRPC `PushService.SendStream` with SPIFFE allowlist (the gateway's KICK);
+  - rules V1–V14, scopes, kill switches and per-pod rate limits from `gw.control`, revocation of jti and API clients;
+  - `Idempotency-Key` with reserved `msgId`/seq, `seq:{p}` / `topicseq:{t}`, `seqepochs` bump on Redis failover (`run_id`) and `POST /admin/v1/seqepochs:bump`;
+  - message status in Redis from `push.offline` / `push.delivered`;
+  - config in `push-api.yml`; `PushApiIT` runs Push API, router and two gateways in one JVM.
+- Contracts: `TenantLimits.push_rate = 8`, `push_burst = 9`, `broadcast_rate = 10` (additive).
+- Router: a CONTROL KICK goes to every live node (single-session replaces the old registry entry before the KICK, so routing by entry missed the old session).
+- Build: `push-router-service` and `push-api-service` publish a plain main jar (exec classifier at plugin level).
+- Devenv: compose service `push-api`; the gateway sends KICK to it; `fake-pushapi` moves to profile `tools`; `make push-api-local`; `make smoke` pushes through the API (`PUSH via API`, `STATUS delivered`, `OFFLINE`).
+- Measurement (dev machine): 10 000 pushes through `POST /v1/push:batch` accepted in 2.7 s (≈ 3.6 k/s), all delivered.
+- ADR 0022–0026.
+
 ### push-router-service (sub-project 3)
 - New module `push-router-service` (spec `docs/superpowers/specs/2026-11-10-push-router-design.md`):
   - consumes `cN.push.requests` with Confluent Parallel Consumer 0.5.3.3 (`KEY` order, virtual-thread workers);

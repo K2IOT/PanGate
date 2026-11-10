@@ -60,7 +60,16 @@ public final class PushGrpcService extends PushServiceGrpc.PushServiceImplBase {
       @Override
       public void onNext(PushRequest r) {
         inFlight.incrementAndGet();
-        serial.submit(targetKey(r) + "|" + System.identityHashCode(so), () -> acceptor.accept(caller, r))
+        serial.submit(targetKey(r) + "|" + System.identityHashCode(so), () -> {
+          long t0 = System.nanoTime();
+          try {
+            return acceptor.accept(caller, r);
+          } finally {
+            io.micrometer.core.instrument.Timer.builder("pushapi.accept.latency")
+                .tag("kind", r.getKind().name().substring(5).toLowerCase(java.util.Locale.ROOT)).register(meters)
+                .record(System.nanoTime() - t0, java.util.concurrent.TimeUnit.NANOSECONDS);
+          }
+        })
             .whenComplete((res, err) -> {
               PushResponse answer = res != null ? res : PushResponse.newBuilder().setRequestId(r.getRequestId())
                   .setOk(false).setCode(PushResponse.Code.CODE_UNAVAILABLE).setError("internal").build();

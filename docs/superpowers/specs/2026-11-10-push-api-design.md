@@ -1,7 +1,7 @@
 # push-api-service — Design Spec
 
 - **Ngày:** 2026-11-10
-- **Trạng thái:** Draft, chờ duyệt
+- **Trạng thái:** Implemented (P1, plan `docs/superpowers/plans/2026-11-10-push-api-p1.md`). Đo trên máy dev: 10 000 push EPHEMERAL qua `POST /v1/push:batch` (100 mục, 10 song song) tới 1 000 phiên: accept hết trong 2,7 s (≈ 3,6 k/s), giao hết sau 4,6 s; `pushapi.accept.latency` mỗi mục p50 141 ms / p99 384 ms
 - **Nguồn kiến trúc:** *Netty Gateway — 10M Active Connections* ("tài liệu gốc"); số mục trong ngoặc, ví dụ (§3.2), là mục của tài liệu gốc.
 - **Các spec liên quan:**
   - "spec contracts": `docs/superpowers/specs/2026-11-10-push-contracts-design.md` (C1): `PushRequest`/`PushResponse`, luật V1–V14 (§3.1), ánh xạ HTTP (§3.2), state seq và idempotency (§3.3), `PushRecord` và luật §1.1.

@@ -115,6 +115,8 @@ class PushHttpIT {
     PushRecord rec = scenario.awaitRequest(b.get("msgId").asText());
     assertThat(rec.getPrincipalId()).isEqualTo(p);
     assertThat(rec.getFrame().getHeadersMap()).containsEntry("type", "t");
+    assertThat(api.ctx.getBean(io.micrometer.core.instrument.MeterRegistry.class).find("pushapi.accept.latency")
+        .tag("kind", "message").timer()).isNotNull().satisfies(t -> assertThat(t.count()).isPositive());
   }
 
   /** Review Focus 2. */

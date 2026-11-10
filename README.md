@@ -14,10 +14,11 @@ Connection gateway (Netty on Spring Boot) for 10M long-lived client connections.
 make bootstrap
 ```
 
-Modules build in order: `platform-parent` → `platform-contracts` → `platform-spring-starter` → `platform-contracts-testkit` → `gateway-devtools` → `gateway-service` → `push-router-service` → `auth-service`.
+Modules build in order: `platform-parent` → `platform-contracts` → `platform-spring-starter` → `platform-contracts-testkit` → `gateway-devtools` → `gateway-service` → `push-router-service` → `push-api-service` → `auth-service`.
 
 - Design spec: [docs/superpowers/specs/2026-11-03-gateway-service-design.md](docs/superpowers/specs/2026-11-03-gateway-service-design.md)
 - Auth service: [auth-service/README.md](auth-service/README.md) (spec [docs/superpowers/specs/2026-11-05-auth-service-design.md](docs/superpowers/specs/2026-11-05-auth-service-design.md))
+- Push API: [push-api-service/README.md](push-api-service/README.md) (spec [docs/superpowers/specs/2026-11-10-push-api-design.md](docs/superpowers/specs/2026-11-10-push-api-design.md))
 - Push router: [push-router-service/README.md](push-router-service/README.md) (spec [docs/superpowers/specs/2026-11-10-push-router-design.md](docs/superpowers/specs/2026-11-10-push-router-design.md))
 - Push-path contracts: [docs/superpowers/specs/2026-11-10-push-contracts-design.md](docs/superpowers/specs/2026-11-10-push-contracts-design.md) (testkit in `platform-contracts-testkit/`)
 - Dev environment: [platform-devenv/README.md](platform-devenv/README.md)

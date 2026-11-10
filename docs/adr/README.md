@@ -25,3 +25,8 @@ Quyết định kiến trúc của gateway-service (spec §13). Mỗi ADR gồm:
 | [0019](0019-router-parallel-consumer-virtual-threads.md) | Router dùng Confluent Parallel Consumer (`KEY`), imperative trên virtual threads |
 | [0020](0020-node-addr-key.md) | Gateway công bố `node:addr:{id}` để router tìm địa chỉ gRPC |
 | [0021](0021-devenv-kafka-front-door.md) | Devenv dùng Kafka (`devtools push`, `fake-pushapi --kafka`) làm cửa vào cho tới khi có Push API |
+| [0022](0022-push-api-one-acceptor.md) | Push API là một service; một lõi `PushAcceptor` cho HTTP và gRPC |
+| [0023](0023-idempotency-reserved-values.md) | Idempotency giữ sẵn `msgId`/seq cho mỗi key (`pending` + `:last`) |
+| [0024](0024-seqepochs-run-id.md) | Phát hiện failover Redis state qua `run_id`; bump `seqepochs` bằng script CAS |
+| [0025](0025-message-status-in-redis.md) | Trạng thái message trong Redis, TTL theo message; `delivered` cần `receipt` |
+| [0026](0026-push-rate-per-pod.md) | Rate limit push là token bucket mỗi pod, cấu hình qua `TenantLimits` |

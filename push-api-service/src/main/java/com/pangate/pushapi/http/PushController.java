@@ -59,7 +59,10 @@ public class PushController {
   public ResponseEntity<?> push(@RequestBody Map<String, Object> body,
       @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey, HttpServletRequest req) {
     Caller.ApiCaller c = caller(req);
-    PushResponse r = acceptor.accept(c, HttpMapping.toRequest(body, c.tenant(), idempotencyKey));
+    PushRequest request = HttpMapping.toRequest(body, c.tenant(), idempotencyKey);
+    long t0 = System.nanoTime();
+    PushResponse r = acceptor.accept(c, request);
+    timed(request, t0);
     count(r);
     return toHttp(r);
   }
@@ -92,7 +95,9 @@ public class PushController {
       }
       String key = r.getKind() == PushRequest.Kind.KIND_BROADCAST ? "topic:" + r.getTopic() : r.getPrincipalId();
       results.add(serial.submit(key, () -> {
+        long t0 = System.nanoTime();
         PushResponse res = acceptor.accept(c, r);
+        timed(r, t0);
         count(res);
         return item(index, res);
       }));
@@ -151,6 +156,12 @@ public class PushController {
     if (v != null) {
       b.put(name, Long.parseLong(v));
     }
+  }
+
+  private void timed(PushRequest r, long t0) {
+    io.micrometer.core.instrument.Timer.builder("pushapi.accept.latency")
+        .tag("kind", r.getKind().name().substring(5).toLowerCase(java.util.Locale.ROOT)).register(meters)
+        .record(System.nanoTime() - t0, java.util.concurrent.TimeUnit.NANOSECONDS);
   }
 
   private void count(PushResponse r) {
