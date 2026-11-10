@@ -68,7 +68,8 @@ public final class LifecyclePublisher implements SessionListener {
         .setCellId(cell)
         .setPlatform(id.platform())
         .setSdkVersion(id.sdkVersion())
-        .setAtMs(wallMillis.getAsLong());
+        .setAtMs(wallMillis.getAsLong())
+        .setEventId(EventIds.next(wallMillis.getAsLong(), java.util.concurrent.ThreadLocalRandom.current()));
     if (type != EventType.EVENT_TYPE_CONNECTED && s.closeCode() != null) {
       e.setCloseCode(s.closeCode().code());
     }

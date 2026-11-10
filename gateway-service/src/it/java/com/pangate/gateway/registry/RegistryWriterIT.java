@@ -64,7 +64,7 @@ class RegistryWriterIT {
     Session s = session("t1:u1", "C1", 1234);
     get(writer.register(s, false));
 
-    assertThat(fx.sync.hget("reg:{t1:u1}", "C1")).isEqualTo("n1|7|1234|android");
+    assertThat(fx.sync.hget("reg:{t1:u1}", "C1")).isEqualTo("n1|7|1234|android|d1");
     // The finished write is not kept for the life of the session (idle heap budget).
     await().atMost(Duration.ofSeconds(2)).until(() -> {
       ((io.netty.channel.embedded.EmbeddedChannel) s.channel()).runPendingTasks();
@@ -80,7 +80,7 @@ class RegistryWriterIT {
     writer.unregister("t1:u1", "C1");
 
     await().atMost(Duration.ofSeconds(5)).until(() -> !fx.sync.hexists("reg:{t1:u1}", "C1"));
-    assertThat(fx.sync.hget("reg:{t1:u1}", "C2")).isEqualTo("n1|7|2|android");
+    assertThat(fx.sync.hget("reg:{t1:u1}", "C2")).isEqualTo("n1|7|2|android|d1");
   }
 
   @Test
@@ -89,7 +89,7 @@ class RegistryWriterIT {
 
     Map<String, String> prev = get(writer.register(session("t1:u2", "C2", 2), true));
 
-    assertThat(prev).containsExactly(Map.entry("C1", "n1|7|1|android"));
+    assertThat(prev).containsExactly(Map.entry("C1", "n1|7|1|android|d1"));
     assertThat(fx.sync.hgetall("reg:{t1:u2}")).containsOnlyKeys("C2");
   }
 
@@ -169,7 +169,7 @@ class RegistryWriterIT {
       ((io.netty.channel.embedded.EmbeddedChannel) second.channel()).runPendingTasks();
       return !replaced.isEmpty();
     });
-    assertThat(replaced).containsExactly(Map.of("C1", "n1|7|1|android"));
+    assertThat(replaced).containsExactly(Map.of("C1", "n1|7|1|android|d1"));
     assertThat(fx.sync.hgetall("reg:{t1:ss}")).containsOnlyKeys("C2");
   }
 
@@ -197,7 +197,7 @@ class RegistryWriterIT {
       return older.state() == com.pangate.gateway.session.SessionState.CLOSED;
     });
     assertThat(older.closeCode()).isEqualTo(com.pangate.gateway.protocol.CloseCode.DUPLICATE_SESSION);
-    await().atMost(Duration.ofSeconds(5)).until(() -> "n1|7|200|android".equals(fx.sync.hget("reg:{t1:race}", "C2")));
+    await().atMost(Duration.ofSeconds(5)).until(() -> "n1|7|200|android|d1".equals(fx.sync.hget("reg:{t1:race}", "C2")));
     assertThat(replaced).isEmpty();  // the newer entry is never handed to the kicker
   }
 }

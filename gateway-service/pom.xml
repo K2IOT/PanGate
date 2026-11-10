@@ -166,6 +166,13 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+      <!-- Push-path contract cases (registry value v2 golden strings), push contracts spec §6 -->
+      <groupId>com.pangate</groupId>
+      <artifactId>platform-contracts-testkit</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>org.testcontainers</groupId>
       <artifactId>kafka</artifactId>
       <scope>test</scope>
