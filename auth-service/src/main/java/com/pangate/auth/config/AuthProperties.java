@@ -12,6 +12,7 @@ public record AuthProperties(
     @DefaultValue("15m") Duration apiTokenTtl,
     @DefaultValue("10m") Duration connectTokenMaxTtl,
     @DefaultValue("24h") Duration revocationTtl,
+    @DefaultValue("60s") Duration expiryInterval,
     @DefaultValue Keys keys,
     @DefaultValue Outbox outbox,
     @DefaultValue Kafka kafka,

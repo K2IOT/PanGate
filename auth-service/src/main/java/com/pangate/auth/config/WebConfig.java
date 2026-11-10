@@ -7,6 +7,7 @@ import com.pangate.auth.application.KeyRing;
 import com.pangate.auth.application.ManageClients;
 import com.pangate.auth.application.ManageTenants;
 import com.pangate.auth.application.MintConnectToken;
+import com.pangate.auth.application.Revoke;
 import com.pangate.auth.application.port.ClientStore;
 import com.pangate.auth.application.port.Clock;
 import com.pangate.auth.application.port.RevocationStore;
@@ -17,7 +18,6 @@ import com.pangate.auth.infrastructure.postgres.JdbcClientStore;
 import com.pangate.auth.infrastructure.postgres.JdbcTenantStore;
 import java.time.Duration;
 import java.util.Set;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -40,21 +40,14 @@ public class WebConfig {
     return new JdbcClientStore(jdbc);
   }
 
-  /** Replaced by the JDBC store with the revocations work; no jti is revoked until then. */
-  @Bean
-  @ConditionalOnMissingBean
-  RevocationStore revocationStore() {
-    return Set::of;
-  }
-
   @Bean
   ManageTenants manageTenants(TenantStore tenants) {
     return new ManageTenants(tenants);
   }
 
   @Bean
-  ManageClients manageClients(ClientStore clients, TenantStore tenants, SecretHasher hasher) {
-    return new ManageClients(clients, tenants, hasher);
+  ManageClients manageClients(ClientStore clients, TenantStore tenants, SecretHasher hasher, Revoke revoke) {
+    return new ManageClients(clients, tenants, hasher, revoke);
   }
 
   @Bean

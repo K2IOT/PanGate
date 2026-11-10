@@ -3,6 +3,7 @@ package com.pangate.auth.api;
 import com.pangate.auth.application.ManageClients;
 import com.pangate.auth.application.ManageTenants;
 import com.pangate.auth.config.JobsConfig.KeyJobs;
+import com.pangate.auth.config.TtlCache;
 import com.pangate.auth.domain.Caller;
 import com.pangate.auth.domain.Client;
 import com.pangate.auth.domain.Scope;
@@ -51,11 +52,14 @@ public class AdminController {
   private final ManageTenants tenants;
   private final ManageClients clients;
   private final KeyJobs keys;
+  private final TtlCache<Set<String>> disabledClients;
 
-  public AdminController(ManageTenants tenants, ManageClients clients, KeyJobs keys) {
+  public AdminController(ManageTenants tenants, ManageClients clients, KeyJobs keys,
+      TtlCache<Set<String>> disabledClientsCache) {
     this.tenants = tenants;
     this.clients = clients;
     this.keys = keys;
+    this.disabledClients = disabledClientsCache;
   }
 
   private <T> T act(HttpServletRequest req, String action, String target, Supplier<T> body) {
@@ -130,8 +134,10 @@ public class AdminController {
 
   @PostMapping("/clients/{id}:disable")
   ClientView disableClient(HttpServletRequest req, @PathVariable String id) {
+    String actor = ApiPrincipal.of(req).clientId();
     return act(req, "client.disable", id, () -> {
-      clients.disable(id);
+      clients.disable(actor, id);
+      disabledClients.invalidate();  // this pod rejects the client's tokens at once; others within 10 s
       return ClientView.of(clients.get(id));
     });
   }

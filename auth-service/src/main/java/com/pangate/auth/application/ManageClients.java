@@ -20,14 +20,26 @@ public final class ManageClients {
 
   public record CreatedClient(String clientId, String plainSecret, Set<Scope> scopes) {}
 
+  /** Publishes {@code revoke:c:<client_id>} so Push API stops accepting the client's tokens (spec §4.5). */
+  @FunctionalInterface
+  public interface ClientRevoker {
+    void revokeClient(String actor, String clientId, String tenantId);
+  }
+
   private final ClientStore clients;
   private final TenantStore tenants;
   private final SecretHasher hasher;
+  private final ClientRevoker revoker;
 
   public ManageClients(ClientStore clients, TenantStore tenants, SecretHasher hasher) {
+    this(clients, tenants, hasher, (actor, id, tenant) -> { });
+  }
+
+  public ManageClients(ClientStore clients, TenantStore tenants, SecretHasher hasher, ClientRevoker revoker) {
     this.clients = clients;
     this.tenants = tenants;
     this.hasher = hasher;
+    this.revoker = revoker;
   }
 
   public static String newSecret() {
@@ -95,8 +107,14 @@ public final class ManageClients {
   }
 
   public void disable(String clientId) {
+    disable("system", clientId);
+  }
+
+  /** {@code status = disabled} and a revocation of kind {@code client}. */
+  public void disable(String actor, String clientId) {
     Client c = get(clientId);
     clients.update(new Client(c.id(), c.tenantId(), c.secretHash(), c.secretHashNext(), c.scopes(), false));
+    revoker.revokeClient(actor, c.id(), c.tenantId());
   }
 
   /** Secret matches the current or the next hash (constant-time comparison inside the hasher). */

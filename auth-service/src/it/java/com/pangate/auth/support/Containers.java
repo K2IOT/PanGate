@@ -35,6 +35,17 @@ public final class Containers {
     return secrets;
   }
 
+  private static final java.util.Set<String> created = new java.util.HashSet<>();
+
+  /** Like {@link #freshDatabase} the first time per JVM, then the same database (for restart tests). */
+  public static synchronized String freshDatabaseOnce(String name) {
+    if (created.add(name)) {
+      return freshDatabase(name);
+    }
+    var pg = postgres();
+    return "jdbc:postgresql://" + pg.getHost() + ":" + pg.getMappedPort(5432) + "/" + name;
+  }
+
   /** JDBC URL of a fresh database {@code name} in the shared container (dropped and recreated). */
   public static String freshDatabase(String name) {
     var pg = postgres();
