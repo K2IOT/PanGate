@@ -20,15 +20,24 @@ public final class RedisState implements AutoCloseable {
   private final Duration timeout;
   private final boolean cluster;
   private final Object client;
+  private final Object connection;
   private final ClientResources resources;
 
+  /** A master and the slots it serves (push-api spec §3.2). */
+  public record Shard(int start, int end, String runId) {
+    public String range() {
+      return start + "-" + end;
+    }
+  }
+
   private RedisState(RedisClusterAsyncCommands<String, String> async, AutoCloseable closer, Duration timeout,
-      boolean cluster, Object client, ClientResources resources) {
+      boolean cluster, Object client, Object connection, ClientResources resources) {
     this.async = async;
     this.closer = closer;
     this.timeout = timeout;
     this.cluster = cluster;
     this.client = client;
+    this.connection = connection;
     this.resources = resources;
   }
 
@@ -42,7 +51,7 @@ public final class RedisState implements AutoCloseable {
         conn.close();
         c.shutdown();
         res.shutdown();
-      }, p.timeout(), true, c, res);
+      }, p.timeout(), true, c, conn, res);
     }
     RedisClient c = RedisClient.create(res, uri);
     var conn = c.connect();
@@ -50,7 +59,7 @@ public final class RedisState implements AutoCloseable {
       conn.close();
       c.shutdown();
       res.shutdown();
-    }, p.timeout(), false, c, res);
+    }, p.timeout(), false, c, conn, res);
   }
 
   public RedisClusterAsyncCommands<String, String> async() {
@@ -72,6 +81,46 @@ public final class RedisState implements AutoCloseable {
 
   public Duration timeout() {
     return timeout;
+  }
+
+  /** Masters with their slot ranges and run_id; standalone is one shard 0-16383. */
+  public java.util.List<Shard> shards() {
+    if (!cluster) {
+      return java.util.List.of(new Shard(0, 16_383, runId(await(async.info("server"), "INFO server"))));
+    }
+    RedisClusterClient c = (RedisClusterClient) client;
+    @SuppressWarnings("unchecked")
+    var conn = (io.lettuce.core.cluster.api.StatefulRedisClusterConnection<String, String>) connection;
+    c.refreshPartitions();
+    java.util.List<Shard> out = new java.util.ArrayList<>();
+    for (var node : c.getPartitions()) {
+      if (!node.is(io.lettuce.core.cluster.models.partitions.RedisClusterNode.NodeFlag.UPSTREAM)) {
+        continue;
+      }
+      String run = runId(await(conn.getConnection(node.getNodeId()).async().info("server"), "INFO server"));
+      java.util.List<Integer> slots = new java.util.ArrayList<>(node.getSlots());
+      java.util.Collections.sort(slots);
+      int i = 0;
+      while (i < slots.size()) {   // contiguous ranges
+        int start = slots.get(i);
+        int end = start;
+        while (i + 1 < slots.size() && slots.get(i + 1) == end + 1) {
+          end = slots.get(++i);
+        }
+        out.add(new Shard(start, end, run));
+        i++;
+      }
+    }
+    return out;
+  }
+
+  static String runId(String info) {
+    for (String line : info.split("\\r?\\n")) {
+      if (line.startsWith("run_id:")) {
+        return line.substring(7).trim();
+      }
+    }
+    throw new com.pangate.pushapi.core.StoreUnavailableException("INFO server has no run_id", null);
   }
 
   /** Waits for {@code f} up to the configured timeout. */

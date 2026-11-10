@@ -46,6 +46,16 @@ public final class RedisSeqEpochs implements SeqEpochs {
     }
   }
 
+  /** Highest cached epoch in slots {@code start..end} (the floor of a bump). */
+  public int maxEpoch(int start, int end) {
+    int[] e = epochs;
+    int max = 0;
+    for (int s = start; s <= end; s++) {
+      max = Math.max(max, e[s]);
+    }
+    return max;
+  }
+
   /** Wall time of the last successful refresh (metric {@code pushapi.seqepoch.cache_age_seconds}). */
   public long refreshedAtMs() {
     return refreshedAtMs;
