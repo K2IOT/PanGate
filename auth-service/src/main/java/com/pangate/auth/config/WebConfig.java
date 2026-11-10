@@ -6,6 +6,7 @@ import com.pangate.auth.application.IssueClientToken;
 import com.pangate.auth.application.KeyRing;
 import com.pangate.auth.application.ManageClients;
 import com.pangate.auth.application.ManageTenants;
+import com.pangate.auth.application.MintConnectToken;
 import com.pangate.auth.application.port.ClientStore;
 import com.pangate.auth.application.port.Clock;
 import com.pangate.auth.application.port.RevocationStore;
@@ -60,6 +61,12 @@ public class WebConfig {
   IssueClientToken issueClientToken(ClientStore clients, TenantStore tenants, SecretHasher hasher, TokenSigner signer,
       KeyRing keys, Clock clock, AuthProperties props) {
     return new IssueClientToken(clients, tenants, hasher, signer, keys, clock, props.issuer(), props.apiTokenTtl());
+  }
+
+  @Bean
+  MintConnectToken mintConnectToken(TenantStore tenants, TokenSigner signer, KeyRing keys, Clock clock,
+      AuthProperties props) {
+    return new MintConnectToken(tenants, signer, keys, clock, props.issuer(), props.connectTokenMaxTtl());
   }
 
   @Bean

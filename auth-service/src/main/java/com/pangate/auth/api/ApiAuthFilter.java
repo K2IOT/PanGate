@@ -4,6 +4,7 @@ import com.pangate.auth.application.KeyRing;
 import com.pangate.auth.application.port.Clock;
 import com.pangate.auth.application.port.TokenSigner;
 import com.pangate.auth.domain.ApiClaims;
+import com.pangate.auth.domain.Caller;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -49,7 +50,7 @@ public class ApiAuthFilter extends OncePerRequestFilter {
       return;
     }
     ApiClaims c = claims.get();
-    req.setAttribute(ApiPrincipal.ATTR, new ApiPrincipal(c.clientId(), c.tenant(), c.scopes(), c.jti()));
+    req.setAttribute(ApiPrincipal.ATTR, new Caller(c.clientId(), c.tenant(), c.scopes(), c.jti()));
     chain.doFilter(req, res);
   }
 }

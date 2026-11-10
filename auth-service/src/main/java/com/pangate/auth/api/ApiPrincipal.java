@@ -1,28 +1,20 @@
 package com.pangate.auth.api;
 
+import com.pangate.auth.domain.Caller;
 import com.pangate.auth.domain.DomainException;
-import com.pangate.auth.domain.Scope;
 import jakarta.servlet.http.HttpServletRequest;
-import java.util.Set;
 
-/** The authenticated API caller, set by {@link ApiAuthFilter}. */
-public record ApiPrincipal(String clientId, String tenant, Set<Scope> scopes, String jti) {
+/** Where {@link ApiAuthFilter} leaves the {@link Caller} of a request. */
+public final class ApiPrincipal {
 
-  public static final String ATTR = ApiPrincipal.class.getName();
+  public static final String ATTR = Caller.class.getName();
 
-  public static ApiPrincipal of(HttpServletRequest req) {
-    Object p = req.getAttribute(ATTR);
-    if (!(p instanceof ApiPrincipal ap)) {
+  private ApiPrincipal() {}
+
+  public static Caller of(HttpServletRequest req) {
+    if (!(req.getAttribute(ATTR) instanceof Caller c)) {
       throw new DomainException("invalid_token", 401, "authentication required");
     }
-    return ap;
-  }
-
-  /** @throws DomainException {@code missing_scope} (403) */
-  public ApiPrincipal require(Scope scope) {
-    if (!scopes.contains(scope)) {
-      throw new DomainException("missing_scope", 403, "scope " + scope.value() + " required");
-    }
-    return this;
+    return c;
   }
 }

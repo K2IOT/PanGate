@@ -3,6 +3,7 @@ package com.pangate.auth.api;
 import com.pangate.auth.application.ManageClients;
 import com.pangate.auth.application.ManageTenants;
 import com.pangate.auth.config.JobsConfig.KeyJobs;
+import com.pangate.auth.domain.Caller;
 import com.pangate.auth.domain.Client;
 import com.pangate.auth.domain.Scope;
 import com.pangate.auth.domain.Tenant;
@@ -58,7 +59,7 @@ public class AdminController {
   }
 
   private <T> T act(HttpServletRequest req, String action, String target, Supplier<T> body) {
-    ApiPrincipal p = ApiPrincipal.of(req).require(Scope.ADMIN);
+    Caller p = ApiPrincipal.of(req).require(Scope.ADMIN);
     try {
       T out = body.get();
       audit.atInfo().addKeyValue("admin_action", action).addKeyValue("actor", p.clientId())
