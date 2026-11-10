@@ -180,7 +180,7 @@ class PushAcceptorTest {
     PushResponse r = acceptor().accept(API, message().toBuilder().setIdempotencyKey("k1").build());
     assertThat(r.getCode()).isEqualTo(Code.CODE_UNAVAILABLE);
     assertThat(r.getRetryAfterMs()).isEqualTo(500);
-    assertThat(idemValues).doesNotContainKey("idem:{t1}:k1").containsKey("idem:{t1}:k1:last");
+    assertThat(idemValues).doesNotContainKey("idem:{t1}:k1").containsKey("idemlast:{t1}:k1");
   }
 
   /** Review Focus 1. */
@@ -199,6 +199,31 @@ class PushAcceptorTest {
     assertThat(dup.getDuplicate()).isTrue();
     assertThat(dup.getMsgId()).isEqualTo(ok.getMsgId());
     assertThat(produced).hasSize(1);
+  }
+
+  /** Final review: a retry with the same key but another target must not carry the first target's seq. */
+  @Test
+  void retryWithTheSameKeyForAnotherPrincipalTakesFreshValues() {
+    failProduces = 1;
+    counters.put("seq:{t1:u2}", 5L);
+    PushAcceptor a = acceptor();
+    a.accept(API, message().toBuilder().setIdempotencyKey("k1").build());
+    PushResponse r = a.accept(API, message().toBuilder().setIdempotencyKey("k1").setPrincipalId("t1:u2").build());
+    assertThat(r.getCode()).isEqualTo(Code.CODE_OK);
+    assertThat(r.getSeq()).isEqualTo(6);
+    assertThat(produced).singleElement().satisfies(p -> assertThat(p.getFrame().getSeq()).isEqualTo(6));
+  }
+
+  /** Final review: a retry that changes the kind is a new request, not a 500 for the next hour. */
+  @Test
+  void retryWithTheSameKeyAsAnotherKindIsAccepted() {
+    failProduces = 1;
+    PushAcceptor a = acceptor();
+    a.accept(API, message().toBuilder().setIdempotencyKey("k1").build());
+    PushResponse r = a.accept(API, Fixtures.request(PushRequest.Kind.KIND_BROADCAST).toBuilder()
+        .setIdempotencyKey("k1").build());
+    assertThat(r.getCode()).isEqualTo(Code.CODE_OK);
+    assertThat(r.getTopicSeq()).isEqualTo(1);
   }
 
   @Test

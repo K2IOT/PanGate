@@ -45,37 +45,46 @@ public final class ControlListener implements AutoCloseable {
   private void run() {
     try {
       List<TopicPartition> parts = List.of();
-      while (running && parts.isEmpty()) {
-        parts = consumer.partitionsFor(topic, Duration.ofSeconds(5)).stream()
-            .map(p -> new TopicPartition(topic, p.partition())).toList();
-        if (parts.isEmpty()) {
-          log.warn("{} has no partitions yet; retrying", topic);
-          Thread.sleep(1_000);
-        }
-      }
-      consumer.assign(parts);
-      consumer.seekToBeginning(parts);
-      Map<TopicPartition, Long> end = consumer.endOffsets(parts);
+      Map<TopicPartition, Long> end = null;
       while (running) {
-        for (ConsumerRecord<String, byte[]> r : consumer.poll(Duration.ofMillis(200))) {
-          try {
-            state.apply(r.key(), r.value());
-          } catch (IllegalArgumentException e) {
-            onMalformed.run();
-            log.warn("skipping malformed {}@{}:{}", r.topic(), r.partition(), r.offset());
+        try {
+          if (end == null) {
+            parts = consumer.partitionsFor(topic, Duration.ofSeconds(5)).stream()
+                .map(p -> new TopicPartition(topic, p.partition())).toList();
+            if (parts.isEmpty()) {
+              log.warn("{} has no partitions yet; retrying", topic);
+              Thread.sleep(1_000);
+              continue;
+            }
+            consumer.assign(parts);
+            consumer.seekToBeginning(parts);
+            end = consumer.endOffsets(parts);
           }
-        }
-        if (!caughtUp && end.entrySet().stream().allMatch(e -> consumer.position(e.getKey()) >= e.getValue())) {
-          caughtUp = true;
-          log.info("{} replayed ({} partitions)", topic, parts.size());
+          for (ConsumerRecord<String, byte[]> r : consumer.poll(Duration.ofMillis(200))) {
+            try {
+              state.apply(r.key(), r.value());
+            } catch (IllegalArgumentException e) {
+              onMalformed.run();
+              log.warn("skipping malformed {}@{}:{}", r.topic(), r.partition(), r.offset());
+            }
+          }
+          Map<TopicPartition, Long> replayTo = end;
+          if (!caughtUp && replayTo.entrySet().stream().allMatch(e -> consumer.position(e.getKey()) >= e.getValue())) {
+            caughtUp = true;
+            log.info("{} replayed ({} partitions)", topic, parts.size());
+          }
+        } catch (WakeupException e) {
+          throw e;
+        } catch (RuntimeException e) {
+          // a broker outage must not stop revocations and kill switches for good: the position is kept
+          log.warn("{} listener: {}; going on", topic, e.toString());
+          Thread.sleep(1_000);
         }
       }
     } catch (WakeupException e) {
       // closing
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-    } catch (RuntimeException e) {
-      log.error("{} listener stopped: {}", topic, e.toString());
     } finally {
       consumer.close(Duration.ofSeconds(2));
     }

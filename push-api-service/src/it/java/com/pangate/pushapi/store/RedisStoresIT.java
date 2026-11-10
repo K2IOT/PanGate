@@ -61,6 +61,19 @@ class RedisStoresIT {
     assertThat(epochs.epoch("t1:other-slot-xyz")).isZero();
   }
 
+  /** Final review: a refresh that reads a lost hash (restart without persistence) must not lower the bump floor. */
+  @Test
+  void aRefreshNeverLowersAnEpoch() throws Exception {
+    RedisSeqEpochs epochs = new RedisSeqEpochs(state);
+    int slot = SeqKeys.slot("t1:u1");
+    state.async().hset(SeqKeys.SEQ_EPOCHS, Integer.toString(slot), "3").get();
+    epochs.refreshNow();
+    state.async().del(SeqKeys.SEQ_EPOCHS).get();
+    epochs.refreshNow();
+    assertThat(epochs.epoch("t1:u1")).isEqualTo(3);
+    assertThat(epochs.maxEpoch(slot, slot)).isEqualTo(3);
+  }
+
   @Test
   void idemSetIfAbsentAndDeleteIfEquals() {
     RedisIdemStore idem = new RedisIdemStore(state);

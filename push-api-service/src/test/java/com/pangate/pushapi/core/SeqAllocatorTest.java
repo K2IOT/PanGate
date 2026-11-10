@@ -56,7 +56,7 @@ class SeqAllocatorTest {
   @Test
   void keysHelpers() {
     assertThat(PushApiKeys.idem("t1", "k")).isEqualTo("idem:{t1}:k");
-    assertThat(PushApiKeys.idemLast("t1", "k")).isEqualTo("idem:{t1}:k:last");
+    assertThat(PushApiKeys.idemLast("t1", "k")).isEqualTo("idemlast:{t1}:k");
     assertThat(PushApiKeys.msg("t1", "M")).isEqualTo("msg:{t1}:M");
     assertThat(PushApiKeys.RUNIDS).isEqualTo("runids{seqepochs}");
     assertThat(SeqKeys.slot(PushApiKeys.RUNIDS)).isEqualTo(SeqKeys.slot(SeqKeys.SEQ_EPOCHS));

@@ -16,8 +16,9 @@ public final class PushApiKeys {
     return "idem:{" + tenant + "}:" + key;
   }
 
+  /** Own prefix, so a client key ending in {@code :last} cannot land on another key's copy. */
   public static String idemLast(String tenant, String key) {
-    return idem(tenant, key) + ":last";
+    return "idemlast:{" + tenant + "}:" + key;
   }
 
   public static String msg(String tenant, String msgId) {

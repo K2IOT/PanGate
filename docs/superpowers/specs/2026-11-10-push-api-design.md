@@ -129,7 +129,7 @@ Lõi (`PushRequests`, `HttpMapping`, `Callers`, `TenantPolicies`, `RateLimiter`,
 | Produce lỗi | `DEL` (chỉ khi value vẫn là `pending` của mình, script so sánh) | lần retry chạy lại từ đầu |
 | Thành công | `SET … done\|<base64> PX 3600000` | |
 
-- **Pod chết sau produce, trước `done`:** `pending` hết hạn sau 30 s. Để không cấp `msgId`/seq mới cho cùng key, giá trị `pending` được sao vào `idem:{t}:{k}:last` (TTL 1 h) ngay khi chiếm. Lần chiếm sau đọc `:last` và dùng lại đúng `msgId`/seq cũ khi produce lần nữa. Router, gateway và client dedup theo `msg_id`, nên client không thấy hai bản.
+- **Pod chết sau produce, trước `done`:** `pending` hết hạn sau 30 s. Để không cấp `msgId`/seq mới cho cùng key, giá trị `pending` được sao vào `idemlast:{t}:{k}` (TTL 1 h) ngay khi chiếm. Lần chiếm sau đọc `:last` và dùng lại đúng `msgId`/seq cũ khi produce lần nữa, nếu cùng kind, class và target (ADR 0023; review cuối P1). Router, gateway và client dedup theo `msg_id`, nên client không thấy hai bản.
 - **Không so body:** cùng key với body khác vẫn là duplicate (spec contracts §3.3).
 - **Không có `idempotency_key`:** không chạm Redis cho idempotency.
 

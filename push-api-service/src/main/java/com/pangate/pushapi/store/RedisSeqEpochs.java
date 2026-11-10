@@ -2,11 +2,16 @@ package com.pangate.pushapi.store;
 
 import com.pangate.contracts.testkit.SeqKeys;
 import com.pangate.pushapi.core.SeqEpochs;
+import com.pangate.pushapi.core.SingleFlight;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** {@code HGETALL seqepochs} cached as {@code int[16384]} (push-api spec §3.1); a failed refresh keeps the cache. */
+/**
+ * {@code HGETALL seqepochs} cached as {@code int[16384]} (push-api spec §3.1); a failed refresh keeps the cache. An
+ * epoch never goes down in the cache: a hash lost with the data (restart without persistence) reads as zeros until the
+ * watcher bumps it, and the cache is the floor of that bump. Concurrent refreshes share one {@code HGETALL}.
+ */
 public final class RedisSeqEpochs implements SeqEpochs {
 
   private static final Logger log = LoggerFactory.getLogger(RedisSeqEpochs.class);
@@ -14,6 +19,7 @@ public final class RedisSeqEpochs implements SeqEpochs {
   private final RedisState redis;
   private volatile int[] epochs = new int[SeqKeys.SLOTS];
   private volatile long refreshedAtMs;
+  private final SingleFlight flight = new SingleFlight();
 
   public RedisSeqEpochs(RedisState redis) {
     this.redis = redis;
@@ -26,14 +32,18 @@ public final class RedisSeqEpochs implements SeqEpochs {
 
   @Override
   public void refreshNow() {
+    flight.run(this::refresh);
+  }
+
+  private void refresh() {
     try {
       Map<String, String> all = redis.await(redis.async().hgetall(SeqKeys.SEQ_EPOCHS), "HGETALL seqepochs");
-      int[] next = new int[SeqKeys.SLOTS];
+      int[] next = epochs.clone();
       all.forEach((slot, epoch) -> {
         try {
           int s = Integer.parseInt(slot);
           if (s >= 0 && s < SeqKeys.SLOTS) {
-            next[s] = Integer.parseInt(epoch);
+            next[s] = Math.max(next[s], Integer.parseInt(epoch));
           }
         } catch (NumberFormatException ignored) {
           // not a slot field

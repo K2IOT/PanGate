@@ -10,10 +10,11 @@ Contracts §3.3 lưu `PushResponse` đầu tiên cho mỗi `idempotency_key` tro
 
 ## Quyết định
 
-- Request đầu chiếm `idem:{t}:<key>` bằng `pending|msgId|seq|epoch|topicSeq` (`SET NX`, 30 s), và sao giá trị đó vào `idem:{t}:<key>:last` (1 giờ).
+- Request đầu chiếm `idem:{t}:<key>` bằng `pending|msgId|seq|epoch|topicSeq|request` (`SET NX`, 30 s), và sao giá trị đó vào `idemlast:{t}:<key>` (1 giờ). Prefix riêng `idemlast:` để key client kết thúc bằng `:last` không trùng bản sao của key khác. `request` ghi kind, class và target (principal, device, topic) mà các giá trị được cấp cho.
 - Thành công: ghi `done|<PushResponse>`; request sau nhận lại nó với `duplicate=true`.
 - Produce lỗi: xoá `pending` (chỉ khi còn là của mình); `:last` giữ nguyên.
 - Lần chiếm sau đọc `:last` trước khi cấp mới, nên retry produce lại đúng `msgId` và seq; phía dưới dedup theo `msg_id`.
+- Chỉ dùng lại khi `request` khớp. Retry cùng key nhưng khác kind, class hoặc target là request mới và được cấp giá trị mới; nếu dùng lại, seq của principal A sẽ rơi vào stream của principal B.
 - Gặp `pending` của request khác: chờ tối đa 2 s rồi trả `503`.
 
 ## Hệ quả

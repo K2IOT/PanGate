@@ -71,18 +71,18 @@ class IdempotencyTest {
 
   @Test
   void firstRequestOwnsTheKey() {
-    Idempotency.Claim c = idem.claim("t1", "k", this::reserve);
+    Idempotency.Claim c = idem.claim("t1", "k", "A", this::reserve);
     assertThat(c).isInstanceOf(Idempotency.Owned.class);
     assertThat(((Idempotency.Owned) c).reserved()).isEqualTo(new Reserved("M1", 11, 1, 0));
-    assertThat(values).containsEntry("idem:{t1}:k", "pending|M1|11|1|0").containsEntry("idem:{t1}:k:last",
-        "pending|M1|11|1|0");
+    assertThat(values).containsEntry("idem:{t1}:k", "pending|M1|11|1|0|A").containsEntry("idemlast:{t1}:k",
+        "pending|M1|11|1|0|A");
   }
 
   @Test
   void doneReturnsTheFirstResponseAsDuplicate() {
-    Idempotency.Owned o = (Idempotency.Owned) idem.claim("t1", "k", this::reserve);
+    Idempotency.Owned o = (Idempotency.Owned) idem.claim("t1", "k", "A", this::reserve);
     idem.complete(o, ok("M1"));
-    Idempotency.Claim again = idem.claim("t1", "k", this::reserve);
+    Idempotency.Claim again = idem.claim("t1", "k", "A", this::reserve);
     assertThat(again).isInstanceOf(Idempotency.Done.class);
     PushResponse r = ((Idempotency.Done) again).first();
     assertThat(r.getDuplicate()).isTrue();
@@ -94,26 +94,26 @@ class IdempotencyTest {
 
   @Test
   void pendingWaitsThenBusy() {
-    idem.claim("t1", "k", this::reserve);
-    assertThat(idem.claim("t1", "k", this::reserve)).isInstanceOf(Idempotency.Busy.class);
+    idem.claim("t1", "k", "A", this::reserve);
+    assertThat(idem.claim("t1", "k", "A", this::reserve)).isInstanceOf(Idempotency.Busy.class);
     assertThat(sleeps).hasSize(40).allMatch(d -> d.equals(Duration.ofMillis(50)));
   }
 
   @Test
   void pendingThatFinishesWhileWaitingIsDone() {
-    Idempotency.Owned o = (Idempotency.Owned) idem.claim("t1", "k", this::reserve);
+    Idempotency.Owned o = (Idempotency.Owned) idem.claim("t1", "k", "A", this::reserve);
     onSleep = () -> {
       if (sleeps.size() == 3) {
         idem.complete(o, ok("M1"));
       }
     };
-    assertThat(idem.claim("t1", "k", this::reserve)).isInstanceOf(Idempotency.Done.class);
+    assertThat(idem.claim("t1", "k", "A", this::reserve)).isInstanceOf(Idempotency.Done.class);
     assertThat(sleeps).hasSize(3);
   }
 
   @Test
   void abandonDeletesOnlyOurPending() {
-    Idempotency.Owned o = (Idempotency.Owned) idem.claim("t1", "k", this::reserve);
+    Idempotency.Owned o = (Idempotency.Owned) idem.claim("t1", "k", "A", this::reserve);
     values.put("idem:{t1}:k", "pending|OTHER|1|0|0");
     idem.abandon(o);
     assertThat(values).containsEntry("idem:{t1}:k", "pending|OTHER|1|0|0");
@@ -125,9 +125,9 @@ class IdempotencyTest {
   /** Review Focus 1: a retry after a failed produce, or after a crash, reuses the values first reserved. */
   @Test
   void afterACrashTheRetryReusesTheReservedMsgIdAndSeq() {
-    idem.claim("t1", "k", this::reserve);
+    idem.claim("t1", "k", "A", this::reserve);
     mono.addAndGet(30_001);                      // pending expired, :last (1 h) still there
-    Idempotency.Claim c = idem.claim("t1", "k", this::reserve);
+    Idempotency.Claim c = idem.claim("t1", "k", "A", this::reserve);
     assertThat(c).isInstanceOf(Idempotency.Owned.class);
     assertThat(((Idempotency.Owned) c).reserved()).isEqualTo(new Reserved("M1", 11, 1, 0));
     assertThat(reserves).hasValue(1);
@@ -135,22 +135,39 @@ class IdempotencyTest {
 
   @Test
   void abandonedThenRetriedReusesTheReservedValues() {
-    Idempotency.Owned o = (Idempotency.Owned) idem.claim("t1", "k", this::reserve);
+    Idempotency.Owned o = (Idempotency.Owned) idem.claim("t1", "k", "A", this::reserve);
     idem.abandon(o);
-    Idempotency.Claim c = idem.claim("t1", "k", this::reserve);
+    Idempotency.Claim c = idem.claim("t1", "k", "A", this::reserve);
     assertThat(((Idempotency.Owned) c).reserved().msgId()).isEqualTo("M1");
     assertThat(reserves).hasValue(1);
   }
 
   @Test
   void sameKeyDifferentBodyIsStillDuplicate() {
-    idem.complete((Idempotency.Owned) idem.claim("t1", "k", this::reserve), ok("M1"));
-    assertThat(idem.claim("t1", "k", () -> new Reserved("OTHER", 99, 0, 0))).isInstanceOf(Idempotency.Done.class);
+    idem.complete((Idempotency.Owned) idem.claim("t1", "k", "A", this::reserve), ok("M1"));
+    assertThat(idem.claim("t1", "k", "A", () -> new Reserved("OTHER", 99, 0, 0))).isInstanceOf(Idempotency.Done.class);
   }
 
   @Test
   void keysAreScopedByTenant() {
-    idem.complete((Idempotency.Owned) idem.claim("t1", "k", this::reserve), ok("M1"));
-    assertThat(idem.claim("t2", "k", this::reserve)).isInstanceOf(Idempotency.Owned.class);
+    idem.complete((Idempotency.Owned) idem.claim("t1", "k", "A", this::reserve), ok("M1"));
+    assertThat(idem.claim("t2", "k", "A", this::reserve)).isInstanceOf(Idempotency.Owned.class);
+  }
+
+  /** Final review: a reservation is reused only by the request it was made for (same kind, class and target). */
+  @Test
+  void aReservationIsNotReusedForADifferentRequest() {
+    Idempotency.Owned o = (Idempotency.Owned) idem.claim("t1", "k", "A", this::reserve);
+    idem.abandon(o);
+    Idempotency.Claim c = idem.claim("t1", "k", "B", this::reserve);
+    assertThat(((Idempotency.Owned) c).reserved().msgId()).isEqualTo("M2");
+    assertThat(reserves).hasValue(2);
+  }
+
+  /** Final review: a client key ending in ":last" must not land on another key's reservation copy. */
+  @Test
+  void aKeyEndingInLastDoesNotCollideWithTheCopyOfAnotherKey() {
+    idem.claim("t1", "k", "A", this::reserve);
+    assertThat(idem.claim("t1", "k:last", "A", this::reserve)).isInstanceOf(Idempotency.Owned.class);
   }
 }

@@ -132,4 +132,49 @@ class ApiTokenVerifierTest {
     mono.addAndGet(300_001);
     v.verify(good());
   }
+
+  /** Final review: with auth's JWKS down for over 5 minutes, requests must not each fetch it. */
+  @Test
+  void jwksDownIsFetchedAtMostOncePerTenSecondsFromRequests() throws Exception {
+    v.verify(good());
+    published.set(null);
+    mono.addAndGet(300_001);
+    for (int i = 0; i < 50; i++) {
+      v.verify(good());
+    }
+    assertThat(fetches).hasValue(2);
+    mono.addAndGet(9_000);
+    v.verify(good());
+    assertThat(fetches).hasValue(2);
+    mono.addAndGet(1_001);
+    v.verify(good());
+    assertThat(fetches).hasValue(3);
+  }
+
+  /** Final review: a request with known keys never waits behind a slow JWKS fetch. */
+  @Test
+  void requestsWithKnownKeysDoNotWaitForAFetch() throws Exception {
+    java.util.concurrent.CountDownLatch inFetch = new java.util.concurrent.CountDownLatch(1);
+    java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+    AtomicInteger calls = new AtomicInteger();
+    ApiTokenVerifier slow = new ApiTokenVerifier(() -> {
+      if (calls.incrementAndGet() > 1) {
+        inFetch.countDown();
+        release.await();
+      }
+      return published.get();
+    }, ISS, "pangate-api", control, wall::get, mono::get);
+    slow.refresh(true);
+    mono.addAndGet(300_001);
+    Thread fetching = Thread.ofVirtual().start(() -> slow.refresh(true));
+    inFetch.await();
+    String t = good();
+    try {
+      assertThat(java.util.concurrent.CompletableFuture.supplyAsync(() -> slow.verify(t))
+          .get(2, java.util.concurrent.TimeUnit.SECONDS).tenant()).isEqualTo("t1");
+    } finally {
+      release.countDown();
+      fetching.join();
+    }
+  }
 }

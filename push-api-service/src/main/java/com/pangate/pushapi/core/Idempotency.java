@@ -44,8 +44,11 @@ public final class Idempotency {
     this.monoMs = monoMs;
   }
 
-  /** {@code reserve} runs only when no earlier reservation exists for the key. */
-  public Claim claim(String tenant, String key, Supplier<Reserved> reserve) {
+  /**
+   * {@code reserve} runs only when no earlier reservation exists for the key and {@code request} (what the values are
+   * for: kind, class, target; see {@link PushAcceptor}).
+   */
+  public Claim claim(String tenant, String key, String request, Supplier<Reserved> reserve) {
     String k = PushApiKeys.idem(tenant, key);
     String last = PushApiKeys.idemLast(tenant, key);
     long deadline = monoMs.getAsLong() + waitFor.toMillis();
@@ -61,9 +64,8 @@ public final class Idempotency {
         pause();
         continue;
       }
-      Reserved r = store.get(last).filter(s -> s.startsWith(Reserved.PENDING)).map(Reserved::decode)
-          .orElseGet(reserve);
-      String value = r.encode();
+      Reserved r = store.get(last).flatMap(s -> Reserved.decodeFor(s, request)).orElseGet(reserve);
+      String value = r.encode(request);
       if (store.setIfAbsent(k, value, pendingTtl)) {
         store.set(last, value, ttl);
         return new Owned(k, value, r);

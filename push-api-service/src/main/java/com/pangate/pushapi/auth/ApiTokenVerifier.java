@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.LongSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,7 +22,9 @@ import org.slf4j.LoggerFactory;
 /**
  * API tokens of auth-service (auth spec §3: ES256, {@code aud=pangate-api}, claims {@code tenant}, {@code client_id},
  * {@code scope}, {@code jti}, {@code iat}), checked offline against the cached JWKS (refreshed every 5 minutes, and at
- * most once per 10 s on an unknown {@code kid}), then against the revocations of {@code gw.control}.
+ * most once per 10 s on an unknown {@code kid}), then against the revocations of {@code gw.control}. A request never
+ * fetches more than once per 10 s, and a request whose key is cached never waits for a fetch: an auth outage must not
+ * become a Push API outage. A {@link ReentrantLock}, so waiting virtual threads do not pin their carriers.
  */
 public final class ApiTokenVerifier {
 
@@ -38,8 +41,9 @@ public final class ApiTokenVerifier {
   private final LongSupplier monoMs;
   private volatile Map<String, ECDSAVerifier> keys = Map.of();
   private volatile boolean loaded;
-  private long lastFetchMono = Long.MIN_VALUE / 2;
-  private long lastOkMono = Long.MIN_VALUE / 2;
+  private final ReentrantLock lock = new ReentrantLock();
+  private long lastFetchMono = Long.MIN_VALUE / 2;      // guarded by lock
+  private volatile long lastOkMono = Long.MIN_VALUE / 2;
 
   public ApiTokenVerifier(JwksSource source, String issuer, String audience, ControlState control, LongSupplier wallMs,
       LongSupplier monoMs) {
@@ -57,7 +61,16 @@ public final class ApiTokenVerifier {
   }
 
   /** Fetches now unless one was attempted in the last 10 s; failures keep the cached keys. */
-  public synchronized void refresh(boolean force) {
+  public void refresh(boolean force) {
+    lock.lock();
+    try {
+      fetch(force);
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  private void fetch(boolean force) {
     long now = monoMs.getAsLong();
     if (!force && now - lastFetchMono < UNKNOWN_KID_MS) {
       return;
@@ -83,8 +96,12 @@ public final class ApiTokenVerifier {
   }
 
   public Caller.ApiCaller verify(String token) {
-    if (monoMs.getAsLong() - lastOkMono >= REFRESH_MS) {
-      refresh(true);
+    if (monoMs.getAsLong() - lastOkMono >= REFRESH_MS && lock.tryLock()) {
+      try {
+        fetch(false);       // stale keys still verify; a fetch already running is not waited for
+      } finally {
+        lock.unlock();
+      }
     }
     SignedJWT jwt;
     JWTClaimsSet c;

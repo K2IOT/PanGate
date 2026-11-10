@@ -2,6 +2,7 @@ package com.pangate.pushapi.store;
 
 import com.pangate.contracts.testkit.SeqKeys;
 import com.pangate.pushapi.core.PushApiKeys;
+import com.pangate.pushapi.core.SingleFlight;
 import io.lettuce.core.ScriptOutputType;
 import io.lettuce.core.event.connection.ConnectionActivatedEvent;
 import java.io.IOException;
@@ -38,6 +39,7 @@ public final class SeqEpochWatcher implements AutoCloseable {
   private final RedisSeqEpochs epochs;
   private final Consumer<String> onBump;
   private final Map<String, String> known = new ConcurrentHashMap<>();
+  private final SingleFlight flight = new SingleFlight();
   private ScheduledExecutorService timer;
   private reactor.core.Disposable events;
 
@@ -55,8 +57,15 @@ public final class SeqEpochWatcher implements AutoCloseable {
     }
   }
 
-  /** One pass over every shard; errors are logged and the pass is retried on the next tick. */
-  public synchronized void checkNow() {
+  /**
+   * One pass over every shard that started after this call; callers arriving together (every request that saw a
+   * seq regression after a failover) share it. Errors are logged and the pass is retried on the next tick.
+   */
+  public void checkNow() {
+    flight.run(this::pass);
+  }
+
+  private void pass() {
     boolean bumped = false;
     boolean changed = false;
     try {

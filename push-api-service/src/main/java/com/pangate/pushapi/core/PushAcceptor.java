@@ -94,7 +94,7 @@ public final class PushAcceptor {
     Idempotency.Owned owned = null;
     Reserved reserved;
     if (!r.getIdempotencyKey().isEmpty()) {
-      Idempotency.Claim c = idempotency.claim(r.getTenantId(), r.getIdempotencyKey(), () -> reserve(r));
+      Idempotency.Claim c = idempotency.claim(r.getTenantId(), r.getIdempotencyKey(), reservedFor(r), () -> reserve(r));
       switch (c) {
         case Idempotency.Done d -> {
           return d.first().toBuilder().setRequestId(r.getRequestId()).build();
@@ -148,6 +148,16 @@ public final class PushAcceptor {
       }
     }
     return ok;
+  }
+
+  /** What reserved values are for: a retry with the same key reuses them only for the same kind, class and target. */
+  static String reservedFor(PushRequest r) {
+    return r.getKindValue() + "/" + r.getClass_Value() + "/" + part(r.getPrincipalId()) + part(r.getDeviceId())
+        + part(r.getTopic());
+  }
+
+  private static String part(String s) {
+    return s.length() + ":" + s;
   }
 
   private Reserved reserve(PushRequest r) {

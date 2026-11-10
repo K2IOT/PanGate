@@ -51,47 +51,57 @@ public final class StatusListener implements AutoCloseable {
     try {
       consumer.subscribe(List.of(offlineTopic, deliveredTopic));
       while (running) {
-        ConsumerRecords<String, byte[]> batch = consumer.poll(Duration.ofMillis(500));
-        Map<TopicPartition, Long> retryFrom = new HashMap<>();
-        for (ConsumerRecord<String, byte[]> r : batch) {
-          TopicPartition tp = new TopicPartition(r.topic(), r.partition());
-          if (retryFrom.containsKey(tp)) {
-            continue;
-          }
-          try {
-            if (r.topic().equals(offlineTopic)) {
-              status.offline(OfflineRecord.parseFrom(r.value()));
-            } else {
-              status.delivered(DeliveredRecord.parseFrom(r.value()));
-            }
-            onUpdate.accept(r.topic(), "ok");
-          } catch (com.google.protobuf.InvalidProtocolBufferException | NullPointerException e) {
-            onUpdate.accept(r.topic(), "malformed");
-          } catch (RuntimeException e) {
-            onUpdate.accept(r.topic(), "error");
-            retryFrom.put(tp, r.offset());
-          }
-        }
-        if (retryFrom.isEmpty()) {
-          if (!batch.isEmpty()) {
-            consumer.commitSync();
-          }
-        } else {
-          log.warn("status not written for {} partitions; retrying", retryFrom.size());
-          retryFrom.forEach(consumer::seek);
-          // commit what was written in the other partitions is not possible per record without bookkeeping;
-          // the rewound partitions repeat their records, which the status script tolerates
-          Thread.sleep(500);
+        try {
+          step();
+        } catch (WakeupException e) {
+          throw e;
+        } catch (RuntimeException e) {
+          // a commit during a rebalance, a revoked partition, a broker outage: the uncommitted records come again
+          log.warn("status listener: {}; going on", e.toString());
+          Thread.sleep(1_000);
         }
       }
     } catch (WakeupException e) {
       // closing
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-    } catch (RuntimeException e) {
-      log.error("status listener stopped: {}", e.toString());
     } finally {
       consumer.close(Duration.ofSeconds(2));
+    }
+  }
+
+  private void step() throws InterruptedException {
+    ConsumerRecords<String, byte[]> batch = consumer.poll(Duration.ofMillis(500));
+    Map<TopicPartition, Long> retryFrom = new HashMap<>();
+    for (ConsumerRecord<String, byte[]> r : batch) {
+      TopicPartition tp = new TopicPartition(r.topic(), r.partition());
+      if (retryFrom.containsKey(tp)) {
+        continue;
+      }
+      try {
+        if (r.topic().equals(offlineTopic)) {
+          status.offline(OfflineRecord.parseFrom(r.value()));
+        } else {
+          status.delivered(DeliveredRecord.parseFrom(r.value()));
+        }
+        onUpdate.accept(r.topic(), "ok");
+      } catch (com.google.protobuf.InvalidProtocolBufferException | NullPointerException e) {
+        onUpdate.accept(r.topic(), "malformed");
+      } catch (RuntimeException e) {
+        onUpdate.accept(r.topic(), "error");
+        retryFrom.put(tp, r.offset());
+      }
+    }
+    if (retryFrom.isEmpty()) {
+      if (!batch.isEmpty()) {
+        consumer.commitSync();
+      }
+    } else {
+      log.warn("status not written for {} partitions; retrying", retryFrom.size());
+      retryFrom.forEach(consumer::seek);
+      // commit what was written in the other partitions is not possible per record without bookkeeping;
+      // the rewound partitions repeat their records, which the status script tolerates
+      Thread.sleep(500);
     }
   }
 
