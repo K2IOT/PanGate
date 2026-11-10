@@ -51,6 +51,10 @@ public class PushController {
     this.meters = meters;
   }
 
+  static String targetKey(PushRequest r) {
+    return r.getKind() == PushRequest.Kind.KIND_BROADCAST ? "topic:" + r.getTopic() : r.getPrincipalId();
+  }
+
   static Caller.ApiCaller caller(HttpServletRequest req) {
     return (Caller.ApiCaller) req.getAttribute(ApiAuthFilter.CALLER);
   }
@@ -61,7 +65,13 @@ public class PushController {
     Caller.ApiCaller c = caller(req);
     PushRequest request = HttpMapping.toRequest(body, c.tenant(), idempotencyKey);
     long t0 = System.nanoTime();
-    PushResponse r = acceptor.accept(c, request);
+    // through the same per-target queue as batches: seq order = Kafka order for pushes this pod accepts at once
+    PushResponse r;
+    try {
+      r = serial.submit(targetKey(request), () -> acceptor.accept(c, request)).join();
+    } catch (java.util.concurrent.CompletionException e) {
+      throw e.getCause() instanceof RuntimeException re ? re : e;
+    }
     timed(request, t0);
     count(r);
     return toHttp(r);
@@ -93,8 +103,7 @@ public class PushController {
         results.add(CompletableFuture.completedFuture(itemError(index, 400, e.code(), e.getMessage())));
         continue;
       }
-      String key = r.getKind() == PushRequest.Kind.KIND_BROADCAST ? "topic:" + r.getTopic() : r.getPrincipalId();
-      results.add(serial.submit(key, () -> {
+      results.add(serial.submit(targetKey(r), () -> {
         long t0 = System.nanoTime();
         PushResponse res = acceptor.accept(c, r);
         timed(r, t0);

@@ -327,4 +327,35 @@ class PushHttpIT {
     assertThat(api.post(api.http, "/admin/v1/seqepochs:bump", api.token("pangate", "pangate-admin", "admin"), body)
         .statusCode()).isEqualTo(404);   // admin is only on the management port
   }
+
+  /** Flow review: single pushes for one principal sent at once reach Kafka in seq order (on one pod). */
+  @Test
+  void concurrentSinglePushesForOnePrincipalReachKafkaInSeqOrder() throws Exception {
+    String p = u();
+    String token = api.token("t1", "t1-backend", SEND);
+    List<Thread> threads = new java.util.ArrayList<>();
+    List<String> ids = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+    for (int i = 0; i < 50; i++) {
+      threads.add(Thread.ofVirtual().start(() -> {
+        try {
+          ids.add(json(api.post(api.http, "/v1/push", token, push(p))).get("msgId").asText());
+        } catch (Exception e) {
+          throw new IllegalStateException(e);
+        }
+      }));
+    }
+    for (Thread t : threads) {
+      t.join();
+    }
+    assertThat(ids).hasSize(50);
+    ids.forEach(scenario::awaitRequest);
+    List<Long> seqs = new java.util.ArrayList<>();
+    for (var rec : scenario.drain(PushTopics.requests("c1").name())) {
+      PushRecord r = PushRecord.parseFrom(rec.value());
+      if (r.getPrincipalId().equals(p)) {
+        seqs.add(r.getFrame().getSeq());
+      }
+    }
+    assertThat(seqs).hasSize(50).isSorted();
+  }
 }

@@ -100,6 +100,8 @@ Lõi (`DeliveryJob`, `RegistryLookup`, `NodeDirectory`, `GatewayLinks`, `Outcome
    - Có ít nhất một kết nối đã giao → xong.
    - Không có → `OfflineRecord{reason của lần thử cuối, attempts = tổng PushItem đã gửi}`.
 
+**Hết hạn (BROADCAST, CONTROL):** `now > expires_at_ms` → bỏ (`router.records{result=dropped}`), theo spec contracts §1.1a.
+
 **BROADCAST:** `PushItem{KIND_BROADCAST, topic, frame, priority}` tới mọi node sống, không drain. Xong khi mọi `send` đã được nhận vào stream. Node đứt trong lúc gửi thì bỏ qua (`router.broadcast.skipped`). Không có offline hay receipt.
 
 **CONTROL:** `PushItem{KIND_CONTROL, tenant_id, principal_id, control}` tới mỗi node có entry sống của principal (mỗi node một lần, kể cả node đang drain). Không có entry thì xong ngay. Không có offline hay receipt. **KICK** (single-session) đi tới mọi node sống: khi gateway gửi KICK, nó đã thay entry cũ bằng entry mới trong `reg:{p}`, nên không định tuyến theo entry được (sửa trong P1 của push-api). Router không chờ ack của KICK: ack không đổi kết quả gì, còn chờ thì partition phải đợi node chậm nhất; mỗi link vẫn ghi KICK theo thứ tự.

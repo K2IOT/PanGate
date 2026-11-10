@@ -112,7 +112,7 @@ Lõi (`PushRequests`, `HttpMapping`, `Callers`, `TenantPolicies`, `RateLimiter`,
    - `Frame{type=PUSH, msg_id, class, payload, headers, seq/seq_epoch hoặc topic/topic_seq, collapse_key}` theo ADR 0017. Class `UNSPECIFIED` → RELIABLE; priority `UNSPECIFIED` → NORMAL.
    - `PushRecord` với `cell_id`, `receipt`, `sender_principal_id`; kiểm lại bằng luật §1.1.
 9. **Produce** lên `cN.push.requests`: key và header theo testkit (`PushKeys`, `PushHeaders`), chờ ack (timeout `produce-timeout`, 5 s). Lỗi → `CODE_UNAVAILABLE` (`503`, `retry_after_ms=500`), xoá idempotency `pending`.
-10. **Trạng thái:** `msg:{t}:<id>` = `accepted` (§4.2). Lỗi chỉ log và đếm, không làm request thất bại. CONTROL không ghi trạng thái.
+10. **Trạng thái:** `msg:{t}:<id>` = `accepted` (§4.2), ghi **trước** bước 9: kết quả của router có thể tới StatusListener trước một lần ghi sau produce, và kết quả cho key chưa tồn tại bị bỏ. `state` chỉ được đặt khi chưa có, nên lần accept retry không ghi đè `delivered`/`offline`. Lỗi chỉ log và đếm, không làm request thất bại. CONTROL không ghi trạng thái. Produce lỗi thì trạng thái `accepted` còn lại tới hết TTL; retry cùng key dùng lại đúng `msgId` đó (review luồng P1).
 11. **Idempotency, ghi `done`** (§2.1).
 12. **Trả lời:** HTTP `202 {msgId, seq?, seqEpoch?, topicSeq?, cell}`; gRPC `PushResponse{ok=true, CODE_OK, msg_id, seq, seq_epoch, topic_seq, cell_id}`.
 
@@ -152,6 +152,7 @@ Lõi (`PushRequests`, `HttpMapping`, `Callers`, `TenantPolicies`, `RateLimiter`,
 
 - `Content-Type: application/json`; body đơn ≤ 128 KB. `payload` là JSON bất kỳ, ghi thành bytes UTF-8; `headers["content-type"] = application/json`.
 - Ánh xạ field đúng bảng §3.2 của spec contracts; header `Idempotency-Key` → `idempotency_key`.
+- `POST /v1/push` đơn cũng đi qua hàng đợi theo target key như batch, nên các push cùng principal tới một pod cùng lúc vào Kafka đúng thứ tự seq. Giữa nhiều pod thì không đảm bảo (review luồng P1).
 - Lỗi là `application/problem+json` với `code` ổn định: `invalid_request`, `payload_too_large`, `rule_V1`…`rule_V14`, `forbidden`, `tenant_blocked`, `rate_limited`, `unavailable`, `invalid_token`.
 
 ---

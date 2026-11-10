@@ -6,14 +6,14 @@ import com.pangate.contracts.v1.PushRecord;
 import com.pangate.pushapi.core.MessageStatus;
 import com.pangate.pushapi.core.PushApiKeys;
 import io.lettuce.core.ScriptOutputType;
-import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.LongSupplier;
 
 /**
- * {@code msg:{t}:<id>} hashes (push-api spec §4.2). Outcomes are written only to keys that exist, and
+ * {@code msg:{t}:<id>} hashes (push-api spec §4.2). {@code accepted} is written before the record is produced, so
+ * the key exists when an outcome arrives; outcomes are written only to keys that exist, and
  * {@code delivered} wins over {@code offline} (a redelivery after a router restart never downgrades the status).
  */
 public final class RedisMessageStatus implements MessageStatus {
@@ -24,6 +24,14 @@ public final class RedisMessageStatus implements MessageStatus {
       if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
       if redis.call('HGET', KEYS[1], 'state') == 'delivered' then return 0 end
       redis.call('HSET', KEYS[1], 'state', 'offline', 'offlineReason', ARGV[1], 'attempts', ARGV[2], 'offlineAt', ARGV[3])
+      return 1""";
+
+  /** Written before the record is produced; never replaces an outcome already there (a retried accept). */
+  static final String ACCEPTED = """
+      redis.call('HSETNX', KEYS[1], 'state', 'accepted')
+      redis.call('HSET', KEYS[1], 'kind', ARGV[1], 'class', ARGV[2], 'receipt', ARGV[3], 'target', ARGV[4],
+        'acceptedAt', ARGV[5], 'expiresAt', ARGV[6])
+      redis.call('PEXPIRE', KEYS[1], ARGV[7])
       return 1""";
 
   static final String DELIVERED = """
@@ -58,20 +66,11 @@ public final class RedisMessageStatus implements MessageStatus {
   @Override
   public void accepted(PushRecord r) {
     String key = PushApiKeys.msg(r.getTenantId(), r.getMsgId());
-    Map<String, String> f = new LinkedHashMap<>();
-    f.put("state", "accepted");
-    f.put("kind", lower(r.getKind(), "KIND_"));
-    f.put("class", lower(r.getClass_(), "DELIVERY_CLASS_"));
-    f.put("receipt", Boolean.toString(r.getReceipt()));
-    f.put("target", target(r));
-    f.put("acceptedAt", Long.toString(r.getAcceptedAtMs()));
-    f.put("expiresAt", Long.toString(r.getExpiresAtMs()));
     long ttl = Math.max(1, r.getExpiresAtMs() - wallMs.getAsLong() + GRACE_MS);
-    var a = redis.async();
-    var set = a.hset(key, f);
-    var exp = a.pexpire(key, ttl);
-    redis.await(set, "HSET msg");
-    redis.await(exp, "PEXPIRE msg");
+    redis.await(redis.async().<Long>eval(ACCEPTED, ScriptOutputType.INTEGER, new String[] {key},
+        lower(r.getKind(), "KIND_"), lower(r.getClass_(), "DELIVERY_CLASS_"), Boolean.toString(r.getReceipt()),
+        target(r), Long.toString(r.getAcceptedAtMs()), Long.toString(r.getExpiresAtMs()), Long.toString(ttl)),
+        "status accepted");
   }
 
   @Override

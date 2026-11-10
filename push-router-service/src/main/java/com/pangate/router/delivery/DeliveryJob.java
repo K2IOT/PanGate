@@ -49,6 +49,9 @@ public final class DeliveryJob {
   }
 
   public DeliveryResult run(PushRecord r) {
+    if (r.getKind() != PushRecord.Kind.KIND_MESSAGE && wallMs.getAsLong() > r.getExpiresAtMs()) {
+      return DeliveryResult.DROPPED;   // contracts §1.1a: expired BROADCAST / CONTROL are dropped (MESSAGE: below)
+    }
     DeliveryResult result = switch (r.getKind()) {
       case KIND_MESSAGE -> message(r);
       case KIND_BROADCAST -> broadcast(r);

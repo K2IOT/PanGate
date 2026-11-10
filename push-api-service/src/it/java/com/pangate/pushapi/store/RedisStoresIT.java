@@ -87,6 +87,21 @@ class RedisStoresIT {
     assertThat(idem.get("idem:{t1}:k")).contains("done|x");
   }
 
+  /** Flow review: a retried accept (produce timed out but landed) must not turn an outcome back into accepted. */
+  @Test
+  void acceptedNeverOverwritesAnOutcome() throws Exception {
+    long now = System.currentTimeMillis();
+    RedisMessageStatus status = new RedisMessageStatus(state, System::currentTimeMillis);
+    PushRecord r = Fixtures.withMsgId(Fixtures.message("t1:u1"), "M7").toBuilder().setReceipt(true)
+        .setAcceptedAtMs(now).setExpiresAtMs(now + 3_600_000).build();
+    status.accepted(r);
+    status.delivered(DeliveredRecord.newBuilder().setMsgId("M7").setTenantId("t1").setConnId("C1")
+        .setStatus(AckItem.Status.STATUS_ACKED).setAtMs(now + 5).build());
+    status.accepted(r);
+    assertThat(status.get("t1", "M7")).get().satisfies(m -> assertThat(m).containsEntry("state", "delivered")
+        .containsEntry("deliveredConns", "1"));
+  }
+
   @Test
   void statusDeliveredWinsAndOrphansAreNotCreated() throws Exception {
     long now = System.currentTimeMillis();

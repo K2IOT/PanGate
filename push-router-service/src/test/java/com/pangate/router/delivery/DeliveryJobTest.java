@@ -368,4 +368,22 @@ class DeliveryJobTest {
         .isEqualTo(DeliveryResult.DELIVERED);
     assertThat(sent).hasSize(3);
   }
+
+  /** Flow review (contracts §1.1a): an expired BROADCAST is dropped, not delivered late. */
+  @Test
+  void expiredBroadcastIsDropped() {
+    PushRecord b = Fixtures.broadcast("t1:news");
+    now = b.getExpiresAtMs() + 1;
+    assertThat(job().run(b)).isEqualTo(DeliveryResult.DROPPED);
+    assertThat(sent).isEmpty();
+  }
+
+  /** Flow review (contracts §1.1a): an expired CONTROL is dropped too. */
+  @Test
+  void expiredControlIsDropped() {
+    PushRecord c = Fixtures.control("t1:u1", Fixtures.kick("NEW", 1));
+    now = c.getExpiresAtMs() + 1;
+    assertThat(job().run(c)).isEqualTo(DeliveryResult.DROPPED);
+    assertThat(sent).isEmpty();
+  }
 }

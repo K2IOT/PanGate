@@ -59,6 +59,7 @@ class PushAcceptorTest {
     produced.add(r);
   };
   final List<String> statuses = new ArrayList<>();
+  final List<Integer> producedWhenAccepted = new ArrayList<>();
   boolean statusDown;
   final MessageStatus status = new MessageStatus() {
     @Override public void accepted(PushRecord r) {
@@ -66,6 +67,7 @@ class PushAcceptorTest {
         throw new StoreUnavailableException("down", null);
       }
       statuses.add(r.getMsgId());
+      producedWhenAccepted.add(produced.size());
     }
     @Override public Optional<Map<String, String>> get(String t, String id) { return Optional.empty(); }
     @Override public void offline(OfflineRecord o) { }
@@ -234,6 +236,14 @@ class PushAcceptorTest {
     assertThat(produced).isEmpty();
     assertThat(acceptor().accept(API, message().toBuilder().setIdempotencyKey("é".repeat(128)).build()).getCode())
         .isEqualTo(Code.CODE_OK);
+  }
+
+  /** Flow review: the router's outcome can reach the status listener before a write made after produce. */
+  @Test
+  void statusIsRecordedBeforeTheRecordIsProduced() {
+    assertThat(acceptor().accept(API, message()).getCode()).isEqualTo(Code.CODE_OK);
+    assertThat(producedWhenAccepted).containsExactly(0);
+    assertThat(produced).hasSize(1);
   }
 
   @Test

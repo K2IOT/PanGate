@@ -120,6 +120,15 @@ public final class PushAcceptor {
     if (broken.isPresent()) {
       throw new IllegalStateException("built a PushRecord that breaks §1.1 (" + broken.get() + ")");
     }
+    if (rec.getKind() != PushRecord.Kind.KIND_CONTROL) {
+      // before produce: the router's outcome can reach the status listener before a write made afterwards, and an
+      // outcome for a key that does not exist is dropped (spec §4.2)
+      try {
+        status.accepted(rec);
+      } catch (RuntimeException e) {
+        log.warn("status of msg_id {} not recorded: {}", rec.getMsgId(), e.toString());
+      }
+    }
     try {
       producer.send(rec);
     } catch (ProduceFailedException e) {
@@ -134,13 +143,6 @@ public final class PushAcceptor {
           e.toString());
       return fail(res, Code.CODE_UNAVAILABLE, "unavailable: kafka").toBuilder().setRetryAfterMs(RETRY_PRODUCE_MS)
           .build();
-    }
-    if (rec.getKind() != PushRecord.Kind.KIND_CONTROL) {
-      try {
-        status.accepted(rec);
-      } catch (RuntimeException e) {
-        log.warn("status of msg_id {} not recorded: {}", rec.getMsgId(), e.toString());
-      }
     }
     PushResponse ok = res.setOk(true).setCode(Code.CODE_OK).setMsgId(rec.getMsgId()).setSeq(reserved.seq())
         .setSeqEpoch(reserved.seq() > 0 ? reserved.seqEpoch() : 0).setTopicSeq(reserved.topicSeq())
