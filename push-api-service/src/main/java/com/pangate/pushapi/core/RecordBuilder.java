@@ -14,7 +14,7 @@ import java.util.function.LongSupplier;
  * A valid {@link PushRequest} → {@link PushRecord} with a complete PUSH {@link Frame} (ADR 0017, push-api spec §2
  * step 8). Class UNSPECIFIED is RELIABLE, priority UNSPECIFIED is NORMAL, ttl 0 is the default ttl.
  */
-public final class RecordBuilder {
+public class RecordBuilder {
 
   private final String cell;
   private final LongSupplier wallMs;
