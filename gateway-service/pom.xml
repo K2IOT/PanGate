@@ -186,6 +186,26 @@
   <build>
     <plugins>
       <plugin>
+        <!-- Extra jar with only com.pangate.gateway.auth (depends on Nimbus + SLF4J): auth-service uses it in a
+             test-scope contract test against the real JwtVerifier. -->
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>verifier-jar</id>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+            <configuration>
+              <classifier>verifier</classifier>
+              <includes>
+                <include>com/pangate/gateway/auth/**</include>
+              </includes>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-enforcer-plugin</artifactId>
         <executions>

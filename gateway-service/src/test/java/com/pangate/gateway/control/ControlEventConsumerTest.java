@@ -155,4 +155,16 @@ class ControlEventConsumerTest {
     await().atMost(Duration.ofSeconds(5)).until(node::controlCaughtUp);
     assertThat(seen).containsExactly("trace t1:u1 5 9", "trace- t1:u1");
   }
+
+  @Test
+  void clientRevokeIsIgnoredWithoutCountingABadRecord() {
+    add(0, "revoke:c:t1-backend", ControlEvent.newBuilder().setRevoke(Revoke.newBuilder().setClientId("t1-backend")
+        .setExpiresAtMs(Long.MAX_VALUE)).build().toByteArray());
+    add(1, "revoke:c:t1-backend", null);
+    start(2, Duration.ofMinutes(5));
+
+    await().atMost(Duration.ofSeconds(5)).until(node::controlCaughtUp);
+    assertThat(seen).isEmpty();
+    assertThat(errors()).isZero();
+  }
 }

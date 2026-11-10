@@ -28,4 +28,10 @@ class ControlKeysTest {
       assertThat(ControlKeys.parse(k)).as(String.valueOf(k)).isInstanceOf(ControlKeys.Unknown.class);
     }
   }
+
+  @Test
+  void clientRevokeKeyIsRecognised() {
+    assertThat(ControlKeys.parse("revoke:c:t1-backend")).isEqualTo(new ControlKeys.ClientRevokeKey("t1-backend"));
+    assertThat(ControlKeys.parse("revoke:c:")).isInstanceOf(ControlKeys.Unknown.class);
+  }
 }
