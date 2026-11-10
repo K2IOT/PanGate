@@ -14,7 +14,8 @@ public final class ContainersInitializer implements ApplicationContextInitialize
         "spring.datasource.url=" + pg.getJdbcUrl(),
         "spring.datasource.username=" + pg.getUsername(),
         "spring.datasource.password=" + pg.getPassword(),
-        "auth.kafka.bootstrap-servers=" + Containers.kafka().getBootstrapServers())
+        "auth.kafka.bootstrap-servers=" + Containers.kafka().getBootstrapServers(),
+        "pangate.secrets.dir=" + Containers.secretsDir())
         .applyTo(ctx.getEnvironment());
   }
 }

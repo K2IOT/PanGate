@@ -22,7 +22,8 @@ public record AuthProperties(
       @DefaultValue("7d") Duration overlap,
       @DefaultValue("1h") Duration publishAhead,
       @DefaultValue("v1") String kekId,
-      @DefaultValue("60s") Duration cacheRefresh) {}
+      @DefaultValue("60s") Duration cacheRefresh,
+      @DefaultValue("1h") Duration rotateInterval) {}
 
   public record Outbox(
       @DefaultValue("200ms") Duration interval,
