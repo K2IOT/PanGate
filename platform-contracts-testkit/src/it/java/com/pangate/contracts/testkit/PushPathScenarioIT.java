@@ -88,17 +88,6 @@ class PushPathScenarioIT {
     assertThat(scenario.awaitNodeDown(e.getNodeId(), 9)).isEqualTo(e);
   }
 
-  @Test
-  void conventionViolationFailsTheAwait() {
-    PushRecord m = Fixtures.withMsgId(Fixtures.message(principal()), id());
-    RecordHeaders noCell = new RecordHeaders();
-    noCell.add("tenant-id", "t1".getBytes());
-    noCell.add("content-type", PushHeaders.contentType("PushRecord").getBytes());
-    scenario.produceRaw(PushTopics.requests("c1").name(), PushKeys.of(m), m.toByteArray(), noCell);
-    assertThatThrownBy(() -> scenario.awaitRequest(m.getMsgId(), Duration.ofSeconds(20)))
-        .isInstanceOf(AssertionError.class).hasMessageContaining("cell-id");
-  }
-
   /** Reads only the msg_id field so the order test does not depend on the parsing path under test. */
   static final class PushRecordParser {
     static String msgId(byte[] v) {

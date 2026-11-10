@@ -161,7 +161,7 @@ message DeliveredRecord {
 - `EVENT_TYPE_NODE_DOWN = 5`:
   - Router phát khi lease `node:{id}` hết hạn (§3.5).
   - Chỉ có `node_id`, `epoch`, `cell_id`, `at_ms` và `event_id`.
-  - Mọi router đều phát, nên consumer dedup theo `node_id:epoch`.
+  - Mọi router đều phát, mỗi bản có `event_id` riêng, nên với `NODE_DOWN` consumer dedup theo `node_id:epoch`, **không** theo `event_id`. Luật "dedup theo `event_id`" ở §2 áp cho mọi sự kiện khác.
 
 ### 1.3 `push.proto` (additive), xem §3
 
@@ -245,6 +245,9 @@ message PushResponse {
 | V9 | Request KICK 5-field của gateway 0.1.0 (CONTROL + `control.kick`) hợp lệ | — (phải `CODE_OK`) |
 | V10 | `receipt` chỉ cho MESSAGE RELIABLE/ORDERED | `CODE_INVALID` |
 | V11 | MESSAGE tới device (`device_id` có giá trị) không được là ORDERED | `CODE_INVALID` |
+| V12 | `sender_principal_id` rỗng hoặc bắt đầu bằng `<tenant_id>:` | `CODE_INVALID` |
+| V13 | CONTROL: topic trong `subscribe` / `unsubscribe` bắt đầu bằng `<tenant_id>:`; không có `device_id` | `CODE_INVALID` |
+| V14 | `headers` ≤ 16 mục, tên ≤ 64 B, giá trị ≤ 1 024 B; `collapse_key` ≤ 256 B | `CODE_INVALID` |
 
 Quyền của bên gọi: với gRPC nội bộ thì kiểm theo allowlist mTLS, với HTTP thì theo scope `push:send` / `push:broadcast`. Vi phạm trả `CODE_FORBIDDEN`. Đây là việc của ④; spec này chỉ cố định mã lỗi.
 
@@ -318,9 +321,10 @@ Module mới, build sau `platform-contracts` và `platform-spring-starter` (test
 | `PushKeys` | `of(PushRecord)`, `of(OfflineRecord)`, `of(DeliveredRecord)`, `of(ConnectionEvent)` theo §2 |
 | `PushHeaders` | `write(Headers, tenant, cell, traceparent, messageName)` (bọc `PangateHeaders`); `assertConventions(ConsumerRecord<String, byte[]>, String messageName)` |
 | `Fixtures` | `message(principal)`, `deviceMessage(principal, device)`, `broadcast(topic)`, `control(principal, ControlOp)`, `offline(record, reason)`, `delivered(record, connId)`, `nodeDown(nodeId, epoch)`; mặc định hợp lệ theo §1.1, sửa được qua `toBuilder()` |
-| `PushRequestCases` | `List<Case(String name, PushRequest request, PushResponse.Code expected)>`, ít nhất một ca đúng và một ca sai cho mỗi luật V1–V11 |
+| `PushRequestCases` | `List<Case(String name, PushRequest request, PushResponse.Code expected)>`, ít nhất một ca đúng và một ca sai cho mỗi luật V1–V14 |
 | `PushRecordRules` | `assertValid(PushRecord)`: mọi luật §1.1, ném `AssertionError` nêu tên luật. `PushPathScenario.produce` gọi nó; ④ dùng để kiểm record mình produce |
 | `SeqKeys` | `seq(principal)`, `SEQ_EPOCHS`, `slot(principal)` theo §3.3 |
+| `PushKinds` | `toRecord(PushRequest.Kind) -> PushRecord.Kind`: hai enum đánh số khác nhau, phải ánh xạ theo nghĩa |
 | `RegistryValues` | `List<Case(String value, Optional<Parsed> expected)>`, với `Parsed(nodeId, epoch, connectedAtMs, platform, Optional<String> device)`: v1, v2, device chứa `|`, device rỗng, thiếu phần, số hỏng; và `v2(nodeId, epoch, connectedAtMs, platform, device)` để dựng chuỗi chuẩn |
 | `golden/v1/<name>.textproto`, `<name>.bin` | Một cặp cho mỗi fixture của `Fixtures` và một request mẫu cho mỗi `kind` của `PushRequest` |
 | `PushPathScenario` | Extension JUnit 5 quản lý một `KafkaContainer` dùng chung trong JVM và tạo topic theo `PushTopics`. API: `bootstrapServers()`, `produce(PushRecord)` (đúng key và header), `awaitRequest(msgId)`, `awaitOffline(msgId, Reason)`, `awaitDelivered(msgId)`, `awaitNodeDown(nodeId, epoch)`, `drain(topic)`; mọi record đọc ra đều qua `assertConventions` |

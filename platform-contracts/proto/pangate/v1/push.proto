@@ -15,6 +15,7 @@ service PushService {
 }
 
 message PushRequest {
+  // Numbered differently from PushRecord.Kind: map by meaning (testkit PushKinds), never by number.
   enum Kind { KIND_UNSPECIFIED = 0; KIND_CONTROL = 1; KIND_MESSAGE = 2; KIND_BROADCAST = 3; }
   string request_id = 1;            // echoed in PushResponse; responses may arrive out of order
   Kind kind = 2;

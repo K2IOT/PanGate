@@ -31,18 +31,32 @@ public final class RegistryValues {
     if (p.length < 4 || p[0].isEmpty()) {
       return Optional.empty();
     }
+    if (!digits(p[1]) || !digits(p[2])) {
+      return Optional.empty();
+    }
     long epoch;
     long at;
     try {
       epoch = Long.parseLong(p[1]);
       at = Long.parseLong(p[2]);
-    } catch (NumberFormatException e) {
-      return Optional.empty();
-    }
-    if (epoch < 0 || at < 0) {
+    } catch (NumberFormatException e) {  // overflow
       return Optional.empty();
     }
     return Optional.of(new Parsed(p[0], epoch, at, p[3], p.length == 5 ? Optional.of(p[4]) : Optional.empty()));
+  }
+
+  /** Decimal, non-negative, ASCII digits only (no sign, no other Unicode digits). */
+  static boolean digits(String s) {
+    if (s.isEmpty()) {
+      return false;
+    }
+    for (int i = 0; i < s.length(); i++) {
+      char c = s.charAt(i);
+      if (c < '0' || c > '9') {
+        return false;
+      }
+    }
+    return true;
   }
 
   /** True only for a v2 entry whose non-empty device equals {@code device}. */
@@ -63,6 +77,11 @@ public final class RegistryValues {
         new Case("epoch not a number", "gw-1|x|1000|ios", Optional.empty()),
         new Case("negative time", "gw-1|7|-1|ios", Optional.empty()),
         new Case("empty node", "|7|1000|ios", Optional.empty()),
-        new Case("empty value", "", Optional.empty()));
+        new Case("empty value", "", Optional.empty()),
+        new Case("signed number", "gw-1|+7|1000|ios", Optional.empty()),
+        new Case("non-ASCII digit", "gw-1|\u0667|1000|ios", Optional.empty()),
+        new Case("three parts", "gw-1|7|1000", Optional.empty()),
+        new Case("v2 null platform as the gateway writes it", "gw|7|1000||d1",
+            Optional.of(new Parsed("gw", 7, 1000, "", Optional.of("d1")))));
   }
 }

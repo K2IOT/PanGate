@@ -40,4 +40,14 @@ class RegistryValuesTest {
       assertThat(RegistryValues.parse(c.value())).as(c.name()).isEqualTo(c.expected());
     }
   }
+
+  @Test
+  void numbersAreAsciiDigitsOnly() {
+    for (String bad : new String[] {"gw-1|+7|1000|ios", "gw-1|7|+1000|ios", "gw-1|\u0667|1000|ios", "gw-1|7|1 0|ios",
+        "gw-1|7"}) {
+      assertThat(RegistryValues.parse(bad)).as(bad).isEmpty();
+    }
+    assertThat(RegistryValues.parse("gw|7|1000||d1")).hasValue(new RegistryValues.Parsed("gw", 7, 1000, "",
+        Optional.of("d1")));
+  }
 }

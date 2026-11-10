@@ -15,7 +15,7 @@ import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 
-/** Test-only stand-in for push-router: every MESSAGE goes offline (NO_SESSION); receipt=true also gets delivered. */
+/** Test-only stand-in for push-router: a MESSAGE with receipt is delivered (one ACK), any other goes offline. */
 final class FakeRouter implements AutoCloseable {
 
   private final Thread thread;
@@ -43,11 +43,12 @@ final class FakeRouter implements AutoCloseable {
           if (r.getKind() != PushRecord.Kind.KIND_MESSAGE) {
             continue;
           }
-          OfflineRecord o = Fixtures.offline(r, OfflineRecord.Reason.REASON_NO_SESSION, 0);
-          var out = new ProducerRecord<>(PushTopics.offline(cell).name(), PushKeys.of(o), o.toByteArray());
-          PushHeaders.write(out.headers(), r.getTenantId(), cell, null, "OfflineRecord");
-          producer.send(out);
-          if (r.getReceipt()) {
+          if (!r.getReceipt()) {  // no session: offline
+            OfflineRecord o = Fixtures.offline(r, OfflineRecord.Reason.REASON_NO_SESSION, 0);
+            var out = new ProducerRecord<>(PushTopics.offline(cell).name(), PushKeys.of(o), o.toByteArray());
+            PushHeaders.write(out.headers(), r.getTenantId(), cell, null, "OfflineRecord");
+            producer.send(out);
+          } else {  // pretends one connection acked: delivered, never also offline
             var d = Fixtures.delivered(r, "conn-1");
             var dr = new ProducerRecord<>(PushTopics.delivered(cell).name(), PushKeys.of(d), d.toByteArray());
             PushHeaders.write(dr.headers(), r.getTenantId(), cell, null, "DeliveredRecord");

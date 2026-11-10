@@ -147,7 +147,8 @@ public final class PushPathScenario implements BeforeAllCallback, AfterAllCallba
   public OfflineRecord awaitOffline(String msgId, OfflineRecord.Reason reason, Duration timeout) {
     return await(PushTopics.offline(cell).name(), "OfflineRecord", OfflineRecord::parseFrom,
         r -> r.getRecord().getMsgId().equals(msgId) && r.getReason() == reason, PushKeys::of, timeout,
-        "OfflineRecord " + msgId + " " + reason);
+        "OfflineRecord " + msgId + " " + reason,
+        r -> r.getRecord().getMsgId().equals(msgId) ? r.getReason() + " (attempts " + r.getAttempts() + ")" : null);
   }
 
   public DeliveredRecord awaitDelivered(String msgId) {
@@ -169,8 +170,28 @@ public final class PushPathScenario implements BeforeAllCallback, AfterAllCallba
         PushKeys::of, timeout, "NODE_DOWN " + nodeId + ":" + epoch);
   }
 
-  /** Every record currently in {@code topic}, in partition then offset order. */
+  /** Every record currently in {@code topic}, each checked against the header conventions. */
   public List<ConsumerRecord<String, byte[]>> drain(String topic) {
+    List<ConsumerRecord<String, byte[]>> out = drainUnchecked(topic);
+    String messageName = messageNameOf(topic);
+    out.forEach(r -> PushHeaders.assertConventions(r, messageName));
+    return out;
+  }
+
+  private String messageNameOf(String topic) {
+    if (topic.equals(PushTopics.requests(cell).name())) {
+      return "PushRecord";
+    } else if (topic.equals(PushTopics.offline(cell).name())) {
+      return "OfflineRecord";
+    } else if (topic.equals(PushTopics.delivered(cell).name())) {
+      return "DeliveredRecord";
+    } else if (topic.equals(PushTopics.lifecycle(cell).name())) {
+      return "ConnectionEvent";
+    }
+    throw new IllegalArgumentException(topic + " is not a push-path topic of cell " + cell);
+  }
+
+  private List<ConsumerRecord<String, byte[]>> drainUnchecked(String topic) {
     List<ConsumerRecord<String, byte[]>> out = new ArrayList<>();
     try (var c = consumer()) {
       List<TopicPartition> parts = assignAll(c, topic);
@@ -190,12 +211,22 @@ public final class PushPathScenario implements BeforeAllCallback, AfterAllCallba
 
   private <T extends Message> T await(String topic, String messageName, Parser<T> parser, Predicate<T> match,
       Function<T, String> key, Duration timeout, String what) {
+    return await(topic, messageName, parser, match, key, timeout, what, v -> null);
+  }
+
+  /** {@code near}: describes a record that is close to the one awaited (same msg_id), for the timeout message. */
+  private <T extends Message> T await(String topic, String messageName, Parser<T> parser, Predicate<T> match,
+      Function<T, String> key, Duration timeout, String what, Function<T, String> near) {
+    List<String> seen = new ArrayList<>();
     try (var c = consumer()) {
       assignAll(c, topic);
       long deadline = System.nanoTime() + timeout.toNanos();
       while (System.nanoTime() < deadline) {
         for (ConsumerRecord<String, byte[]> r : c.poll(Duration.ofMillis(200))) {
           Optional<T> v = parse(parser, r.value());
+          if (v.isPresent() && !match.test(v.get()) && near.apply(v.get()) != null) {
+            seen.add(near.apply(v.get()));
+          }
           if (v.isPresent() && match.test(v.get())) {
             PushHeaders.assertConventions(r, messageName);
             if (!key.apply(v.get()).equals(r.key())) {
@@ -206,7 +237,8 @@ public final class PushPathScenario implements BeforeAllCallback, AfterAllCallba
         }
       }
     }
-    throw new AssertionError(what + " not seen on " + topic + " within " + timeout);
+    throw new AssertionError(what + " not seen on " + topic + " within " + timeout
+        + (seen.isEmpty() ? "" : "; seen instead: " + seen));
   }
 
   private static <T> Optional<T> parse(Parser<T> parser, byte[] value) {

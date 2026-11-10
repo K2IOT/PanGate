@@ -10,7 +10,7 @@ import java.util.List;
 
 /**
  * Validation cases for {@code PushService.SendStream} (push contracts spec §3.1, rules V1–V9). Push API must answer each
- * request with the expected code (rules V1–V11); this class holds data only, the validator lives in push-api-service.
+ * request with the expected code (rules V1–V14); this class holds data only, the validator lives in push-api-service.
  */
 public final class PushRequestCases {
 
@@ -33,6 +33,16 @@ public final class PushRequestCases {
 
   private static ByteString bytes(int n) {
     return ByteString.copyFrom(new byte[n]);
+  }
+
+  /** Replaces the headers with {@code n} entries of the given name and value sizes (bytes). */
+  private static PushRequest.Builder withHeaders(PushRequest.Builder b, int n, int nameBytes, int valueBytes) {
+    b.clearHeaders();
+    for (int i = 0; i < n; i++) {
+      String name = String.format("h%0" + (nameBytes - 1) + "d", i);
+      b.putHeaders(name, "v".repeat(valueBytes));
+    }
+    return b;
   }
 
   public static List<Case> all() {
@@ -100,6 +110,24 @@ public final class PushRequestCases {
     c.add(new Case("V11 device with RELIABLE", "V11", message().setDeviceId("d1").build(), Code.CODE_OK));
     c.add(new Case("V11 device with ORDERED", "V11", message().setDeviceId("d1")
         .setClass_(com.pangate.contracts.v1.DeliveryClass.DELIVERY_CLASS_ORDERED).build(), Code.CODE_INVALID));
+
+    c.add(new Case("V12 sender inside the tenant", "V12", message().setSenderPrincipalId("t1:s").build(), Code.CODE_OK));
+    c.add(new Case("V12 sender of another tenant", "V12", message().setSenderPrincipalId("t2:s").build(),
+        Code.CODE_INVALID));
+
+    c.add(new Case("V13 subscribe inside the tenant", "V13", control().build(), Code.CODE_OK));
+    c.add(new Case("V13 subscribe to another tenant's topic", "V13",
+        control().setControl(Fixtures.subscribe("t2:news")).build(), Code.CODE_INVALID));
+    c.add(new Case("V13 control with device", "V13", control().setDeviceId("d1").build(), Code.CODE_INVALID));
+
+    c.add(new Case("V14 16 headers and a 256-byte collapse key", "V14", withHeaders(message(), 16, 64, 1024)
+        .setCollapseKey("k".repeat(256)).build(), Code.CODE_OK));
+    c.add(new Case("V14 17 headers", "V14", withHeaders(message(), 17, 8, 8).build(), Code.CODE_INVALID));
+    c.add(new Case("V14 header name of 65 bytes", "V14", withHeaders(message(), 1, 65, 8).build(), Code.CODE_INVALID));
+    c.add(new Case("V14 header value of 1025 bytes", "V14", withHeaders(message(), 1, 8, 1025).build(),
+        Code.CODE_INVALID));
+    c.add(new Case("V14 collapse key of 257 bytes", "V14", message().setCollapseKey("k".repeat(257)).build(),
+        Code.CODE_INVALID));
     return List.copyOf(c);
   }
 }

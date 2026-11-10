@@ -149,6 +149,29 @@ class GrpcServerLifecycleIT {
     assertThat(completed.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();  // onCompleted, not an error
   }
 
+  /** A stream that reaches the service while stop() is already running must still be ended at once. */
+  @Test
+  void stopEndsAStreamThatArrivesDuringShutdown() throws Exception {
+    for (int i = 0; i < 15; i++) {
+      start(true, null, null);
+      channel = NettyChannelBuilder.forAddress("127.0.0.1", server.port()).usePlaintext().build();
+      Metadata h = new Metadata();
+      h.put(PushVersionInterceptor.HEADER, "1");
+      StreamObserver<PushBatch> out = PushStreamGrpc.newStub(channel)
+          .withInterceptors(MetadataUtils.newAttachHeadersInterceptor(h)).stream(new StreamObserver<>() {
+            @Override public void onNext(DeliveryAck v) { }
+            @Override public void onError(Throwable t) { }
+            @Override public void onCompleted() { }
+          });
+      out.onNext(PushBatch.getDefaultInstance());
+      Thread.sleep(i % 5);  // the call lands around service.completeAll()
+      long t0 = System.nanoTime();
+      server.stop();
+      assertThat(Duration.ofNanos(System.nanoTime() - t0)).as("round " + i).isLessThan(Duration.ofSeconds(2));
+      channel.shutdownNow();
+    }
+  }
+
   @Test
   void routerKeepalivePingsEvery10sAreAllowed() throws Exception {
     start(true, null, null);

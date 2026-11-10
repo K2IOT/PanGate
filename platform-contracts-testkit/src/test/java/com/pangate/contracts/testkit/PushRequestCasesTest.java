@@ -18,7 +18,7 @@ class PushRequestCasesTest {
   @Test
   void everyRuleHasAPassingAndAFailingCase() {
     var byRule = PushRequestCases.all().stream().collect(groupingBy(PushRequestCases.Case::rule));
-    for (String r : List.of("V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V10", "V11")) {
+    for (String r : List.of("V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V10", "V11", "V12", "V13", "V14")) {
       assertThat(byRule.get(r)).as(r).isNotNull().anyMatch(c -> c.expected() == Code.CODE_OK)
           .anyMatch(c -> c.expected() == Code.CODE_INVALID);
     }

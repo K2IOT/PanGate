@@ -44,7 +44,7 @@ message Frame {
   map<string, string> headers = 8; // traceparent, content-type, type (UPSTREAM)
   uint32 flags = 9;               // bit0 = zstd-compressed payload
   string topic = 10;              // broadcasts only
-  uint64 topic_seq = 11;          // RELIABLE broadcasts to topics > 256 members
+  uint64 topic_seq = 11;          // RELIABLE / ORDERED broadcasts (push contracts spec §1.1, decision C3)
 }
 
 message Hello {

@@ -20,9 +20,10 @@
       <artifactId>platform-contracts</artifactId>
     </dependency>
     <dependency>
-      <!-- Only PangateHeaders; no Spring comes along -->
+      <!-- Test only: PushHeadersTest pins PushHeaders.write to the starter's PangateHeaders.write -->
       <groupId>com.pangate</groupId>
       <artifactId>platform-spring-starter</artifactId>
+      <scope>test</scope>
       <exclusions>
         <exclusion>
           <groupId>*</groupId>
