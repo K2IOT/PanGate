@@ -3,13 +3,12 @@ package com.pangate.auth.application.port;
 import com.pangate.auth.domain.Revocation;
 import java.time.Instant;
 import java.util.List;
-import java.util.Set;
 
 /** {@code auth.revocations}. */
 public interface RevocationStore {
 
-  /** jtis of revocations of kind {@code jti} that have not expired. */
-  Set<String> activeJtis();
+  /** True if an unexpired revocation of kind {@code jti} exists for {@code jti} (indexed lookup). */
+  boolean isJtiRevoked(String jti);
 
   /** Inserts, or extends the row with the same control key (same id, new expiry). Runs inside a transaction. */
   Revocation upsert(Revocation r);

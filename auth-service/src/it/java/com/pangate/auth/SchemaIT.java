@@ -21,6 +21,9 @@ class SchemaIT {
     var tables = jdbc.sql("SELECT table_name FROM information_schema.tables WHERE table_schema = 'auth'")
         .query(String.class).list();
     assertThat(tables).contains("tenants", "clients", "signing_keys", "revocations", "outbox");
+    var indexes = jdbc.sql("SELECT indexdef FROM pg_indexes WHERE schemaname = 'auth' AND tablename = 'revocations'")
+        .query(String.class).list();
+    assertThat(indexes).anySatisfy(d -> assertThat(d).contains("(control_key)"));
 
     assertThatThrownBy(() -> jdbc.sql("INSERT INTO auth.tenants (id, status) VALUES ('__warmup', 'active')").update())
         .isInstanceOf(DataIntegrityViolationException.class).hasMessageContaining("check");

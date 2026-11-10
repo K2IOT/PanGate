@@ -16,6 +16,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.ApplicationContext;
 
 @AuthIT
+@org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
 class AdminApiIT {
 
   @Autowired ApplicationContext ctx;
@@ -116,5 +117,20 @@ class AdminApiIT {
     Http.Res r = Http.postJson(admin.port(), "/admin/v1/tenants", adminToken, "{not json");
     assertThat(r.status()).isEqualTo(400);
     assertThat(r.body()).contains("malformed_request");
+  }
+
+  @Test
+  void deniedCallsAre403BeforeTheBodyIsJudgedAndAreAudited(
+      org.springframework.boot.test.system.CapturedOutput out) {
+    var registry = ctx.getBean(io.micrometer.core.instrument.MeterRegistry.class);
+    String customer = Tokens.api(ctx, "t1-backend", "t1", Set.of(Scope.TOKENS_MINT));
+    Http.Res r = Http.postJson(admin.port(), "/admin/v1/tenants/t1/clients", customer,
+        "{\"name\":\"x\",\"scopes\":[\"bogus\"]}");
+    assertThat(r.status()).isEqualTo(403);
+    var denied = registry.find("auth.admin.actions").tag("action", "client.create").tag("result", "denied").counter();
+    assertThat(denied).isNotNull();
+    assertThat(denied.count()).isGreaterThanOrEqualTo(1);
+    assertThat(out.getAll()).contains("admin_action=client.create").contains("actor=t1-backend")
+        .contains("result=denied");
   }
 }

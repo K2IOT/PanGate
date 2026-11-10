@@ -17,6 +17,8 @@ import java.util.Optional;
  */
 public final class RotateSigningKeys {
 
+  private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(RotateSigningKeys.class);
+
   static final Duration RENEW_BEFORE_EXPIRY = Duration.ofDays(1);
 
   private final SigningKeyStore store;
@@ -32,7 +34,8 @@ public final class RotateSigningKeys {
   /** @return true if anything changed */
   public boolean runOnce() {
     Instant now = clock.now();
-    List<SigningKey> keys = store.all();
+    SigningKeyStore.Snapshot snapshot = store.load();
+    List<SigningKey> keys = snapshot.usable();
     boolean changed = false;
     Optional<SigningKey> active = first(keys, KeyState.ACTIVE);
     Optional<SigningKey> pending = first(keys, KeyState.PENDING);
@@ -44,7 +47,15 @@ public final class RotateSigningKeys {
       pending = Optional.empty();
       changed = true;
     } else if (active.isEmpty()) {
-      // First run, or the active key cannot be decrypted: a signing key is needed now (spec §3 rule 1, §6).
+      Optional<SigningKeyStore.PublishedKey> unreadable = snapshot.published().stream()
+          .filter(p -> p.state() == KeyState.ACTIVE).findFirst();
+      if (unreadable.isPresent() && !kekProvenHere(snapshot, unreadable.get())) {
+        // This pod lacks the KEK (or holds wrong bytes): other pods may sign with this key. Do not replace it.
+        log.error("active signing key {} cannot be decrypted with KEK {} on this pod; leaving it to pods that can",
+            unreadable.get().kid(), unreadable.get().kekId());
+        return false;
+      }
+      // First run, or the active key is corrupt although its KEK opens other keys: a signing key is needed now.
       store.retireActive(now, now.plus(cfg.overlap()));
       SigningKey k = Es256TokenSigner.newKey(now, KeyState.ACTIVE);
       store.insert(k);
@@ -65,6 +76,12 @@ public final class RotateSigningKeys {
       }
     }
     return changed;
+  }
+
+  /** The KEK of {@code k} demonstrably works here: another row sealed with the same KEK decrypts on this pod. */
+  private static boolean kekProvenHere(SigningKeyStore.Snapshot s, SigningKeyStore.PublishedKey k) {
+    return s.published().stream().anyMatch(p -> p.decryptable() && !p.kid().equals(k.kid())
+        && p.kekId().equals(k.kekId()));
   }
 
   /** Publishes a new pending key now (key compromise, Admin {@code /keys:rotate-now}); false if one exists. */

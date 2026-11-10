@@ -26,15 +26,15 @@ public class ApiAuthFilter extends OncePerRequestFilter {
   private final KeyRing keys;
   private final Clock clock;
   private final Supplier<Set<String>> disabledClients;
-  private final Supplier<Set<String>> revokedJtis;
+  private final java.util.function.Predicate<String> revokedJti;
 
   public ApiAuthFilter(TokenSigner signer, KeyRing keys, Clock clock, Supplier<Set<String>> disabledClients,
-      Supplier<Set<String>> revokedJtis) {
+      java.util.function.Predicate<String> revokedJti) {
     this.signer = signer;
     this.keys = keys;
     this.clock = clock;
     this.disabledClients = disabledClients;
-    this.revokedJtis = revokedJtis;
+    this.revokedJti = revokedJti;
   }
 
   @Override
@@ -44,7 +44,7 @@ public class ApiAuthFilter extends OncePerRequestFilter {
     Optional<ApiClaims> claims = h != null && h.regionMatches(true, 0, "Bearer ", 0, 7)
         ? signer.verifyApi(h.substring(7).trim(), keys::publicKey, clock.now()) : Optional.empty();
     if (claims.isEmpty() || disabledClients.get().contains(claims.get().clientId())
-        || revokedJtis.get().contains(claims.get().jti())) {
+        || revokedJti.test(claims.get().jti())) {
       res.setHeader(HttpHeaders.WWW_AUTHENTICATE, "Bearer error=\"invalid_token\"");
       Problems.write(res, 401, "invalid_token", "missing, invalid, expired or revoked access token");
       return;

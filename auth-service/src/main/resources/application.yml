@@ -38,6 +38,10 @@ auth:
 # (auth.admin-port). PortRoutingFilter keeps each path on its port (spec §1).
 server:
   port: 8090
+  # Behind the API ingress the client address comes from X-Forwarded-For, trusted only from internal proxies
+  # (server.tomcat.remoteip.internal-proxies, default: private and loopback ranges). The failed-auth IP block of
+  # /oauth2/token depends on it (spec §7); set internal-proxies to the ingress range in each environment.
+  forward-headers-strategy: native
   shutdown: graceful
   max-http-request-header-size: 16KB
 

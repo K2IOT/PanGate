@@ -33,26 +33,41 @@ public class JdbcSigningKeyStore implements SigningKeyStore {
   }
 
   private record Row(String kid, byte[] sealed, String kekId, String state, Timestamp activateAt, Timestamp retireAt,
-      Timestamp removeAt) {}
+      Timestamp removeAt, String publicJwk) {}
 
   @Override
   public List<SigningKey> all() {
-    List<Row> rows = jdbc.sql("SELECT kid, private_key_enc, kek_id, state, activate_at, retire_at, remove_at"
-        + " FROM auth.signing_keys ORDER BY activate_at").query((rs, i) -> new Row(rs.getString(1), rs.getBytes(2),
-        rs.getString(3), rs.getString(4), rs.getTimestamp(5), rs.getTimestamp(6), rs.getTimestamp(7))).list();
-    List<SigningKey> out = new ArrayList<>(rows.size());
+    return load().usable();
+  }
+
+  /** Every row is published from its public_jwk; only the rows this pod can decrypt are usable for signing. */
+  @Override
+  public Snapshot load() {
+    List<Row> rows = jdbc.sql("SELECT kid, private_key_enc, kek_id, state, activate_at, retire_at, remove_at,"
+        + " public_jwk::text FROM auth.signing_keys ORDER BY activate_at").query((rs, i) -> new Row(rs.getString(1),
+        rs.getBytes(2), rs.getString(3), rs.getString(4), rs.getTimestamp(5), rs.getTimestamp(6), rs.getTimestamp(7),
+        rs.getString(8))).list();
+    List<SigningKey> usable = new ArrayList<>(rows.size());
+    List<PublishedKey> published = new ArrayList<>(rows.size());
     for (Row r : rows) {
+      KeyState state = KeyState.fromDb(r.state);
+      boolean ok = false;
       try {
         ECKey jwk = ECKey.parse(new String(cipher.decrypt(r.kekId, r.kid, r.sealed), StandardCharsets.UTF_8));
-        out.add(new SigningKey(r.kid, jwk, KeyState.fromDb(r.state), instant(r.activateAt), instant(r.retireAt),
-            instant(r.removeAt)));
+        usable.add(new SigningKey(r.kid, jwk, state, instant(r.activateAt), instant(r.retireAt), instant(r.removeAt)));
+        ok = true;
       } catch (Exception e) {
         undecryptable.increment();
-        log.error("signing key {} (KEK {}) cannot be decrypted and is not used: {}", r.kid, r.kekId,
+        log.error("signing key {} (KEK {}) cannot be decrypted here and is not used for signing: {}", r.kid, r.kekId,
             e.getClass().getSimpleName());
       }
+      try {
+        published.add(new PublishedKey(r.kid, state, ECKey.parse(r.publicJwk), r.kekId, ok));
+      } catch (java.text.ParseException e) {
+        log.error("signing key {} has an unreadable public_jwk and is not published", r.kid);
+      }
     }
-    return out;
+    return new Snapshot(usable, published);
   }
 
   @Override

@@ -74,8 +74,8 @@ public class WebConfig {
   }
 
   @Bean
-  TtlCache<Set<String>> revokedJtisCache(RevocationStore revocations) {
-    return new TtlCache<>(revocations::activeJtis, AUTH_CACHE_TTL, Set.of(), System::nanoTime);
+  JtiRevocationCache jtiRevocationCache(RevocationStore revocations) {
+    return new JtiRevocationCache(revocations::isJtiRevoked, AUTH_CACHE_TTL, 100_000, System::nanoTime);
   }
 
   @Bean
@@ -125,9 +125,9 @@ public class WebConfig {
 
   @Bean
   FilterRegistrationBean<ApiAuthFilter> apiAuthFilter(TokenSigner signer, KeyRing keys, Clock clock,
-      TtlCache<Set<String>> disabledClientsCache, TtlCache<Set<String>> revokedJtisCache) {
+      TtlCache<Set<String>> disabledClientsCache, JtiRevocationCache jtiRevocationCache) {
     var r = new FilterRegistrationBean<>(new ApiAuthFilter(signer, keys, clock, disabledClientsCache,
-        revokedJtisCache));
+        jtiRevocationCache::isRevoked));
     r.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
     r.addUrlPatterns("/v1/*", "/admin/v1/*");
     return r;

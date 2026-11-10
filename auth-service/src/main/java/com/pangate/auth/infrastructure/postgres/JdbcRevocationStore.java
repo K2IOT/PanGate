@@ -5,10 +5,8 @@ import com.pangate.auth.domain.Revocation;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 public class JdbcRevocationStore implements RevocationStore {
@@ -20,9 +18,9 @@ public class JdbcRevocationStore implements RevocationStore {
   }
 
   @Override
-  public Set<String> activeJtis() {
-    return new HashSet<>(jdbc.sql("SELECT substr(control_key, 10) FROM auth.revocations"
-        + " WHERE kind = 'jti' AND expires_at > now()").query(String.class).list());
+  public boolean isJtiRevoked(String jti) {
+    return Boolean.TRUE.equals(jdbc.sql("SELECT EXISTS (SELECT 1 FROM auth.revocations WHERE control_key = :k"
+        + " AND expires_at > now())").param("k", "revoke:j:" + jti).query(Boolean.class).single());
   }
 
   /** Serialised per control key with a transaction-scoped advisory lock (control_key has no unique index). */

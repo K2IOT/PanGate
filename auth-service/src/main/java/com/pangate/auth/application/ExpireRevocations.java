@@ -30,16 +30,28 @@ public final class ExpireRevocations {
     this.topic = topic;
   }
 
-  /** @return how many revocations were tombstoned */
+  static final long BUDGET_NANOS = java.time.Duration.ofSeconds(20).toNanos();
+
+  /**
+   * Batches of {@value #BATCH}, one transaction each, until the backlog is drained or the pass has run for 20 s, so
+   * expiry keeps up with the revocation intake (spec §7: 100/s per client). @return revocations tombstoned
+   */
   public int runOnce() {
-    int[] n = {0};
-    tx.inTx(() -> {
-      for (Revocation r : store.expired(clock.now(), BATCH)) {
-        outbox.append(topic, r.controlKey(), null, r.tenantId());
-        store.delete(r.id());
-        n[0]++;
-      }
-    });
-    return n[0];
+    long start = System.nanoTime();
+    int total = 0;
+    int batch;
+    do {
+      int[] n = {0};
+      tx.inTx(() -> {
+        for (Revocation r : store.expired(clock.now(), BATCH)) {
+          outbox.append(topic, r.controlKey(), null, r.tenantId());
+          store.delete(r.id());
+          n[0]++;
+        }
+      });
+      batch = n[0];
+      total += batch;
+    } while (batch == BATCH && System.nanoTime() - start < BUDGET_NANOS);
+    return total;
   }
 }

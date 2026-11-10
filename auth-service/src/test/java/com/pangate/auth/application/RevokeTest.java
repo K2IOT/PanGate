@@ -26,8 +26,8 @@ class RevokeTest {
     final AtomicLong ids = new AtomicLong();
 
     @Override
-    public Set<String> activeJtis() {
-      return Set.of();
+    public boolean isJtiRevoked(String jti) {
+      return byKey.containsKey("revoke:j:" + jti);
     }
 
     @Override
@@ -126,5 +126,15 @@ class RevokeTest {
     assertThat(store.byKey).isEmpty();
     assertThat(outbox.rows.getLast().key()).isEqualTo("revoke:j:abc");
     assertThat(outbox.rows.getLast().payload()).isNull();
+  }
+
+  @Test
+  void expiryDrainsMoreThanOneBatchPerPass() {
+    for (int i = 0; i < 1_200; i++) {
+      revoke.jti(t1, "j" + i);
+    }
+    now.set(now.get().plus(Duration.ofHours(25)));
+    assertThat(new ExpireRevocations(store, outbox, Runnable::run, now::get).runOnce()).isEqualTo(1_200);
+    assertThat(store.byKey).isEmpty();
   }
 }

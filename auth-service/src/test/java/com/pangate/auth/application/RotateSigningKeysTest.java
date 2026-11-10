@@ -83,15 +83,22 @@ class RotateSigningKeysTest {
     assertThat(store.rows).doesNotContainKey(first).hasSize(1);
   }
 
-  @Test
-  void undecryptableActiveKeyIsReplacedAtOnce() {
-    rotate.runOnce();
-    // the store hides rows it cannot decrypt: simulate by flipping the only active key out of view
-    SigningKey hidden = store.in(KeyState.ACTIVE).getFirst();
-    InMemorySigningKeyStore view = new InMemorySigningKeyStore() {
+  /** A view of {@link #store} in which this pod cannot decrypt {@code hidden} (other pods may). */
+  private InMemorySigningKeyStore viewWithout(SigningKey hidden, boolean otherRowsWithSameKekDecrypt) {
+    return new InMemorySigningKeyStore() {
+      @Override
+      public Snapshot load() {
+        var usable = store.all().stream().filter(k -> !k.kid().equals(hidden.kid())).toList();
+        var published = store.all().stream().map(k -> new PublishedKey(k.kid(), k.state(),
+            k.privateJwk().toPublicJWK(), "v1", !k.kid().equals(hidden.kid()))).toList();
+        return new Snapshot(otherRowsWithSameKekDecrypt ? usable : java.util.List.of(), published.stream()
+            .map(p -> p.kid().equals(hidden.kid()) || otherRowsWithSameKekDecrypt ? p
+                : new PublishedKey(p.kid(), p.state(), p.publicJwk(), p.kekId(), false)).toList());
+      }
+
       @Override
       public java.util.List<SigningKey> all() {
-        return store.all().stream().filter(k -> !k.kid().equals(hidden.kid())).toList();
+        return load().usable();
       }
 
       @Override
@@ -100,13 +107,39 @@ class RotateSigningKeysTest {
       }
 
       @Override
+      public void update(SigningKey k) {
+        store.update(k);
+      }
+
+      @Override
       public int retireActive(Instant retireAt, Instant removeAt) {
         return store.retireActive(retireAt, removeAt);
       }
     };
-    assertThat(new RotateSigningKeys(view, now::get, KEYS).runOnce()).isTrue();
-    assertThat(store.in(KeyState.ACTIVE)).singleElement().extracting(SigningKey::kid).isNotEqualTo(hidden.kid());
-    assertThat(store.rows.get(hidden.kid()).state()).isEqualTo(KeyState.RETIRED);
+  }
+
+  private SigningKey rotatedTwice() {
+    rotate.runOnce();
+    at(Duration.ofDays(29));
+    rotate.runOnce();
+    at(Duration.ofDays(29).plusHours(1));
+    rotate.runOnce();  // first key retired, second active
+    return store.in(KeyState.ACTIVE).getFirst();
+  }
+
+  @Test
+  void corruptActiveKeyIsReplacedWhenTheSameKekOpensOtherKeys() {
+    SigningKey active = rotatedTwice();
+    assertThat(new RotateSigningKeys(viewWithout(active, true), now::get, KEYS).runOnce()).isTrue();
+    assertThat(store.in(KeyState.ACTIVE)).singleElement().extracting(SigningKey::kid).isNotEqualTo(active.kid());
+    assertThat(store.rows.get(active.kid()).state()).isEqualTo(KeyState.RETIRED);
+  }
+
+  @Test
+  void activeKeyThisPodCannotReadIsLeftAloneWhenItsKekIsUnproven() {
+    SigningKey active = rotatedTwice();
+    assertThat(new RotateSigningKeys(viewWithout(active, false), now::get, KEYS).runOnce()).isFalse();
+    assertThat(store.in(KeyState.ACTIVE)).singleElement().extracting(SigningKey::kid).isEqualTo(active.kid());
   }
 
   @Test

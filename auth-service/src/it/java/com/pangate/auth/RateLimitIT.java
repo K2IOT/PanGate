@@ -82,4 +82,20 @@ class RateLimitIT {
   void prometheusIsNotOnThePublicPort() {
     assertThat(Http.get(port, "/actuator/prometheus", null).status()).isEqualTo(404);
   }
+
+  @Test
+  void behindTheIngressEachClientAddressIsBlockedOnItsOwn() {
+    var c = client();
+    for (int i = 0; i < 21; i++) {
+      tokenFrom("203.0.113.7", "t1-nobody-" + i, "bad");
+    }
+    assertThat(tokenFrom("203.0.113.7", c.clientId(), c.plainSecret()).status()).isEqualTo(429);
+    assertThat(tokenFrom("203.0.113.8", c.clientId(), c.plainSecret()).status()).isEqualTo(200);
+  }
+
+  private Http.Res tokenFrom(String clientAddress, String id, String secret) {
+    String basic = Base64.getEncoder().encodeToString((id + ":" + secret).getBytes(StandardCharsets.UTF_8));
+    return Http.send("POST", port, "/oauth2/token", null, "application/x-www-form-urlencoded",
+        "grant_type=client_credentials", Map.of("Authorization", "Basic " + basic, "X-Forwarded-For", clientAddress));
+  }
 }

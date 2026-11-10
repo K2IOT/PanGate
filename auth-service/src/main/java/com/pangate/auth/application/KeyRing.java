@@ -9,8 +9,6 @@ import java.security.interfaces.ECPublicKey;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,10 +20,11 @@ public final class KeyRing {
 
   private static final Logger log = LoggerFactory.getLogger(KeyRing.class);
 
-  private record Snapshot(SigningKey active, Map<String, SigningKey> byKid, String jwks) {}
+  private record Snapshot(SigningKey active, Map<String, ECPublicKey> byKid, Map<String, KeyState> states,
+      String jwks) {}
 
   private final SigningKeyStore store;
-  private volatile Snapshot snap = new Snapshot(null, Map.of(), "{\"keys\":[]}");
+  private volatile Snapshot snap = new Snapshot(null, Map.of(), Map.of(), "{\"keys\":[]}");
 
   public KeyRing(SigningKeyStore store) {
     this.store = store;
@@ -33,18 +32,27 @@ public final class KeyRing {
 
   /** Re-reads the store; on failure keeps serving the previous keys. */
   public void reload() {
-    List<SigningKey> keys;
+    SigningKeyStore.Snapshot s;
     try {
-      keys = store.all();
+      s = store.load();
     } catch (RuntimeException e) {
       log.warn("signing keys not reloaded, serving the cached set: {}", e.toString());
       return;
     }
-    SigningKey active = keys.stream().filter(k -> k.state() == KeyState.ACTIVE).findFirst().orElse(null);
-    Map<String, SigningKey> byKid = keys.stream().collect(Collectors.toUnmodifiableMap(SigningKey::kid,
-        Function.identity()));
-    List<JWK> pub = keys.stream().map(k -> (JWK) k.privateJwk().toPublicJWK()).toList();
-    snap = new Snapshot(active, byKid, new JWKSet(pub).toString());
+    SigningKey active = s.usable().stream().filter(k -> k.state() == KeyState.ACTIVE).findFirst().orElse(null);
+    Map<String, ECPublicKey> byKid = new java.util.HashMap<>();
+    Map<String, KeyState> states = new java.util.HashMap<>();
+    List<JWK> pub = new java.util.ArrayList<>();
+    for (SigningKeyStore.PublishedKey k : s.published()) {
+      try {
+        byKid.put(k.kid(), k.publicJwk().toECPublicKey());
+        states.put(k.kid(), k.state());
+        pub.add(k.publicJwk().toPublicJWK());
+      } catch (com.nimbusds.jose.JOSEException e) {
+        log.error("signing key {} has an invalid public key and is not published", k.kid());
+      }
+    }
+    snap = new Snapshot(active, Map.copyOf(byKid), Map.copyOf(states), new JWKSet(pub).toString());
   }
 
   /** @throws NoSigningKeyException if no key can sign */
@@ -60,9 +68,9 @@ public final class KeyRing {
     return snap.active != null;
   }
 
+  /** Every published key, including keys this pod cannot decrypt (spec §3). */
   public Optional<ECPublicKey> publicKey(String kid) {
-    SigningKey k = snap.byKid.get(kid);
-    return k == null ? Optional.empty() : Optional.of(k.publicKey());
+    return Optional.ofNullable(snap.byKid.get(kid));
   }
 
   public String jwksJson() {
@@ -70,7 +78,7 @@ public final class KeyRing {
   }
 
   public long count(com.pangate.auth.domain.KeyState state) {
-    return snap.byKid.values().stream().filter(k -> k.state() == state).count();
+    return snap.states.values().stream().filter(s -> s == state).count();
   }
 
   public int size() {

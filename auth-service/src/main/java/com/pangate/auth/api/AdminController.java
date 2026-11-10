@@ -65,20 +65,30 @@ public class AdminController {
     this.metrics = metrics;
   }
 
+  /** Authorises, runs and audits one Admin command; denied attempts are audited too (spec §4.5). */
   private <T> T act(HttpServletRequest req, String action, String target, Supplier<T> body) {
-    Caller p = ApiPrincipal.of(req).require(Scope.ADMIN);
+    Caller p = ApiPrincipal.of(req);
     try {
-      T out = body.get();
-      audit.atInfo().addKeyValue("admin_action", action).addKeyValue("actor", p.clientId())
-          .addKeyValue("target", target).addKeyValue("result", "ok").log("admin action");
-      metrics.admin(action, "ok");
-      return out;
+      p.require(Scope.ADMIN);
     } catch (RuntimeException e) {
-      audit.atInfo().addKeyValue("admin_action", action).addKeyValue("actor", p.clientId())
-          .addKeyValue("target", target).addKeyValue("result", "error").log("admin action failed");
-      metrics.admin(action, "error");
+      audit(action, p.clientId(), target, "denied");
       throw e;
     }
+    try {
+      T out = body.get();
+      audit(action, p.clientId(), target, "ok");
+      return out;
+    } catch (RuntimeException e) {
+      audit(action, p.clientId(), target, "error");
+      throw e;
+    }
+  }
+
+  private void audit(String action, String actor, String target, String result) {
+    audit.atInfo().addKeyValue("admin_action", action).addKeyValue("actor", actor).addKeyValue("target", target)
+        .addKeyValue("result", result).log("admin_action={} actor={} target={} result={}", action, actor, target,
+            result);
+    metrics.admin(action, result);
   }
 
   @PostMapping("/tenants")
@@ -110,13 +120,15 @@ public class AdminController {
   @PostMapping("/tenants/{t}/clients")
   ResponseEntity<Map<String, Object>> createClient(HttpServletRequest req, @PathVariable String t,
       @RequestBody ClientBody b) {
-    Set<Scope> scopes = EnumSet.noneOf(Scope.class);
-    if (b.scopes() != null) {
-      b.scopes().forEach(s -> scopes.add(Scope.of(s)));
-    }
-    var created = act(req, "client.create", t + "-" + b.name(), () -> clients.create(t, b.name(), scopes));
+    var created = act(req, "client.create", t + "-" + b.name(), () -> {
+      Set<Scope> scopes = EnumSet.noneOf(Scope.class);
+      if (b.scopes() != null) {
+        b.scopes().forEach(s -> scopes.add(Scope.of(s)));
+      }
+      return clients.create(t, b.name(), scopes);
+    });
     return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("clientId", created.clientId(), "secret",
-        created.plainSecret(), "scopes", scopes.stream().map(Scope::value).toList()));
+        created.plainSecret(), "scopes", created.scopes().stream().sorted().map(Scope::value).toList()));
   }
 
   @GetMapping("/tenants/{t}/clients")
@@ -139,7 +151,7 @@ public class AdminController {
 
   @PostMapping("/clients/{id}:disable")
   ClientView disableClient(HttpServletRequest req, @PathVariable String id) {
-    String actor = ApiPrincipal.of(req).clientId();
+    String actor = ApiPrincipal.of(req).clientId();  // the identity only; act() authorises
     return act(req, "client.disable", id, () -> {
       clients.disable(actor, id);
       disabledClients.invalidate();  // this pod rejects the client's tokens at once; others within 10 s
