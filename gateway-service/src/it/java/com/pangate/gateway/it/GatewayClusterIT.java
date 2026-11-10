@@ -212,7 +212,7 @@ class GatewayClusterIT {
 
       await().atMost(T).until(() -> redis.hget("reg:{" + p + "}", connId) != null);
       assertThat(redis.hget("reg:{" + p + "}", connId)).startsWith(gw.nodeId() + "|" + gw.epoch() + "|")
-          .endsWith("|iot");
+          .endsWith("|iot|d1");  // registry value v2: platform then device (push contracts spec §4)
     }
 
     await().atMost(T).until(() -> !redis.hexists("reg:{" + p + "}", connId));
