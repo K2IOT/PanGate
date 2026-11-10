@@ -83,4 +83,24 @@ class RegistryLookupTest {
         Duration.ofMillis(200), mono::get);
     assertThatThrownBy(() -> lookup.live("t1:u1")).isInstanceOf(RegistryUnavailableException.class);
   }
+
+  /** Final review #2: without a fresh node directory every entry would look dead; that must be transient. */
+  @Test
+  void staleDirectoryIsATransientFailure() {
+    reg.put("t1:u1", Map.of("C1", "a|3|1|ios|d1"));
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> lookup().live("t1:u1"))
+        .isInstanceOf(RegistryUnavailableException.class);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> lookup().sessions("t1:u1"))
+        .isInstanceOf(RegistryUnavailableException.class);
+  }
+
+  /** Final review #7: CONTROL reaches sessions on draining nodes too (they are still connected). */
+  @Test
+  void sessionsIncludeDrainingNodes() {
+    nodes.put("a", new Node("a", 3, "h:1", false));
+    nodes.put("d", new Node("d", 1, "h:2", true));
+    dir.refresh();
+    reg.put("t1:u1", Map.of("C1", "a|3|1|ios|d1", "C2", "a|2|1|ios|d2", "C3", "d|1|1|ios|d3"));
+    assertThat(lookup().sessions("t1:u1")).extracting(LiveConnection::connId).containsExactlyInAnyOrder("C1", "C3");
+  }
 }

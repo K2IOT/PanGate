@@ -55,6 +55,15 @@ public final class NodeDirectory {
     return snapshot;
   }
 
+  /** The snapshot, or a transient failure when it is stale: a blind router must not decide outcomes (spec §4). */
+  public Map<String, Node> requireFresh() {
+    if (!fresh()) {
+      throw new com.pangate.router.registry.RegistryUnavailableException("-",
+          new IllegalStateException("node directory not refreshed for more than " + staleAfterMs + " ms"));
+    }
+    return snapshot;
+  }
+
   public Optional<Node> node(String id) {
     return Optional.ofNullable(snapshot.get(id));
   }

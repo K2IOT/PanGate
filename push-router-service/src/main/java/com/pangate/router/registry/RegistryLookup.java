@@ -41,6 +41,20 @@ public final class RegistryLookup implements Connections {
 
   @Override
   public List<LiveConnection> live(String principal) {
+    return entries(principal, false);
+  }
+
+  @Override
+  public List<LiveConnection> sessions(String principal) {
+    return entries(principal, true);
+  }
+
+  private List<LiveConnection> entries(String principal, boolean includeDraining) {
+    if (!dir.fresh()) {
+      // without a fresh directory every entry would look dead and live principals would go offline
+      throw new RegistryUnavailableException(Integer.toHexString(principal.hashCode()),
+          new IllegalStateException("node directory stale"));
+    }
     long now = monoMs.getAsLong();
     Cached c = cache.get(principal);
     if (c == null || now - c.atMono() > cacheMs) {
@@ -62,7 +76,7 @@ public final class RegistryLookup implements Connections {
     List<LiveConnection> out = new ArrayList<>();
     c.raw().forEach((connId, value) -> parse(connId, value).ifPresent(l -> {
       Optional<Node> n = dir.node(l.nodeId());
-      if (n.isPresent() && n.get().epoch() == l.epoch() && !n.get().draining()) {
+      if (n.isPresent() && n.get().epoch() == l.epoch() && (includeDraining || !n.get().draining())) {
         out.add(l);
       }
     }));

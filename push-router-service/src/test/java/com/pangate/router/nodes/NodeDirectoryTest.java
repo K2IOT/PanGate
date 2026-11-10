@@ -55,4 +55,13 @@ class NodeDirectoryTest {
     assertThat(dir.node("a").orElseThrow().draining()).isTrue();
     assertThat(seen).containsExactly("[]->[a]");
   }
+
+  /** Final review #2: BROADCAST must not "deliver" to no nodes while the directory is blind. */
+  @Test
+  void requireFreshThrowsWhenStale() {
+    org.assertj.core.api.Assertions.assertThatThrownBy(dir::requireFresh)
+        .isInstanceOf(com.pangate.router.registry.RegistryUnavailableException.class);
+    dir.refresh();
+    assertThat(dir.requireFresh()).isEqualTo(dir.live());
+  }
 }

@@ -41,7 +41,12 @@ class DeliveryJobTest {
       return rounds.isEmpty() ? List.of() : rounds.get(Math.min(liveCalls++, rounds.size() - 1));
     }
     @Override public void invalidate(String p) { invalidated.add(p); }
+    @Override public List<LiveConnection> sessions(String p) {
+      invalidated.add("sessions:" + p);
+      return sessionsAnswer;
+    }
   };
+  List<LiveConnection> sessionsAnswer = List.of();
   BiFunction<String, PushItem, CompletableFuture<Status>> answer = (n, i) -> done(Status.STATUS_ACKED);
   final List<String> sent = new ArrayList<>();                    // "node/kind/conn"
   final Links links = (node, item) -> {
@@ -239,7 +244,7 @@ class DeliveryJobTest {
   }
 
   @Test void controlGoesOncePerNodeHoldingThePrincipal() {
-    rounds.add(List.of(conn("C1", "n1"), conn("C2", "n1"), conn("C3", "n2")));
+    sessionsAnswer = List.of(conn("C1", "n1"), conn("C2", "n1"), conn("C3", "n2"));
     PushRecord c = Fixtures.control("t1:u1", Fixtures.subscribe("t1:news"));
     assertThat(job().run(c)).isEqualTo(DeliveryResult.DELIVERED);
     assertThat(sent).containsExactlyInAnyOrder("n1/KIND_CONTROL/", "n2/KIND_CONTROL/");
@@ -284,5 +289,59 @@ class DeliveryJobTest {
     assertThat(t.isAlive()).isFalse();
     assertThat(thrown.get()).isNotNull();
     assertThat(outcomes).isEmpty();
+  }
+
+  /** Final review #1: a timed-out wait cancels the future so the link frees the item. */
+  @Test
+  void timedOutFuturesAreCancelled() {
+    rounds.add(List.of(conn("C1", "n1")));
+    List<CompletableFuture<Status>> handed = new ArrayList<>();
+    answer = (n, i) -> {
+      CompletableFuture<Status> f = new CompletableFuture<>();
+      handed.add(f);
+      return f;
+    };
+    job().run(msg());
+    assertThat(handed).hasSize(3).allMatch(CompletableFuture::isCancelled);
+  }
+
+  /** Final review #3: an interrupt (shutdown) never ends in an outcome, even after an already completed NACK. */
+  @Test
+  void interruptedBeforeTheOutcomeWritesNothing() throws Exception {
+    rounds.add(List.of(conn("C1", "n1")));
+    answer = (n, i) -> done(Status.STATUS_NACK_CLOSED);
+    java.util.concurrent.atomic.AtomicReference<Throwable> thrown = new java.util.concurrent.atomic.AtomicReference<>();
+    Thread t = Thread.ofVirtual().start(() -> {
+      Thread.currentThread().interrupt();
+      try {
+        job().run(msg());
+      } catch (Throwable e) {
+        thrown.set(e);
+      }
+    });
+    t.join(5_000);
+    assertThat(thrown.get()).isInstanceOf(IllegalStateException.class);
+    assertThat(outcomes).isEmpty();
+  }
+
+  /** Final review #6: OVERFLOW / SHED / SLOW_CONSUMER connections are not retried (contracts §1.1a). */
+  @Test
+  void retryRoundsSkipConnectionsThatFailedWithoutRetry() {
+    rounds.add(List.of(conn("C1", "n1"), conn("C2", "n2")));
+    answer = (n, i) -> done(i.getConnId().equals("C1") ? Status.STATUS_NACK_OVERFLOW : Status.STATUS_NACK_CLOSED);
+    assertThat(job().run(msg())).isEqualTo(DeliveryResult.OFFLINE);
+    assertThat(sent).containsExactly("n1/KIND_MESSAGE/C1", "n2/KIND_MESSAGE/C2", "n2/KIND_MESSAGE/C2",
+        "n2/KIND_MESSAGE/C2");
+    assertThat(outcomes).containsExactly("offline REASON_CLOSED 4");
+  }
+
+  /** Final review #7: KICK reads the registry fresh and includes draining nodes. */
+  @Test
+  void controlReadsFreshSessionsIncludingDrainingNodes() {
+    sessionsAnswer = List.of(conn("C1", "n1"), conn("C9", "nd"));
+    PushRecord c = Fixtures.control("t1:u1", Fixtures.kick("C1", 1));
+    assertThat(job().run(c)).isEqualTo(DeliveryResult.DELIVERED);
+    assertThat(invalidated).containsExactly("t1:u1", "sessions:t1:u1");
+    assertThat(sent).containsExactlyInAnyOrder("n1/KIND_CONTROL/", "nd/KIND_CONTROL/");
   }
 }

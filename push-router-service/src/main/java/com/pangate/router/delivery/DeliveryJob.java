@@ -49,12 +49,20 @@ public final class DeliveryJob {
   }
 
   public DeliveryResult run(PushRecord r) {
-    return switch (r.getKind()) {
+    DeliveryResult result = switch (r.getKind()) {
       case KIND_MESSAGE -> message(r);
       case KIND_BROADCAST -> broadcast(r);
       case KIND_CONTROL -> control(r);
       default -> DeliveryResult.DROPPED;
     };
+    checkInterrupted();   // a record finished while shutting down is still left for the next owner
+    return result;
+  }
+
+  private static void checkInterrupted() {
+    if (Thread.currentThread().isInterrupted()) {
+      throw new IllegalStateException("interrupted: record left unfinished");
+    }
   }
 
   static boolean sequenced(PushRecord r) {
@@ -78,13 +86,15 @@ public final class DeliveryJob {
     }
     int attempts = 0;
     Reason last = Reason.REASON_NO_SESSION;
+    java.util.Set<String> failedFinally = new java.util.HashSet<>();   // OVERFLOW / SHED / SLOW_CONSUMER: no retry
     for (int round = 0; round <= retries.size(); round++) {
       if (round > 0) {
         pause(retries.get(round - 1));
         conns.invalidate(principal);
       }
       List<LiveConnection> targets = conns.live(principal).stream()
-          .filter(c -> deviceId.isEmpty() || deviceId.equals(c.device().filter(d -> !d.isEmpty()))).toList();
+          .filter(c -> deviceId.isEmpty() || deviceId.equals(c.device().filter(d -> !d.isEmpty())))
+          .filter(c -> !failedFinally.contains(c.connId())).toList();
       if (targets.isEmpty()) {
         if (last != Reason.REASON_NODE_GONE) {
           last = Reason.REASON_NO_SESSION;
@@ -107,6 +117,7 @@ public final class DeliveryJob {
           case STATUS_ACKED, STATUS_WRITTEN -> {
             delivered = true;
             if (r.getReceipt() && seq) {
+              checkInterrupted();
               recorder.delivered(r, c, s);
             }
           }
@@ -120,9 +131,18 @@ public final class DeliveryJob {
               roundReason = nodeLive(c.nodeId()) ? Reason.REASON_CLOSED : Reason.REASON_NODE_GONE;
             }
           }
-          case STATUS_NACK_OVERFLOW -> roundReason = orKeep(roundReason, Reason.REASON_OVERFLOW);
-          case STATUS_NACK_SLOW_CONSUMER -> roundReason = orKeep(roundReason, Reason.REASON_SLOW_CONSUMER);
-          case STATUS_NACK_SHED -> roundReason = orKeep(roundReason, Reason.REASON_SHED);
+          case STATUS_NACK_OVERFLOW -> {
+            failedFinally.add(c.connId());
+            roundReason = orKeep(roundReason, Reason.REASON_OVERFLOW);
+          }
+          case STATUS_NACK_SLOW_CONSUMER -> {
+            failedFinally.add(c.connId());
+            roundReason = orKeep(roundReason, Reason.REASON_SLOW_CONSUMER);
+          }
+          case STATUS_NACK_SHED -> {
+            failedFinally.add(c.connId());
+            roundReason = orKeep(roundReason, Reason.REASON_SHED);
+          }
           default -> roundReason = orKeep(roundReason, Reason.REASON_CLOSED);
         }
       }
@@ -145,6 +165,7 @@ public final class DeliveryJob {
   }
 
   private DeliveryResult finish(PushRecord r, boolean seq, Reason reason, int attempts) {
+    checkInterrupted();
     if (!seq) {
       return DeliveryResult.DROPPED;
     }
@@ -177,8 +198,10 @@ public final class DeliveryJob {
   }
 
   private DeliveryResult control(PushRecord r) {
+    // KICK decides single-session correctness: read the registry fresh, and reach draining nodes too (spec §2)
     Set<String> nodes = new LinkedHashSet<>();
-    conns.live(r.getPrincipalId()).forEach(c -> nodes.add(c.nodeId()));
+    conns.invalidate(r.getPrincipalId());
+    conns.sessions(r.getPrincipalId()).forEach(c -> nodes.add(c.nodeId()));
     if (nodes.isEmpty()) {
       return DeliveryResult.DROPPED;
     }
@@ -211,6 +234,7 @@ public final class DeliveryJob {
     try {
       return f.get(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
     } catch (TimeoutException e) {
+      f.cancel(false);   // the link frees the item and its permit (final review #1)
       return Status.STATUS_NACK_TIMEOUT;
     } catch (InterruptedException e) {
       throw interrupted(e);

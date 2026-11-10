@@ -124,7 +124,9 @@ public class RouterConfig {
   }
 
   static ManagedChannel channel(Node n, RouterProperties.Grpc grpc) {
-    NettyChannelBuilder b = NettyChannelBuilder.forTarget(n.address());
+    // keepalive finds a half-open connection in ~15 s (spec §3.3); the gateway permits pings every 10 s
+    NettyChannelBuilder b = NettyChannelBuilder.forTarget(n.address()).keepAliveTime(10, TimeUnit.SECONDS)
+        .keepAliveTimeout(5, TimeUnit.SECONDS);
     if (grpc.plaintext()) {
       b.usePlaintext();
     } else {
@@ -159,7 +161,7 @@ public class RouterConfig {
         kafka.delivered(r, c, s);
       }
     };
-    DeliveryJob job = new DeliveryJob(lookup, links, () -> dir.live().values(), recorder, System::currentTimeMillis,
+    DeliveryJob job = new DeliveryJob(lookup, links, () -> dir.requireFresh().values(), recorder, System::currentTimeMillis,
         p.ackTimeout(), p.retries(), d -> Thread.sleep(d));
     return new RouterConsumer(job::run, metrics, p.cell() + ".push.requests", System::currentTimeMillis);
   }

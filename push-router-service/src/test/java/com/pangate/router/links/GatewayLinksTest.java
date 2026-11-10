@@ -182,4 +182,52 @@ class GatewayLinksTest {
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> links.send("nope", ephemeral()))
         .isInstanceOf(NodeUnavailableException.class);
   }
+
+  /** Final review #1: an item whose caller gave up (cancel on ack-timeout) must give its permit back. */
+  @Test
+  void abandonedItemsGiveTheirPermitBack() throws Exception {
+    CompletableFuture<AckItem.Status> a = links.send("n1", reliable());
+    CompletableFuture<AckItem.Status> b = links.send("n1", reliable());
+    a.cancel(false);
+    b.cancel(false);
+    CompletableFuture<AckItem.Status> c = CompletableFuture.supplyAsync(() -> links.send("n1", reliable()).join(),
+        r -> Thread.ofVirtual().start(r));
+    await().atMost(Duration.ofSeconds(2)).until(() -> items() == 3);   // the third send was not blocked
+    long id = batches.stream().flatMap(x -> x.getItemsList().stream()).mapToLong(PushItem::getDeliveryId).max()
+        .orElseThrow();
+    toRouter.get().onNext(DeliveryAck.newBuilder()
+        .addAcks(AckItem.newBuilder().setDeliveryId(id).setStatus(AckItem.Status.STATUS_ACKED)).build());
+    assertThat(c.get(5, TimeUnit.SECONDS)).isEqualTo(AckItem.Status.STATUS_ACKED);
+  }
+
+  /** Final review #3: an interrupt while blocked on back-pressure must not look like a gateway answer. */
+  @Test
+  void interruptWhileBlockedThrowsInsteadOfNackClosed() throws Exception {
+    links.send("n1", reliable());
+    links.send("n1", reliable());
+    AtomicReference<Throwable> thrown = new AtomicReference<>();
+    Thread t = Thread.ofVirtual().start(() -> {
+      try {
+        links.send("n1", reliable());
+      } catch (Throwable e) {
+        thrown.set(e);
+      }
+    });
+    await().atMost(Duration.ofSeconds(2)).until(() -> t.getState() == Thread.State.WAITING);
+    t.interrupt();
+    t.join(2_000);
+    assertThat(thrown.get()).isInstanceOf(IllegalStateException.class);
+  }
+
+  /** Final review #5: items that need no ACK are bounded too while they wait for the stream. */
+  @Test
+  void queuedItemsAreBoundedByMaxInFlight() throws Exception {
+    var slow = new GatewayLinks(dir, n -> InProcessChannelBuilder.forName(n.address()).directExecutor().build(), 256,
+        Duration.ofSeconds(1), 2);
+    slow.send("n1", ephemeral());
+    slow.send("n1", ephemeral());
+    assertThat(slow.send("n1", ephemeral()).get(500, TimeUnit.MILLISECONDS))
+        .isEqualTo(AckItem.Status.STATUS_NACK_OVERFLOW);
+    slow.close();
+  }
 }

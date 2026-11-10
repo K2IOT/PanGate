@@ -10,4 +10,7 @@ public interface Connections {
   List<LiveConnection> live(String principal);
 
   void invalidate(String principal);
+
+  /** Every session of {@code principal} on a live node at its current epoch, draining nodes included (CONTROL). */
+  List<LiveConnection> sessions(String principal);
 }

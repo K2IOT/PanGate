@@ -26,6 +26,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import org.slf4j.Logger;
@@ -115,9 +116,13 @@ public final class GatewayLinks implements Links, AutoCloseable {
     final Node node;
     final AtomicBoolean closed = new AtomicBoolean();
     final ConcurrentLinkedQueue<Pending> queue = new ConcurrentLinkedQueue<>();
+    /** Items in {@link #queue}: an O(1) size, and the bound for items that take no permit. */
+    final AtomicInteger queued = new AtomicInteger();
     final Map<Long, Pending> awaiting = new ConcurrentHashMap<>();
     final Semaphore permits = new Semaphore(maxInFlight);
     final AtomicBoolean flushScheduled = new AtomicBoolean();
+    /** A flush found the stream not ready; the on-ready handler owes one. */
+    final AtomicBoolean deferred = new AtomicBoolean();
     volatile ClientCallStreamObserver<PushBatch> out;
 
     Link(Node node, ManagedChannel channel) {
@@ -130,6 +135,11 @@ public final class GatewayLinks implements Links, AutoCloseable {
     @Override
     public void beforeStart(ClientCallStreamObserver<PushBatch> requestStream) {
       out = requestStream;
+      requestStream.setOnReadyHandler(() -> {
+        if (deferred.compareAndSet(true, false)) {
+          flusher.execute(this::flush);
+        }
+      });
     }
 
     CompletableFuture<AckItem.Status> send(PushItem item) {
@@ -138,21 +148,34 @@ public final class GatewayLinks implements Links, AutoCloseable {
         try {
           permits.acquire();  // backpressure: blocks the (virtual) worker thread
         } catch (InterruptedException e) {
+          // shutdown, not a gateway answer: the record must stay unfinished (spec §4)
           Thread.currentThread().interrupt();
-          return CompletableFuture.completedFuture(AckItem.Status.STATUS_NACK_CLOSED);
+          throw new IllegalStateException("interrupted waiting for a permit to " + node.id(), e);
         }
+      } else if (queued.get() >= maxInFlight) {
+        return CompletableFuture.completedFuture(AckItem.Status.STATUS_NACK_OVERFLOW);
       }
       CompletableFuture<AckItem.Status> f = new CompletableFuture<>();
       Pending p = new Pending(item, f, ack);
       if (closed.get()) {
-        finish(p, AckItem.Status.STATUS_NACK_CLOSED);
+        if (ack) {
+          permits.release();
+        }
+        f.complete(AckItem.Status.STATUS_NACK_CLOSED);
         return f;
       }
       if (ack) {
-        awaiting.put(item.getDeliveryId(), p);
+        long id = item.getDeliveryId();
+        awaiting.put(id, p);
+        // whoever removes the entry releases the permit: an ACK, the stream closing, or the caller giving up
+        f.whenComplete((s, e) -> {
+          if (awaiting.remove(id, p)) {
+            permits.release();
+          }
+        });
       }
       queue.add(p);
-      if (queue.size() >= batchMax) {
+      if (queued.incrementAndGet() >= batchMax) {
         flusher.execute(this::flush);
       } else if (flushScheduled.compareAndSet(false, true)) {
         flusher.schedule(this::flush, lingerNanos, TimeUnit.NANOSECONDS);
@@ -170,8 +193,9 @@ public final class GatewayLinks implements Links, AutoCloseable {
         return;
       }
       if (!o.isReady()) {
-        if (flushScheduled.compareAndSet(false, true)) {
-          flusher.schedule(this::flush, 1, TimeUnit.MILLISECONDS);
+        deferred.set(true);   // the on-ready handler flushes again
+        if (o.isReady() && deferred.compareAndSet(true, false)) {
+          flusher.execute(this::flush);   // became ready in between
         }
         return;
       }
@@ -179,6 +203,7 @@ public final class GatewayLinks implements Links, AutoCloseable {
         List<Pending> batch = new ArrayList<>(batchMax);
         Pending p;
         while (batch.size() < batchMax && (p = queue.poll()) != null) {
+          queued.decrementAndGet();
           batch.add(p);
         }
         if (batch.isEmpty()) {
@@ -237,20 +262,24 @@ public final class GatewayLinks implements Links, AutoCloseable {
     void drainClosed() {
       Pending p;
       while ((p = queue.poll()) != null) {
+        queued.decrementAndGet();
         finish(p, AckItem.Status.STATUS_NACK_CLOSED);
       }
       for (Long id : List.copyOf(awaiting.keySet())) {
         Pending a = awaiting.remove(id);
         if (a != null) {
-          finish(a, AckItem.Status.STATUS_NACK_CLOSED);
+          permits.release();
+          a.future().complete(AckItem.Status.STATUS_NACK_CLOSED);
         }
       }
     }
 
+    /** Completes {@code p}; an ACK item gives its permit back if its awaiting entry was still there. */
     private void finish(Pending p, AckItem.Status s) {
-      if (p.future().complete(s) && p.awaitsAck()) {
+      if (p.awaitsAck() && awaiting.remove(p.item().getDeliveryId(), p)) {
         permits.release();
       }
+      p.future().complete(s);
     }
   }
 }
