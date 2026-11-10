@@ -67,4 +67,13 @@ class PushContractNumbersTest {
     assertThat(ConnectionEvent.getDescriptor().findFieldByName("event_id").getNumber()).isEqualTo(13);
     assertThat(EventType.EVENT_TYPE_NODE_DOWN.getNumber()).isEqualTo(5);
   }
+
+  /** Push API rates (push-api spec §4.1), additive to the gateway's TenantLimits. */
+  @Test
+  void tenantLimitsPushFields() {
+    assertNumbers(TenantLimits.getDescriptor(), Map.ofEntries(entry("max_conns", 1), entry("inbound_rate", 2),
+        entry("inbound_burst", 3), entry("topics_per_conn", 4), entry("min_sdk_version", 5),
+        entry("origin_allowlist", 6), entry("single_session", 7), entry("push_rate", 8), entry("push_burst", 9),
+        entry("broadcast_rate", 10)));
+  }
 }

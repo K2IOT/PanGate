@@ -77,6 +77,9 @@ message TenantLimits {
   optional string min_sdk_version = 5;
   repeated string origin_allowlist = 6;  // empty = does not override (an empty effective list allows every origin)
   optional bool single_session = 7;
+  optional uint32 push_rate = 8;       // Push API: MESSAGE records/s per Push API pod (push-api spec §4.1); gateway ignores
+  optional uint32 push_burst = 9;      // Push API: MESSAGE bucket size per pod
+  optional uint32 broadcast_rate = 10; // Push API: BROADCAST records/s per pod (burst = rate)
 }
 
 message KillSwitches {
