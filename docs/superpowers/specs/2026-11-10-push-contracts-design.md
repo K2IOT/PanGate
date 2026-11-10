@@ -1,7 +1,7 @@
 # Contracts cho đường push — Design Spec
 
 - **Ngày:** 2026-11-10
-- **Trạng thái:** Draft, chờ duyệt
+- **Trạng thái:** Đã hiện thực (milestone C1, plan `docs/superpowers/plans/2026-11-10-push-contracts-c1.md`, 2026-11-10). Số đo: `make verify` xanh (contracts 15, testkit 24 + 6 IT trên Kafka thật, gateway 580 + 97 IT, auth 79 + 39 IT); `buf lint` / `buf breaking` xanh; devenv tạo `c1.push.requests` 64 / `offline` 16 / `delivered` 16 partition; `make smoke` xanh (push → ack 473 ms, revoke → 4003 598 ms)
 - **Nguồn kiến trúc:** *Netty Gateway — 10M Active Connections* (gọi tắt là "tài liệu gốc"); số mục trong ngoặc, ví dụ (§3.5), là mục của tài liệu gốc. "Spec gateway" là `docs/superpowers/specs/2026-11-03-gateway-service-design.md`; "spec auth" là `docs/superpowers/specs/2026-11-05-auth-service-design.md`.
 - **Vị trí trong lộ trình:** sub-project 2/4 sau `0.1.0`: (1) `auth-service` (xong, A1), **(2) contracts cho đường push**, (3) `push-router-service`, (4) `push-api-service`.
 
