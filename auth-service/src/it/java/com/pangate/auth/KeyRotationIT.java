@@ -78,7 +78,9 @@ class KeyRotationIT {
 
     void pass(Duration sinceStart, Instant start) {
       now.set(start.plus(sinceStart));
-      lock.runExclusive("auth.rotate-keys", rotate::runOnce);
+      // the pod's own scheduled pass may hold the lock for a moment: retry until this pass really ran
+      await().atMost(Duration.ofSeconds(10)).pollInterval(Duration.ofMillis(50))
+          .until(() -> lock.runExclusive("auth.rotate-keys", rotate::runOnce));
       ring.reload();
     }
   }
