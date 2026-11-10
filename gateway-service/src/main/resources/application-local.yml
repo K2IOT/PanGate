@@ -11,7 +11,7 @@ gateway:
   # R3: SIGTERM → exit in ≤ 15 s even with clients connected (spec §9.1)
   drain: { interval: 1s, max-duration: 5s, listener-close-delay: 0s }
   shed: { cpu: false }
-  grpc: { plaintext: true }
+  grpc: { plaintext: true, advertise-host: 127.0.0.1 }
   push-api: { enabled: false }
   node-id: gateway-local
   cell: cell-1

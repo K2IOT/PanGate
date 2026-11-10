@@ -57,6 +57,7 @@ gateway:
   shed: { cpu: true }
   grpc:
     port: 9090
+    advertise-host: ${HOSTNAME:localhost}   # node:addr:{id} for push routers (push-router spec §3.1)
     plaintext: false
     allowed-spiffe: [spiffe://pangate/cell-1/push-router]
     tls:
