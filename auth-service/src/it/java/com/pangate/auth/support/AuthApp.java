@@ -14,7 +14,7 @@ public final class AuthApp {
   public static ConfigurableApplicationContext start(String jdbcUrl, String... extra) {
     var pg = Containers.postgres();
     List<String> props = new ArrayList<>(List.of(
-        "server.port=0", "management.server.port=0",
+        "server.port=0", "auth.admin-port=0",
         "spring.datasource.url=" + jdbcUrl,
         "spring.datasource.username=" + pg.getUsername(),
         "spring.datasource.password=" + pg.getPassword(),
@@ -28,7 +28,7 @@ public final class AuthApp {
     return Integer.parseInt(ctx.getEnvironment().getProperty("local.server.port"));
   }
 
-  public static int managementPort(ConfigurableApplicationContext ctx) {
-    return Integer.parseInt(ctx.getEnvironment().getProperty("local.management.port"));
+  public static int adminPort(ConfigurableApplicationContext ctx) {
+    return ctx.getBean(com.pangate.auth.config.AdminConnector.class).port();
   }
 }

@@ -8,9 +8,9 @@ import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-class ClaimLimitsTest {
+public class ClaimLimitsTest {
 
-  static DomainException assertCode(Runnable r, String code) {
+  public static DomainException assertCode(Runnable r, String code) {
     DomainException e = catchThrowableOfType(DomainException.class, r::run);
     assertThat(e).as("expected " + code).isNotNull();
     assertThat(e.code()).isEqualTo(code);

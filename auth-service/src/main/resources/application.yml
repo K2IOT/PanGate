@@ -30,17 +30,17 @@ auth:
   keys: { lifetime: 30d, overlap: 7d, publish-ahead: 1h, kek-id: v1, cache-refresh: 60s, rotate-interval: 1h }
   outbox: { interval: 200ms, batch: 500, keep-sent: 7d }
   kafka: { control-topic: gw.control, bootstrap-servers: "kafka:9092" }
+  admin-port: 8081
   seed: { enabled: false }
 
-# Public API on :8090; actuator, /ready, /live and /admin/v1 on the management port :8081 (spec §1).
+# Public API on :8090 (server.port); actuator, /ready, /live and /admin/v1 on a second connector :8081
+# (auth.admin-port). PortRoutingFilter keeps each path on its port (spec §1).
 server:
   port: 8090
   shutdown: graceful
   max-http-request-header-size: 16KB
 
 management:
-  server:
-    port: 8081
   endpoints:
     web:
       exposure:
@@ -52,8 +52,8 @@ management:
       group:
         readiness:
           include: readinessState,db
-          additional-path: "management:/ready"
+          additional-path: "server:/ready"
           show-details: always
         liveness:
           include: livenessState
-          additional-path: "management:/live"
+          additional-path: "server:/live"

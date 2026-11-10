@@ -11,6 +11,6 @@ import org.springframework.test.context.ContextConfiguration;
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = {"management.server.port=0"})
+    properties = {"auth.admin-port=0"})
 @ContextConfiguration(initializers = ContainersInitializer.class)
 public @interface AuthIT {}
