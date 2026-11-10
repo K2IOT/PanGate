@@ -339,9 +339,21 @@ class DeliveryJobTest {
   @Test
   void controlReadsFreshSessionsIncludingDrainingNodes() {
     sessionsAnswer = List.of(conn("C1", "n1"), conn("C9", "nd"));
-    PushRecord c = Fixtures.control("t1:u1", Fixtures.kick("C1", 1));
+    PushRecord c = Fixtures.control("t1:u1", Fixtures.subscribe("t1:news"));
     assertThat(job().run(c)).isEqualTo(DeliveryResult.DELIVERED);
     assertThat(invalidated).containsExactly("t1:u1", "sessions:t1:u1");
     assertThat(sent).containsExactlyInAnyOrder("n1/KIND_CONTROL/", "nd/KIND_CONTROL/");
+  }
+
+  /**
+   * Single-session KICK: the registry already holds only the new entry (the gateway replaced the old one), so KICK
+   * cannot be routed by entry; it goes to every live node, draining ones too (push-api P1, PushApiIT).
+   */
+  @Test
+  void kickGoesToEveryLiveNodeIncludingDraining() {
+    sessionsAnswer = List.of(conn("NEW", "n2"));
+    PushRecord c = Fixtures.control("t1:u1", Fixtures.kick("NEW", 1));
+    assertThat(job().run(c)).isEqualTo(DeliveryResult.DELIVERED);
+    assertThat(sent).containsExactlyInAnyOrder("n1/KIND_CONTROL/", "n2/KIND_CONTROL/", "nd/KIND_CONTROL/");
   }
 }

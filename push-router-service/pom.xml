@@ -110,14 +110,13 @@
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
+        <!-- plugin level: inside the execution the classifier is ignored and the plain jar is replaced -->
+        <configuration><classifier>exec</classifier></configuration>
         <executions>
           <execution>
             <goals>
               <goal>repackage</goal>
             </goals>
-            <configuration>
-              <classifier>exec</classifier>
-            </configuration>
           </execution>
         </executions>
       </plugin>

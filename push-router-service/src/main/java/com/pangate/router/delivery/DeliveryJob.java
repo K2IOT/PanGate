@@ -198,10 +198,17 @@ public final class DeliveryJob {
   }
 
   private DeliveryResult control(PushRecord r) {
-    // KICK decides single-session correctness: read the registry fresh, and reach draining nodes too (spec §2)
     Set<String> nodes = new LinkedHashSet<>();
-    conns.invalidate(r.getPrincipalId());
-    conns.sessions(r.getPrincipalId()).forEach(c -> nodes.add(c.nodeId()));
+    if (r.getControl().hasKick()) {
+      // single-session KICK: the gateway already replaced the old entry with the new one in reg:{p}, so the node
+      // holding the older session is not in the registry any more; every live node (draining too) gets the KICK and
+      // closes only sessions older than new_conn_id
+      liveNodes.get().forEach(n -> nodes.add(n.id()));
+    } else {
+      // read the registry fresh, and reach draining nodes too (spec §2)
+      conns.invalidate(r.getPrincipalId());
+      conns.sessions(r.getPrincipalId()).forEach(c -> nodes.add(c.nodeId()));
+    }
     if (nodes.isEmpty()) {
       return DeliveryResult.DROPPED;
     }
