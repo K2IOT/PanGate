@@ -25,11 +25,17 @@ public final class TtlCache<T> implements Supplier<T> {
     this.loadedAt = nanos.getAsLong() - ttlNanos - 1;
   }
 
+  private final java.util.concurrent.locks.ReentrantLock reload = new java.util.concurrent.locks.ReentrantLock();
+
+  /**
+   * One caller reloads a stale value; the others keep getting the previous value meanwhile instead of queueing
+   * behind the database (and no monitor is held during I/O, so virtual threads are never pinned).
+   */
   @Override
   public T get() {
     long now = nanos.getAsLong();
-    if (now - loadedAt > ttlNanos) {
-      synchronized (this) {
+    if (now - loadedAt > ttlNanos && reload.tryLock()) {
+      try {
         if (now - loadedAt > ttlNanos) {
           try {
             value = loader.get();
@@ -38,6 +44,8 @@ public final class TtlCache<T> implements Supplier<T> {
           }
           loadedAt = now;
         }
+      } finally {
+        reload.unlock();
       }
     }
     return value;

@@ -52,8 +52,9 @@ public class WebConfig {
   }
 
   @Bean
-  ManageClients manageClients(ClientStore clients, TenantStore tenants, SecretHasher hasher, Revoke revoke) {
-    return new ManageClients(clients, tenants, hasher, revoke);
+  ManageClients manageClients(ClientStore clients, TenantStore tenants, SecretHasher hasher, Revoke revoke,
+      com.pangate.auth.application.port.Transactions tx) {
+    return new ManageClients(clients, tenants, hasher, revoke, tx);
   }
 
   @Bean

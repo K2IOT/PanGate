@@ -1,11 +1,11 @@
 package com.pangate.auth.application;
 
 import com.pangate.auth.application.port.Clock;
+import com.pangate.auth.application.port.KeyFactory;
 import com.pangate.auth.application.port.SigningKeyStore;
-import com.pangate.auth.config.AuthProperties;
+import com.pangate.auth.domain.KeyPolicy;
 import com.pangate.auth.domain.KeyState;
 import com.pangate.auth.domain.SigningKey;
-import com.pangate.auth.infrastructure.crypto.Es256TokenSigner;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -23,12 +23,14 @@ public final class RotateSigningKeys {
 
   private final SigningKeyStore store;
   private final Clock clock;
-  private final AuthProperties.Keys cfg;
+  private final KeyPolicy cfg;
+  private final KeyFactory keyFactory;
 
-  public RotateSigningKeys(SigningKeyStore store, Clock clock, AuthProperties.Keys cfg) {
+  public RotateSigningKeys(SigningKeyStore store, Clock clock, KeyPolicy cfg, KeyFactory keys) {
     this.store = store;
     this.clock = clock;
     this.cfg = cfg;
+    this.keyFactory = keys;
   }
 
   /** @return true if anything changed */
@@ -39,12 +41,15 @@ public final class RotateSigningKeys {
     boolean changed = false;
     Optional<SigningKey> active = first(keys, KeyState.ACTIVE);
     Optional<SigningKey> pending = first(keys, KeyState.PENDING);
+    // a pending key this pod cannot decrypt still counts as published-ahead: never publish a second one
+    boolean pendingPublished = snapshot.published().stream().anyMatch(p -> p.state() == KeyState.PENDING);
 
     if (pending.isPresent() && !now.isBefore(pending.get().activateAt())) {
       store.retireActive(now, now.plus(cfg.overlap()));
       store.update(pending.get().withState(KeyState.ACTIVE, null, null));
       active = pending;
       pending = Optional.empty();
+      pendingPublished = false;
       changed = true;
     } else if (active.isEmpty()) {
       Optional<SigningKeyStore.PublishedKey> unreadable = snapshot.published().stream()
@@ -57,19 +62,19 @@ public final class RotateSigningKeys {
       }
       // First run, or the active key is corrupt although its KEK opens other keys: a signing key is needed now.
       store.retireActive(now, now.plus(cfg.overlap()));
-      SigningKey k = Es256TokenSigner.newKey(now, KeyState.ACTIVE);
+      SigningKey k = keyFactory.newKey(now, KeyState.ACTIVE);
       store.insert(k);
       active = Optional.of(k);
       changed = true;
     }
 
     Instant renewAt = active.get().activateAt().plus(cfg.lifetime()).minus(RENEW_BEFORE_EXPIRY);
-    if (pending.isEmpty() && !now.isBefore(renewAt)) {
-      store.insert(Es256TokenSigner.newKey(now.plus(cfg.publishAhead()), KeyState.PENDING));
+    if (!pendingPublished && !now.isBefore(renewAt)) {
+      store.insert(keyFactory.newKey(now.plus(cfg.publishAhead()), KeyState.PENDING));
       changed = true;
     }
 
-    for (SigningKey k : keys) {
+    for (SigningKeyStore.PublishedKey k : snapshot.published()) {  // decryptable or not
       if (k.state() == KeyState.RETIRED && k.removeAt() != null && !now.isBefore(k.removeAt())) {
         store.delete(k.kid());
         changed = true;
@@ -89,7 +94,7 @@ public final class RotateSigningKeys {
     if (first(store.all(), KeyState.PENDING).isPresent()) {
       return false;
     }
-    store.insert(Es256TokenSigner.newKey(clock.now().plus(cfg.publishAhead()), KeyState.PENDING));
+    store.insert(keyFactory.newKey(clock.now().plus(cfg.publishAhead()), KeyState.PENDING));
     return true;
   }
 

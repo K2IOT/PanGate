@@ -72,7 +72,7 @@ public class JobsConfig {
 
   @Bean
   RotateSigningKeys rotateSigningKeys(JdbcSigningKeyStore store, Clock clock, AuthProperties props) {
-    return new RotateSigningKeys(store, clock, props.keys());
+    return new RotateSigningKeys(store, clock, props.keys().policy(), Es256TokenSigner::newKey);
   }
 
   @Bean
@@ -116,7 +116,18 @@ public class JobsConfig {
      * while this pod has no signing key yet (several pods starting on an empty database), waits for it briefly so
      * this pod can sign as soon as it is ready. Never throws.
      */
-    public synchronized void rotate() {
+    private final java.util.concurrent.locks.ReentrantLock passes = new java.util.concurrent.locks.ReentrantLock();
+
+    public void rotate() {
+      passes.lock();  // a ReentrantLock, not synchronized: the pass sleeps and does I/O on a virtual thread
+      try {
+        rotateLocked();
+      } finally {
+        passes.unlock();
+      }
+    }
+
+    private void rotateLocked() {
       for (int attempt = 0; attempt < 25; attempt++) {
         boolean[] changed = {false};
         boolean ran = false;
@@ -142,11 +153,16 @@ public class JobsConfig {
     }
 
     /** Admin {@code /keys:rotate-now}. */
-    public synchronized boolean forcePending() {
-      boolean[] created = {false};
-      lock.runExclusive(ROTATE_LOCK, () -> created[0] = rotate.forcePending());
-      ring.reload();
-      return created[0];
+    public boolean forcePending() {
+      passes.lock();
+      try {
+        boolean[] created = {false};
+        lock.runExclusive(ROTATE_LOCK, () -> created[0] = rotate.forcePending());
+        ring.reload();
+        return created[0];
+      } finally {
+        passes.unlock();
+      }
     }
   }
 }

@@ -41,6 +41,14 @@ Management, `:8081` (`:8082` in profile `local`): `/ready`, `/live`, `/actuator/
 
 Errors other than OAuth2 are `application/problem+json` with a stable `code`.
 
+Input rules worth knowing:
+- Client names are `[a-z0-9_]`, with no `-`, so that `<tenant>-<name>` stays unambiguous.
+- Devices contain no `/`.
+- Credentials are refused in the query string.
+- Bodies over 16 KB get `413`, chunked or not.
+
+Behind an ingress, the failed-auth block of `/oauth2/token` keys on the client address from `X-Forwarded-For`. That header is trusted only from `server.tomcat.remoteip.internal-proxies`, which defaults to private and loopback ranges. Set it to the ingress range in each environment.
+
 ## Seed (local and dev)
 
 On start Auth creates tenant `pangate` with client `pangate-admin` (`admin`), and tenant `t1` with client `t1-backend`

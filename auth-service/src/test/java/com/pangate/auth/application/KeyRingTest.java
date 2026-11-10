@@ -21,8 +21,8 @@ class KeyRingTest {
       @Override
       public Snapshot load() {
         return new Snapshot(List.of(mine), List.of(
-            new PublishedKey(mine.kid(), KeyState.ACTIVE, mine.privateJwk().toPublicJWK(), "v1", true),
-            new PublishedKey(other.kid(), KeyState.RETIRED, other.privateJwk().toPublicJWK(), "v2", false)));
+            new PublishedKey(mine.kid(), KeyState.ACTIVE, mine.privateJwk().toPublicJWK(), "v1", true, null),
+            new PublishedKey(other.kid(), KeyState.RETIRED, other.privateJwk().toPublicJWK(), "v2", false, null)));
       }
     };
     KeyRing ring = new KeyRing(store);

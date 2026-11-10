@@ -71,7 +71,8 @@ class KeyRotationIT {
     Driver(ConfigurableApplicationContext ctx, Instant start) {
       now = new AtomicReference<>(start);
       rotate = new RotateSigningKeys(ctx.getBean(JdbcSigningKeyStore.class), now::get,
-          ctx.getBean(AuthProperties.class).keys());
+          ctx.getBean(AuthProperties.class).keys().policy(),
+          com.pangate.auth.infrastructure.crypto.Es256TokenSigner::newKey);
       lock = ctx.getBean(AdvisoryLock.class);
       ring = ctx.getBean(KeyRing.class);
     }

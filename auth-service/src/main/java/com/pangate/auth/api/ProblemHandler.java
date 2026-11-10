@@ -29,6 +29,11 @@ public class ProblemHandler {
 
   @ExceptionHandler({HttpMessageNotReadableException.class, HttpMediaTypeNotSupportedException.class})
   ResponseEntity<ProblemDetail> malformed(Exception e) {
+    for (Throwable t = e; t != null; t = t.getCause()) {
+      if (t instanceof BodyLimitFilter.BodyTooLargeException) {
+        return ResponseEntity.status(413).body(Problems.of(413, "payload_too_large", "request body exceeds 16 KB"));
+      }
+    }
     return ResponseEntity.badRequest().body(Problems.of(400, "malformed_request", "request body is not valid JSON"));
   }
 

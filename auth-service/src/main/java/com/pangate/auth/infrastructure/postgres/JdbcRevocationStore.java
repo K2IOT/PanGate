@@ -29,14 +29,16 @@ public class JdbcRevocationStore implements RevocationStore {
     jdbc.sql("SELECT pg_advisory_xact_lock(hashtext(:k))").param("k", "auth.revocation:" + r.controlKey())
         .query((rs, i) -> 1).list();
     Timestamp exp = Timestamp.from(r.expiresAt().truncatedTo(ChronoUnit.MICROS));
-    Optional<Long> id = jdbc.sql("UPDATE auth.revocations SET expires_at = GREATEST(expires_at, :e), created_by = :by"
-        + " WHERE control_key = :k RETURNING id").param("e", exp).param("by", r.createdBy())
-        .param("k", r.controlKey()).query(Long.class).optional();
-    long rowId = id.orElseGet(() -> jdbc.sql("INSERT INTO auth.revocations (tenant_id, kind, control_key, expires_at,"
-        + " created_by) VALUES (:t, :kind, :k, :e, :by) RETURNING id").param("t", r.tenantId())
+    // Extending keeps the first actor (created_by) and returns the stored expiry, which is what gets published.
+    org.springframework.jdbc.core.RowMapper<Revocation> row = (rs, i) -> new Revocation(rs.getLong(1), r.tenantId(),
+        r.kind(), r.controlKey(), rs.getTimestamp(2).toInstant(), rs.getString(3));
+    Optional<Revocation> extended = jdbc.sql("UPDATE auth.revocations SET expires_at = GREATEST(expires_at, :e)"
+        + " WHERE control_key = :k RETURNING id, expires_at, created_by").param("e", exp).param("k", r.controlKey())
+        .query(row).optional();
+    return extended.orElseGet(() -> jdbc.sql("INSERT INTO auth.revocations (tenant_id, kind, control_key, expires_at,"
+        + " created_by) VALUES (:t, :kind, :k, :e, :by) RETURNING id, expires_at, created_by").param("t", r.tenantId())
         .param("kind", r.kind().db()).param("k", r.controlKey()).param("e", exp).param("by", r.createdBy())
-        .query(Long.class).single());
-    return new Revocation(rowId, r.tenantId(), r.kind(), r.controlKey(), r.expiresAt(), r.createdBy());
+        .query(row).single());
   }
 
   @Override

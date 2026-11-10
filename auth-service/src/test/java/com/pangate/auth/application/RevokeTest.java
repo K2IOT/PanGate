@@ -137,4 +137,9 @@ class RevokeTest {
     assertThat(new ExpireRevocations(store, outbox, Runnable::run, now::get).runOnce()).isEqualTo(1_200);
     assertThat(store.byKey).isEmpty();
   }
+
+  @Test
+  void deviceRevocationRejectsSlash() {
+    assertCode(() -> revoke.device(t1, "t1:u", "a/b"), "device_invalid");
+  }
 }

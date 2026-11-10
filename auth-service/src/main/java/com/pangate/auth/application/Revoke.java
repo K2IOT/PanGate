@@ -52,8 +52,9 @@ public final class Revoke implements ManageClients.ClientRevoker {
   public Revocation device(Caller caller, String principal, String device) {
     caller.require(Scope.SESSIONS_REVOKE);
     checkPrincipal(caller, principal);
-    if (device == null || device.isEmpty() || bytes(device) > ClaimLimits.DEVICE_MAX) {
-      throw DomainException.badRequest("device_invalid", "device must be 1.." + ClaimLimits.DEVICE_MAX + " bytes");
+    if (!ClaimLimits.validDevice(device)) {
+      throw DomainException.badRequest("device_invalid", "device must be 1.." + ClaimLimits.DEVICE_MAX
+          + " bytes without '/'");
     }
     return write(caller.tenant(), Kind.DEVICE, Revocation.controlKey(Kind.DEVICE, principal, device, null, null),
         caller.clientId());

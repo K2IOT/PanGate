@@ -98,4 +98,18 @@ class RateLimitIT {
     return Http.send("POST", port, "/oauth2/token", null, "application/x-www-form-urlencoded",
         "grant_type=client_credentials", Map.of("Authorization", "Basic " + basic, "X-Forwarded-For", clientAddress));
   }
+
+  @Test
+  void oversizedChunkedBodyIs413() throws Exception {
+    byte[] big = ("{\"principal\":\"t1:u\",\"device\":\"d\",\"pad\":\"" + "x".repeat(17_000) + "\"}")
+        .getBytes(StandardCharsets.UTF_8);
+    var req = java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://127.0.0.1:" + port + "/v1/tokens"))
+        .header("Authorization", "Bearer " + Tokens.api(ctx, "t1-backend", "t1", Set.of(Scope.TOKENS_MINT)))
+        .header("Content-Type", "application/json")
+        .POST(java.net.http.HttpRequest.BodyPublishers.ofInputStream(() -> new java.io.ByteArrayInputStream(big)))
+        .build();  // no Content-Length: chunked
+    var res = java.net.http.HttpClient.newHttpClient().send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+    assertThat(res.statusCode()).isEqualTo(413);
+    assertThat(res.body()).contains("payload_too_large");
+  }
 }

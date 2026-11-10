@@ -26,7 +26,7 @@ class MintConnectTokenTest {
 
   @BeforeEach
   void setUp() {
-    new RotateSigningKeys(keys, () -> now, RotateSigningKeysTest.KEYS).runOnce();
+    new RotateSigningKeys(keys, () -> now, RotateSigningKeysTest.KEYS, Es256TokenSigner::newKey).runOnce();
     ring.reload();
     new ManageTenants(tenants).create("t1");
     new ManageTenants(tenants).create("pangate");

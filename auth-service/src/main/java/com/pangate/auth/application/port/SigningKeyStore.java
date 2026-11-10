@@ -10,7 +10,8 @@ import java.util.List;
 public interface SigningKeyStore {
 
   /** A stored key as published: its public part (column public_jwk) and whether this pod can decrypt it. */
-  record PublishedKey(String kid, KeyState state, ECKey publicJwk, String kekId, boolean decryptable) {}
+  record PublishedKey(String kid, KeyState state, ECKey publicJwk, String kekId, boolean decryptable,
+      java.time.Instant removeAt) {}
 
   /** {@code usable}: keys this pod can sign with; {@code published}: every stored key (spec §3: all are on JWKS). */
   record Snapshot(List<SigningKey> usable, List<PublishedKey> published) {}
@@ -21,7 +22,7 @@ public interface SigningKeyStore {
   default Snapshot load() {
     List<SigningKey> keys = all();
     return new Snapshot(keys, keys.stream().map(k -> new PublishedKey(k.kid(), k.state(), k.privateJwk().toPublicJWK(),
-        "", true)).toList());
+        "", true, k.removeAt())).toList());
   }
 
   void insert(SigningKey k);

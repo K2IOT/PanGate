@@ -101,6 +101,11 @@ public class TokenEndpoint {
 
   /** Exactly one of HTTP Basic (form-urlencoded parts, RFC 6749 §2.3.1) or form parameters. */
   static Credentials credentials(HttpServletRequest req) {
+    String q = req.getQueryString();
+    if (q != null && java.util.regex.Pattern.compile("(^|&)client_(id|secret)=").matcher(q).find()) {
+      // RFC 6749 §2.3.1: never in the URI, where access logs keep them
+      throw new OAuthError("invalid_request", 400, "client credentials must not be sent in the query string");
+    }
     String h = req.getHeader(HttpHeaders.AUTHORIZATION);
     boolean basic = h != null && h.regionMatches(true, 0, "Basic ", 0, 6);
     String formId = req.getParameter("client_id");

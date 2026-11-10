@@ -62,7 +62,7 @@ public class JdbcSigningKeyStore implements SigningKeyStore {
             e.getClass().getSimpleName());
       }
       try {
-        published.add(new PublishedKey(r.kid, state, ECKey.parse(r.publicJwk), r.kekId, ok));
+        published.add(new PublishedKey(r.kid, state, ECKey.parse(r.publicJwk), r.kekId, ok, instant(r.removeAt)));
       } catch (java.text.ParseException e) {
         log.error("signing key {} has an unreadable public_jwk and is not published", r.kid);
       }

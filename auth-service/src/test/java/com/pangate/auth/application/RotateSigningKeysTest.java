@@ -2,7 +2,8 @@ package com.pangate.auth.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.pangate.auth.config.AuthProperties;
+import com.pangate.auth.domain.KeyPolicy;
+import com.pangate.auth.infrastructure.crypto.Es256TokenSigner;
 import com.pangate.auth.domain.KeyState;
 import com.pangate.auth.domain.SigningKey;
 import java.time.Duration;
@@ -13,12 +14,11 @@ import org.junit.jupiter.api.Test;
 class RotateSigningKeysTest {
 
   static final Instant T0 = Instant.parse("2026-11-01T00:00:00Z");
-  static final AuthProperties.Keys KEYS = new AuthProperties.Keys(Duration.ofDays(30), Duration.ofDays(7),
-      Duration.ofHours(1), "v1", Duration.ofSeconds(60), Duration.ofHours(1));
+  static final KeyPolicy KEYS = new KeyPolicy(Duration.ofDays(30), Duration.ofDays(7), Duration.ofHours(1));
 
   private final AtomicReference<Instant> now = new AtomicReference<>(T0);
   private final InMemorySigningKeyStore store = new InMemorySigningKeyStore();
-  private final RotateSigningKeys rotate = new RotateSigningKeys(store, now::get, KEYS);
+  private final RotateSigningKeys rotate = new RotateSigningKeys(store, now::get, KEYS, Es256TokenSigner::newKey);
 
   private void at(Duration sinceT0) {
     now.set(T0.plus(sinceT0));
@@ -90,10 +90,10 @@ class RotateSigningKeysTest {
       public Snapshot load() {
         var usable = store.all().stream().filter(k -> !k.kid().equals(hidden.kid())).toList();
         var published = store.all().stream().map(k -> new PublishedKey(k.kid(), k.state(),
-            k.privateJwk().toPublicJWK(), "v1", !k.kid().equals(hidden.kid()))).toList();
+            k.privateJwk().toPublicJWK(), "v1", !k.kid().equals(hidden.kid()), k.removeAt())).toList();
         return new Snapshot(otherRowsWithSameKekDecrypt ? usable : java.util.List.of(), published.stream()
             .map(p -> p.kid().equals(hidden.kid()) || otherRowsWithSameKekDecrypt ? p
-                : new PublishedKey(p.kid(), p.state(), p.publicJwk(), p.kekId(), false)).toList());
+                : new PublishedKey(p.kid(), p.state(), p.publicJwk(), p.kekId(), false, p.removeAt())).toList());
       }
 
       @Override
@@ -130,7 +130,7 @@ class RotateSigningKeysTest {
   @Test
   void corruptActiveKeyIsReplacedWhenTheSameKekOpensOtherKeys() {
     SigningKey active = rotatedTwice();
-    assertThat(new RotateSigningKeys(viewWithout(active, true), now::get, KEYS).runOnce()).isTrue();
+    assertThat(new RotateSigningKeys(viewWithout(active, true), now::get, KEYS, Es256TokenSigner::newKey).runOnce()).isTrue();
     assertThat(store.in(KeyState.ACTIVE)).singleElement().extracting(SigningKey::kid).isNotEqualTo(active.kid());
     assertThat(store.rows.get(active.kid()).state()).isEqualTo(KeyState.RETIRED);
   }
@@ -138,7 +138,7 @@ class RotateSigningKeysTest {
   @Test
   void activeKeyThisPodCannotReadIsLeftAloneWhenItsKekIsUnproven() {
     SigningKey active = rotatedTwice();
-    assertThat(new RotateSigningKeys(viewWithout(active, false), now::get, KEYS).runOnce()).isFalse();
+    assertThat(new RotateSigningKeys(viewWithout(active, false), now::get, KEYS, Es256TokenSigner::newKey).runOnce()).isFalse();
     assertThat(store.in(KeyState.ACTIVE)).singleElement().extracting(SigningKey::kid).isEqualTo(active.kid());
   }
 
@@ -149,5 +149,33 @@ class RotateSigningKeysTest {
     assertThat(store.in(KeyState.PENDING)).singleElement()
         .extracting(SigningKey::activateAt).isEqualTo(T0.plus(Duration.ofHours(1)));
     assertThat(rotate.forcePending()).isFalse();  // a pending key already exists
+  }
+
+  @Test
+  void undecryptableRetiredKeyIsStillDeletedAfterOverlapAndPendingIsNotDuplicated() {
+    SigningKey active = rotatedTwice();
+    String retired = store.in(KeyState.RETIRED).getFirst().kid();
+    var view = new InMemorySigningKeyStore() {
+      @Override
+      public Snapshot load() {
+        var all = store.all();
+        return new Snapshot(all.stream().filter(k -> !k.kid().equals(retired)).toList(), all.stream()
+            .map(k -> new PublishedKey(k.kid(), k.state(), k.privateJwk().toPublicJWK(), "v1",
+                !k.kid().equals(retired), k.removeAt())).toList());
+      }
+
+      @Override
+      public void delete(String kid) {
+        store.delete(kid);
+      }
+
+      @Override
+      public void insert(SigningKey k) {
+        store.insert(k);
+      }
+    };
+    at(Duration.ofDays(36).plusHours(1));
+    new RotateSigningKeys(view, now::get, KEYS, Es256TokenSigner::newKey).runOnce();
+    assertThat(store.rows).doesNotContainKey(retired).containsKey(active.kid());
   }
 }

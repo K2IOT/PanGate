@@ -62,4 +62,28 @@ class TokenBucketsTest {
     failures.recordFailure("ip");
     assertThat(failures.blockedFor("ip")).isEmpty();
   }
+
+  @Test
+  void aFullTrackerEvictsIdleSourcesButKeepsBlockedOnes() {
+    var failures = new FailedAuthTracker(2, Duration.ofSeconds(60), nanos::get, 10);
+    for (int i = 0; i < 3; i++) {
+      failures.recordFailure("attacker");
+    }
+    assertThat(failures.blockedFor("attacker")).isPresent();
+    for (int i = 0; i < 50; i++) {
+      failures.recordFailure("10.1.0." + i);  // floods the map
+    }
+    assertThat(failures.blockedFor("attacker")).isPresent();
+  }
+
+  @Test
+  void aFullBucketMapKeepsDrainedBuckets() {
+    var b = new TokenBuckets(java.util.Map.of("token", new TokenBuckets.Limit(1, 1)), nanos::get, 10);
+    assertThat(b.tryAcquire("token", "busy")).isEmpty();
+    assertThat(b.tryAcquire("token", "busy")).isPresent();
+    for (int i = 0; i < 50; i++) {
+      b.tryAcquire("token", "k" + i);
+    }
+    assertThat(b.tryAcquire("token", "busy")).isPresent();  // not reset to a full bucket
+  }
 }

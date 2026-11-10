@@ -69,4 +69,34 @@ class ManageClientsTest {
     manage.disable("t1-backend");
     assertThat(clients.disabledIds()).containsExactly("t1-backend");
   }
+
+  @Test
+  void clientNamesCannotContainTheIdSeparator() {
+    manageTenants.create("t1-a");
+    assertCode(() -> manage.create("t1", "a-b", Set.of()), "client_name_invalid");
+    assertThat(manage.create("t1-a", "b", Set.of()).clientId()).isEqualTo("t1-a-b");
+    assertThat(manage.create("t1", "a_b", Set.of()).clientId()).isEqualTo("t1-a_b");
+  }
+
+  @Test
+  void disableAndItsRevocationAreOneTransaction() {
+    manage.create("t1", "backend", Set.of(Scope.TOKENS_MINT));
+    // a transaction that restores the rows when the work throws
+    com.pangate.auth.application.port.Transactions tx = work -> {
+      var before = new java.util.TreeMap<>(clients.rows);
+      try {
+        work.run();
+      } catch (RuntimeException e) {
+        clients.rows.clear();
+        clients.rows.putAll(before);
+        throw e;
+      }
+    };
+    var failing = new ManageClients(clients, tenants, hasher, (actor, id, t) -> {
+      throw new IllegalStateException("db down");
+    }, tx);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> failing.disable("admin", "t1-backend"))
+        .hasMessageContaining("db down");
+    assertThat(clients.rows.get("t1-backend").active()).isTrue();
+  }
 }

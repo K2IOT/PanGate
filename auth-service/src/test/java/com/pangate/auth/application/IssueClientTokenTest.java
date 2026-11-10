@@ -31,7 +31,7 @@ class IssueClientTokenTest {
 
   @BeforeEach
   void setUp() {
-    new RotateSigningKeys(keys, () -> now, RotateSigningKeysTest.KEYS).runOnce();
+    new RotateSigningKeys(keys, () -> now, RotateSigningKeysTest.KEYS, Es256TokenSigner::newKey).runOnce();
     ring.reload();
     new ManageTenants(tenants).create("t1");
     secret = manage.create("t1", "backend", EnumSet.of(Scope.TOKENS_MINT, Scope.PUSH_SEND)).plainSecret();

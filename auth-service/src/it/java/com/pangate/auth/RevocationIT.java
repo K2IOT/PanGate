@@ -178,4 +178,26 @@ class RevocationIT {
       throw new IllegalStateException(e);
     }
   }
+
+  @Test
+  void reRevokeExtendsOneRowKeepsItsCreatorAndPublishesAgain() {
+    var ctx = pod("rev_again");
+    var jdbc = ctx.getBean(org.springframework.jdbc.core.simple.JdbcClient.class);
+    String body = "{\"kind\":\"principal\",\"principal\":\"" + user + "\"}";
+    Http.Res first = revoke(ctx, body);
+    Instant firstExp = Instant.parse(first.body().replaceAll(".*\"expiresAt\":\"([^\"]+)\".*", "$1"));
+    Http.Res second = Http.postJson(AuthApp.port(ctx), "/v1/revocations", Tokens.api(ctx, "t1-other", "t1",
+        Set.of(Scope.SESSIONS_REVOKE)), body);
+    assertThat(second.status()).isEqualTo(202);
+    assertThat(second.body().replaceAll(".*\"id\":([0-9]+).*", "$1"))
+        .isEqualTo(first.body().replaceAll(".*\"id\":([0-9]+).*", "$1"));
+    var row = jdbc.sql("SELECT count(*), max(created_by), max(expires_at) FROM auth.revocations WHERE control_key = :k")
+        .param("k", "revoke:p:" + user).query((rs, i) -> List.of(rs.getString(1), rs.getString(2),
+            rs.getTimestamp(3).toInstant().toString())).single();
+    assertThat(row.get(0)).isEqualTo("1");
+    assertThat(row.get(1)).isEqualTo("t1-backend");  // the first actor is kept
+    assertThat(Instant.parse(row.get(2))).isAfterOrEqualTo(firstExp.truncatedTo(java.time.temporal.ChronoUnit.MILLIS));
+    assertThat(jdbc.sql("SELECT count(*) FROM auth.outbox WHERE record_key = :k").param("k", "revoke:p:" + user)
+        .query(Long.class).single()).isEqualTo(2);
+  }
 }

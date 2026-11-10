@@ -81,4 +81,9 @@ public class ClaimLimitsTest {
     assertThat(assertCode(() -> validate("t1", "t2:u", "d", List.of(), null), "principal_outside_tenant")
         .httpStatus()).isEqualTo(400);
   }
+
+  @Test
+  void deviceCannotContainSlash() {
+    assertCode(() -> validate("t1", "t1:u", "phone/1", List.of(), null), "device_invalid");
+  }
 }

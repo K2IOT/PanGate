@@ -21,19 +21,31 @@ public final class FailedAuthTracker {
   private final long blockNanos;
   private final LongSupplier nanos;
   private final ConcurrentHashMap<String, Window> bySource = new ConcurrentHashMap<>();
+  private final int maxKeys;
 
   public FailedAuthTracker(int perMinute, Duration block, LongSupplier nanos) {
+    this(perMinute, block, nanos, TokenBuckets.MAX_KEYS);
+  }
+
+  public FailedAuthTracker(int perMinute, Duration block, LongSupplier nanos, int maxKeys) {
     this.perMinute = perMinute;
     this.blockNanos = block.toNanos();
     this.nanos = nanos;
+    this.maxKeys = maxKeys;
   }
 
   public void recordFailure(String source) {
-    if (bySource.size() > TokenBuckets.MAX_KEYS) {
-      bySource.clear();
-    }
     long now = nanos.getAsLong();
-    Window w = bySource.computeIfAbsent(source, k -> new Window());
+    Window w = bySource.get(source);
+    if (w == null) {
+      if (bySource.size() >= maxKeys) {
+        evictIdle(now);
+      }
+      if (bySource.size() >= maxKeys) {
+        return;  // full of live sources: never drop a block to make room for a newcomer
+      }
+      w = bySource.computeIfAbsent(source, k -> new Window());
+    }
     synchronized (w) {
       while (!w.failures.isEmpty() && now - w.failures.peekFirst() > MINUTE) {
         w.failures.pollFirst();
@@ -45,6 +57,17 @@ public final class FailedAuthTracker {
         w.failures.clear();
       }
     }
+  }
+
+  /** Drops sources that are not blocked and have no failure within the last minute. */
+  private void evictIdle(long now) {
+    bySource.values().removeIf(w -> {
+      synchronized (w) {
+        boolean blocked = w.blocked && w.blockedUntil - now > 0;
+        boolean recent = !w.failures.isEmpty() && now - w.failures.peekLast() <= MINUTE;
+        return !blocked && !recent;
+      }
+    });
   }
 
   /** @return milliseconds the source stays blocked, or empty */

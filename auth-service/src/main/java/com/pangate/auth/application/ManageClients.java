@@ -3,6 +3,7 @@ package com.pangate.auth.application;
 import com.pangate.auth.application.port.ClientStore;
 import com.pangate.auth.application.port.SecretHasher;
 import com.pangate.auth.application.port.TenantStore;
+import com.pangate.auth.application.port.Transactions;
 import com.pangate.auth.domain.Client;
 import com.pangate.auth.domain.DomainException;
 import com.pangate.auth.domain.Scope;
@@ -15,7 +16,8 @@ import java.util.regex.Pattern;
 /** Admin use cases on API clients (spec §4.5). Secrets are returned once and stored only as hashes. */
 public final class ManageClients {
 
-  static final Pattern NAME = Pattern.compile("^[a-z0-9][a-z0-9_-]{0,62}$");
+  /** No '-': the client id is {@code <tenant>-<name>} and tenant ids may contain '-', so ids stay unambiguous. */
+  static final Pattern NAME = Pattern.compile("^[a-z0-9][a-z0-9_]{0,62}$");
   private static final SecureRandom RANDOM = new SecureRandom();
 
   public record CreatedClient(String clientId, String plainSecret, Set<Scope> scopes) {}
@@ -30,16 +32,19 @@ public final class ManageClients {
   private final TenantStore tenants;
   private final SecretHasher hasher;
   private final ClientRevoker revoker;
+  private final Transactions tx;
 
   public ManageClients(ClientStore clients, TenantStore tenants, SecretHasher hasher) {
-    this(clients, tenants, hasher, (actor, id, tenant) -> { });
+    this(clients, tenants, hasher, (actor, id, tenant) -> { }, Runnable::run);
   }
 
-  public ManageClients(ClientStore clients, TenantStore tenants, SecretHasher hasher, ClientRevoker revoker) {
+  public ManageClients(ClientStore clients, TenantStore tenants, SecretHasher hasher, ClientRevoker revoker,
+      Transactions tx) {
     this.clients = clients;
     this.tenants = tenants;
     this.hasher = hasher;
     this.revoker = revoker;
+    this.tx = tx;
   }
 
   public static String newSecret() {
@@ -110,11 +115,13 @@ public final class ManageClients {
     disable("system", clientId);
   }
 
-  /** {@code status = disabled} and a revocation of kind {@code client}. */
+  /** {@code status = disabled} and a revocation of kind {@code client}, in one transaction. */
   public void disable(String actor, String clientId) {
-    Client c = get(clientId);
-    clients.update(new Client(c.id(), c.tenantId(), c.secretHash(), c.secretHashNext(), c.scopes(), false));
-    revoker.revokeClient(actor, c.id(), c.tenantId());
+    tx.inTx(() -> {
+      Client c = get(clientId);
+      clients.update(new Client(c.id(), c.tenantId(), c.secretHash(), c.secretHashNext(), c.scopes(), false));
+      revoker.revokeClient(actor, c.id(), c.tenantId());
+    });
   }
 
   /** Secret matches the current or the next hash (constant-time comparison inside the hasher). */

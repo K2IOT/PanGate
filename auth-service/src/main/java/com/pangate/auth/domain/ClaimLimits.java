@@ -34,8 +34,8 @@ public final class ClaimLimits {
     if (bytes(principal) > PRINCIPAL_MAX) {
       throw DomainException.badRequest("principal_too_long", "principal exceeds " + PRINCIPAL_MAX + " bytes");
     }
-    if (device == null || device.isEmpty() || bytes(device) > DEVICE_MAX) {
-      throw DomainException.badRequest("device_invalid", "device must be 1.." + DEVICE_MAX + " bytes");
+    if (!validDevice(device)) {
+      throw DomainException.badRequest("device_invalid", "device must be 1.." + DEVICE_MAX + " bytes without '/'");
     }
     List<String> t = topics == null ? List.of() : topics;
     if (t.size() > TOPICS_MAX) {
@@ -54,6 +54,11 @@ public final class ClaimLimits {
       throw DomainException.badRequest("ttl_out_of_range", "ttlSec must be in [" + TTL_MIN + ", " + TTL_MAX + "]");
     }
     return new ConnectTokenRequest(tenant, principal, device, List.copyOf(t), ttl);
+  }
+
+  /** No '/': gw.control device keys are {@code revoke:d:<principal>/<device>}. */
+  public static boolean validDevice(String device) {
+    return device != null && !device.isEmpty() && device.indexOf('/') < 0 && bytes(device) <= DEVICE_MAX;
   }
 
   static int bytes(String s) {

@@ -34,7 +34,7 @@ class ClientCredentialsIT {
   void client() {
     String t = "c" + UUID.randomUUID().toString().substring(0, 8);
     tenants.create(t);
-    var c = clients.create(t, "my-backend", EnumSet.of(Scope.TOKENS_MINT, Scope.SESSIONS_REVOKE));
+    var c = clients.create(t, "my_backend", EnumSet.of(Scope.TOKENS_MINT, Scope.SESSIONS_REVOKE));
     clientId = c.clientId();
     secret = c.plainSecret();
   }
@@ -107,5 +107,13 @@ class ClientCredentialsIT {
     // /v1/tokens does not exist yet; the filter accepts the token and the router answers 404, not 401
     assertThat(Http.postJson(port, "/v1/nothing", access, "{}").status()).isEqualTo(404);
     assertThat(Http.postJson(port, "/v1/nothing", "x", "{}").status()).isEqualTo(401);
+  }
+
+  @Test
+  void credentialsInTheQueryStringAreRefused() {
+    Http.Res r = Http.send("POST", port, "/oauth2/token?client_id=" + enc(clientId) + "&client_secret=" + enc(secret),
+        null, FORM, "grant_type=client_credentials", Map.of());
+    assertThat(r.status()).isEqualTo(400);
+    assertThat(r.body()).contains("\"error\":\"invalid_request\"");
   }
 }
