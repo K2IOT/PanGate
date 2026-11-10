@@ -48,6 +48,7 @@ class GatewayPropertiesTest {
       assertThat(p.admission().rampFrom()).isEqualTo(500);
       assertThat(p.admission().rampDuration()).isEqualTo(Duration.ofMinutes(2));
       assertThat(p.auth().audience()).isEqualTo("pangate-gw");
+      assertThat(p.auth().issuer()).isEqualTo("https://auth.pangate");
       assertThat(p.auth().clockSkew()).isEqualTo(Duration.ofSeconds(30));
       assertThat(p.auth().jwksRefresh()).isEqualTo(Duration.ofMinutes(5));
       assertThat(p.listeners().ws().port()).isEqualTo(8443);
@@ -77,16 +78,18 @@ class GatewayPropertiesTest {
       assertThat(p.dev().dir()).isEqualTo(devDir);
       assertThat(p.auth().jwksFile()).isEqualTo(devDir.resolve("jwks.json"));
       assertThat(p.auth().jwksUri()).isEmpty();
+      assertThat(p.auth().issuer()).isEmpty();  // devtools-signed tokens (DevBootstrap JWKS, gateway ITs)
       assertThat(p.tls().certFile()).isEqualTo(devDir.resolve("gateway.crt"));
       assertThat(ctx.getEnvironment().getProperty("pangate.secrets.dir")).isEqualTo(devDir.toString());
     });
   }
 
   @Test
-  void devProfileUsesIssuerJwks() {
+  void devProfileUsesAuthServiceJwks() {
     runner.withPropertyValues("spring.profiles.active=dev").run(ctx -> {
       GatewayProperties p = ctx.getBean(GatewayProperties.class);
-      assertThat(p.auth().jwksUri()).isEqualTo("http://issuer:8090/.well-known/jwks.json");
+      assertThat(p.auth().jwksUri()).isEqualTo("http://auth:8090/.well-known/jwks.json");
+      assertThat(p.auth().issuer()).isEqualTo("http://auth:8090");
       assertThat(p.auth().jwksFile()).isNull();
       assertThat(p.limits().hardCap()).isEqualTo(200_000);
       assertThat(p.nodeId()).isEqualTo("gateway-dev-1");

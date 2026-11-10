@@ -1,6 +1,6 @@
 # PanGate dev environment (spec §2.4, §9.1). One file, compose profiles:
-#   (default)  infrastructure (Kafka, Redis); `make infra-up` exposes it on localhost for the IDE (profile local)
-#   app        issuer + fake-pushapi + gateway, built with `make images`
+#   (default)  infrastructure (Kafka, Redis, PostgreSQL); `make infra-up` exposes it on localhost (profile local)
+#   app        auth + fake-pushapi + gateway, built with `make images`
 #   tools      devtools container for `make smoke`
 name: pangate
 
@@ -60,19 +60,40 @@ services:
       <<: *hc
       test: ["CMD", "redis-cli", "ping"]
 
-  issuer:
+  postgres:
+    image: postgres:16.4
+    environment:
+      POSTGRES_USER: pangate
+      POSTGRES_PASSWORD: pangate
+      POSTGRES_DB: pangate
+    ports:
+      - "5432:5432"
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "pg_isready", "-U", "pangate", "-d", "pangate"]
+
+  # Auth & Token service (docs/superpowers/specs/2026-11-05-auth-service-design.md): JWKS for the gateway, API and
+  # connect tokens, revocations to gw.control. Seed secrets in /dev-secrets/auth/clients.json for devtools.
+  auth:
     profiles: ["app"]
-    image: pangate/gateway-devtools:dev
+    image: pangate/auth-service:dev
     user: "0"
-    command: ["issuer", "--port", "8090", "--key", "/dev-secrets/es256.pem"]
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      JAVA_TOOL_OPTIONS: "-Xmx256m"
     volumes:
       - dev-secrets:/dev-secrets
     ports:
       - "8090:8090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     healthcheck:
       <<: *hc
-      test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.devtools.Main", "health",
-             "http://127.0.0.1:8090/.well-known/jwks.json"]
+      test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.auth.tools.HealthCheck",
+             "http://127.0.0.1:8081/ready"]
 
   # Push API stand-in (spec §2.4, §6.6): receives the gateway's KICK and sends it back as a CONTROL item.
   # It dials gateway:9090 only when a KICK arrives, so it can start before the gateway.
@@ -104,7 +125,7 @@ services:
       - "9090:9090"
       - "8081:8081"
     depends_on:
-      issuer:
+      auth:
         condition: service_healthy
       fake-pushapi:
         condition: service_healthy
@@ -120,6 +141,7 @@ services:
   devtools:
     profiles: ["tools"]
     image: pangate/gateway-devtools:dev
+    user: "0"   # reads /dev-secrets/auth/clients.json (mode 600, written by auth as root)
     volumes:
       - dev-secrets:/dev-secrets:ro
 

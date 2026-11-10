@@ -23,7 +23,8 @@ COMPOSE := docker compose -f platform-devenv/docker-compose.yml
 GATEWAY_JAR := gateway-service/target/gateway-service-$(VERSION).jar
 DEVTOOLS_JAR := gateway-devtools/target/gateway-devtools-$(VERSION)-exec.jar
 
-.PHONY: doctor infra-up infra-down run-local images up down logs smoke local-check memory-check load-check
+.PHONY: doctor infra-up infra-down run-local images up down logs smoke local-check memory-check load-check \
+  auth-local auth-local-check
 
 ## Check JDK 21, Docker, free ports and Kafka/Redis on localhost.
 doctor:
@@ -39,7 +40,7 @@ doctor:
 
 ## Local infrastructure (Kafka + Redis) on localhost for the gateway run from the IDE (profile local).
 infra-up:
-	$(COMPOSE) up -d --wait --wait-timeout 90 kafka redis
+	$(COMPOSE) up -d --wait --wait-timeout 90 kafka redis postgres
 	$(COMPOSE) up kafka-init
 
 infra-down:
@@ -53,6 +54,7 @@ run-local:
 images:
 	$(MVNW) -q -f gateway-devtools/pom.xml jib:dockerBuild
 	$(MVNW) -q -f gateway-service/pom.xml jib:dockerBuild
+	$(MVNW) -q -f auth-service/pom.xml jib:dockerBuild
 
 up:
 	$(COMPOSE) --profile app up -d --wait --wait-timeout 90
@@ -65,7 +67,18 @@ logs:
 
 smoke:
 	$(COMPOSE) --profile tools run --rm devtools smoke --url wss://gateway:8443/v1/ws \
-	  --issuer http://issuer:8090 --ca /dev-secrets/ca.crt --router gateway:9090
+	  --auth-url http://auth:8090 --client-file /dev-secrets/auth/clients.json --ca /dev-secrets/ca.crt \
+	  --router gateway:9090
+
+AUTH_JAR := auth-service/target/auth-service-$(VERSION)-exec.jar
+
+## auth-service from source with profile local (Postgres/Kafka from `make infra-up`; secrets in .dev/auth/).
+auth-local:
+	java -jar $(AUTH_JAR) --spring.profiles.active=local
+
+## Start auth-service (local), wait for /ready, mint a connect token through it with devtools, stop.
+auth-local-check: infra-up
+	platform-devenv/scripts/auth-local-check.sh $(AUTH_JAR) $(DEVTOOLS_JAR)
 
 local-check: infra-up
 	platform-devenv/scripts/local-start-check.sh $(GATEWAY_JAR) $(DEVTOOLS_JAR)

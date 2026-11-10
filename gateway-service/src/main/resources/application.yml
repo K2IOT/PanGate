@@ -47,7 +47,7 @@ gateway:
     jwks-uri: https://auth/.well-known/jwks.json
     jwks-refresh: 5m
     audience: pangate-gw
-    issuer: ""
+    issuer: https://auth.pangate   # auth-service (spec auth §4.3); profile local overrides
     clock-skew: 30s
   broadcast: { rate-per-loop: 10000 }
   outbound-budget: 4GB

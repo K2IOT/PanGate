@@ -24,6 +24,7 @@ gateway:
   auth:
     jwks-uri: ""
     jwks-file: ${gateway.dev.dir}/jwks.json
+    issuer: ""   # tokens signed by gateway-devtools (token/issuer), not by auth-service
   limits:
     hard-cap: 100000
     soft-cap: 80000
