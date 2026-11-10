@@ -1,0 +1,66 @@
+// Push path records on Kafka (push contracts spec §1, §2). Produced by Push API (PushRecord) and the router
+// (OfflineRecord, DeliveredRecord); keys and headers follow the spec's §2 table.
+syntax = "proto3";
+package pangate.v1;
+
+import "pangate/v1/control.proto";  // DeviceRef
+import "pangate/v1/frame.proto";    // Frame, DeliveryClass
+import "pangate/v1/router.proto";   // PushItem.Priority, ControlOp, AckItem.Status
+
+option java_package = "com.pangate.contracts.v1";
+option java_multiple_files = true;
+
+// cN.push.requests — produced only by Push API; consumed by the router (group "push-router") and, in Phase 2, the inbox.
+message PushRecord {
+  enum Kind { KIND_UNSPECIFIED = 0; KIND_MESSAGE = 1; KIND_BROADCAST = 2; KIND_CONTROL = 3; }
+  string msg_id = 1;                 // ULID; every consumer dedups on it
+  Kind kind = 2;
+  string tenant_id = 3;
+  string cell_id = 4;
+  oneof target {
+    string principal_id = 5;         // MESSAGE to every session of the principal, or CONTROL
+    DeviceRef device = 6;            // MESSAGE to one device (principal_id + device_id)
+    string topic = 7;                // BROADCAST
+  }
+  DeliveryClass class = 8;
+  PushItem.Priority priority = 9;
+  int64 accepted_at_ms = 10;
+  int64 expires_at_ms = 11;          // accepted_at_ms + ttl; past it the router does not deliver (see §1.1)
+  string collapse_key = 12;
+  bool receipt = 13;                 // the router produces a DeliveredRecord on delivery
+  string sender_principal_id = 14;   // key of cN.push.delivered; empty for system pushes
+  Frame frame = 15;                  // MESSAGE / BROADCAST: a complete PUSH frame (msg_id, class, payload, headers,
+                                     //   seq/seq_epoch for MESSAGE, topic/topic_seq for BROADCAST)
+  ControlOp control = 16;            // CONTROL: SUBSCRIBE / UNSUBSCRIBE / KICK / REFRESH_CONFIG
+}
+
+// cN.push.offline — router → Offline Delivery. Only for RELIABLE / ORDERED MESSAGE records.
+message OfflineRecord {
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    REASON_NO_SESSION = 1;           // no live registry entry (or no entry for the target device)
+    REASON_NACK_TIMEOUT = 2;         // no ack after the retries (§3.5: 5 s, 2 retries)
+    REASON_NODE_GONE = 3;            // node lease lost while in flight
+    REASON_SLOW_CONSUMER = 4;
+    REASON_OVERFLOW = 5;
+    REASON_CLOSED = 6;
+    REASON_SHED = 7;
+    REASON_EXPIRED = 8;              // expires_at_ms passed before delivery
+  }
+  PushRecord record = 1;             // unchanged
+  Reason reason = 2;
+  uint32 attempts = 3;
+  int64 at_ms = 4;
+}
+
+// cN.push.delivered — router → Receipts, only when record.receipt is true.
+message DeliveredRecord {
+  string msg_id = 1;
+  string tenant_id = 2;
+  string sender_principal_id = 3;
+  string principal_id = 4;
+  string device_id = 5;
+  string conn_id = 6;
+  AckItem.Status status = 7;         // STATUS_ACKED (RELIABLE / ORDERED) or STATUS_WRITTEN (EPHEMERAL)
+  int64 at_ms = 8;
+}

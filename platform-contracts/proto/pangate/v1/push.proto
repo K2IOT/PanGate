@@ -1,8 +1,10 @@
-// Gateway -> Push API (spec §2.1, §6.6). The gateway only uses it to send KICK in single-session mode.
+// Internal callers -> Push API (push contracts spec §3): domain services send every kind of push; the gateway (0.1.0)
+// only sends KICK (KIND_CONTROL with the first five fields). Additive only.
 syntax = "proto3";
 
 package pangate.v1;
 
+import "pangate/v1/frame.proto";
 import "pangate/v1/router.proto";
 
 option java_package = "com.pangate.contracts.v1";
@@ -13,19 +15,39 @@ service PushService {
 }
 
 message PushRequest {
-  enum Kind {
-    KIND_UNSPECIFIED = 0;
-    KIND_CONTROL = 1;
-  }
-  string request_id = 1;
+  enum Kind { KIND_UNSPECIFIED = 0; KIND_CONTROL = 1; KIND_MESSAGE = 2; KIND_BROADCAST = 3; }
+  string request_id = 1;            // echoed in PushResponse; responses may arrive out of order
   Kind kind = 2;
   string tenant_id = 3;
-  string principal_id = 4;
-  pangate.v1.ControlOp control = 5;
+  string principal_id = 4;          // MESSAGE / CONTROL
+  pangate.v1.ControlOp control = 5; // CONTROL
+  string device_id = 6;             // MESSAGE: set = one device of principal_id
+  string topic = 7;                 // BROADCAST
+  DeliveryClass class = 8;          // UNSPECIFIED = RELIABLE
+  PushItem.Priority priority = 9;   // UNSPECIFIED = NORMAL
+  uint32 ttl_sec = 10;              // 0 = 86400; at most 604800
+  string collapse_key = 11;
+  bool receipt = 12;
+  string idempotency_key = 13;      // dedup 1 h per tenant; empty = no dedup
+  bytes payload = 14;               // ≤ 64 KB, opaque to the platform
+  map<string, string> headers = 15; // copied into Frame.headers (type, content-type, traceparent)
+  string sender_principal_id = 16;
 }
 
 message PushResponse {
+  enum Code {
+    CODE_UNSPECIFIED = 0; CODE_OK = 1; CODE_INVALID = 2; CODE_FORBIDDEN = 3;
+    CODE_RATE_LIMITED = 4; CODE_QUOTA_EXCEEDED = 5; CODE_UNAVAILABLE = 6;
+  }
   string request_id = 1;
-  bool ok = 2;
-  string error = 3;
+  bool ok = 2;                      // kept for 0.1.0 callers: ok == (code == CODE_OK)
+  string error = 3;                 // kept: human-readable detail, never secrets
+  Code code = 4;
+  string msg_id = 5;
+  uint64 seq = 6;
+  uint32 seq_epoch = 7;
+  uint64 topic_seq = 8;
+  string cell_id = 9;
+  bool duplicate = 10;              // idempotency hit: msg_id/seq/topic_seq are those of the first request
+  uint32 retry_after_ms = 11;       // RATE_LIMITED / UNAVAILABLE
 }
