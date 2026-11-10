@@ -1,6 +1,12 @@
 package com.pangate.auth.config;
 
 import com.pangate.auth.api.ApiAuthFilter;
+import com.pangate.auth.api.BodyLimitFilter;
+import com.pangate.auth.api.RateLimitFilter;
+import com.pangate.auth.infrastructure.AuthMetrics;
+import com.pangate.auth.infrastructure.ratelimit.FailedAuthTracker;
+import com.pangate.auth.infrastructure.ratelimit.TokenBuckets;
+import java.util.Map;
 import com.pangate.auth.api.PortRoutingFilter;
 import com.pangate.auth.application.IssueClientToken;
 import com.pangate.auth.application.KeyRing;
@@ -77,6 +83,43 @@ public class WebConfig {
     var r = new FilterRegistrationBean<>(new PortRoutingFilter(admin));
     r.setOrder(Ordered.HIGHEST_PRECEDENCE);
     r.addUrlPatterns("/*");
+    return r;
+  }
+
+  @Bean
+  AuthMetrics authMetrics(io.micrometer.core.instrument.MeterRegistry registry, KeyRing keys) {
+    return new AuthMetrics(registry, keys);
+  }
+
+  @Bean
+  TokenBuckets tokenBuckets(AuthProperties props) {
+    var l = props.rateLimits();
+    return new TokenBuckets(Map.of(
+        "token", new TokenBuckets.Limit(l.token().rate(), l.token().burst()),
+        "mint", new TokenBuckets.Limit(l.mint().rate(), l.mint().burst()),
+        "revoke", new TokenBuckets.Limit(l.revoke().rate(), l.revoke().burst()),
+        "admin", new TokenBuckets.Limit(l.admin().rate(), l.admin().burst())), System::nanoTime);
+  }
+
+  @Bean
+  FailedAuthTracker failedAuthTracker(AuthProperties props) {
+    var f = props.rateLimits().authFailures();
+    return new FailedAuthTracker(f.perMinute(), f.block(), System::nanoTime);
+  }
+
+  @Bean
+  FilterRegistrationBean<BodyLimitFilter> bodyLimitFilter() {
+    var r = new FilterRegistrationBean<>(new BodyLimitFilter());
+    r.setOrder(Ordered.HIGHEST_PRECEDENCE + 5);
+    r.addUrlPatterns("/*");
+    return r;
+  }
+
+  @Bean
+  FilterRegistrationBean<RateLimitFilter> rateLimitFilter(TokenBuckets buckets, AuthMetrics metrics) {
+    var r = new FilterRegistrationBean<>(new RateLimitFilter(buckets, metrics));
+    r.setOrder(Ordered.HIGHEST_PRECEDENCE + 20);
+    r.addUrlPatterns("/v1/*", "/admin/v1/*");
     return r;
   }
 

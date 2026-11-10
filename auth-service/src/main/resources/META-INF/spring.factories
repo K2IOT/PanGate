@@ -1,1 +1,2 @@
 org.springframework.boot.env.EnvironmentPostProcessor=com.pangate.auth.config.DevSecrets
+org.springframework.boot.diagnostics.FailureAnalyzer=com.pangate.auth.diagnostics.KekFailureAnalyzer

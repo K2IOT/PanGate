@@ -16,7 +16,8 @@ public record AuthProperties(
     @DefaultValue Keys keys,
     @DefaultValue Outbox outbox,
     @DefaultValue Kafka kafka,
-    @DefaultValue Seed seed) {
+    @DefaultValue Seed seed,
+    @DefaultValue RateLimits rateLimits) {
 
   public record Keys(
       @DefaultValue("30d") Duration lifetime,
@@ -34,6 +35,26 @@ public record AuthProperties(
   public record Kafka(
       @DefaultValue("gw.control") String controlTopic,
       @DefaultValue("kafka:9092") String bootstrapServers) {}
+
+  /** A zero rate means "spec default"; see {@link RateLimits}. */
+  public record Limit(@DefaultValue("0") double rate, @DefaultValue("0") int burst) {
+    Limit or(double r, int b) {
+      return rate > 0 ? new Limit(rate, burst > 0 ? burst : (int) Math.ceil(rate)) : new Limit(r, b);
+    }
+  }
+
+  public record AuthFailures(@DefaultValue("20") int perMinute, @DefaultValue("60s") Duration block) {}
+
+  /** Spec §7 defaults: token 10/s burst 20, mint 1000/s burst 2000, revoke 100/s burst 200, admin 20/s. */
+  public record RateLimits(@DefaultValue Limit token, @DefaultValue Limit mint, @DefaultValue Limit revoke,
+      @DefaultValue Limit admin, @DefaultValue AuthFailures authFailures) {
+    public RateLimits {
+      token = token.or(10, 20);
+      mint = mint.or(1000, 2000);
+      revoke = revoke.or(100, 200);
+      admin = admin.or(20, 20);
+    }
+  }
 
   public record Seed(@DefaultValue("false") boolean enabled, @DefaultValue(".dev/auth") Path dir) {}
 }

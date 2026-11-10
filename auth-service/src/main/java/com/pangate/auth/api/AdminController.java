@@ -4,6 +4,7 @@ import com.pangate.auth.application.ManageClients;
 import com.pangate.auth.application.ManageTenants;
 import com.pangate.auth.config.JobsConfig.KeyJobs;
 import com.pangate.auth.config.TtlCache;
+import com.pangate.auth.infrastructure.AuthMetrics;
 import com.pangate.auth.domain.Caller;
 import com.pangate.auth.domain.Client;
 import com.pangate.auth.domain.Scope;
@@ -53,13 +54,15 @@ public class AdminController {
   private final ManageClients clients;
   private final KeyJobs keys;
   private final TtlCache<Set<String>> disabledClients;
+  private final AuthMetrics metrics;
 
   public AdminController(ManageTenants tenants, ManageClients clients, KeyJobs keys,
-      TtlCache<Set<String>> disabledClientsCache) {
+      TtlCache<Set<String>> disabledClientsCache, AuthMetrics metrics) {
     this.tenants = tenants;
     this.clients = clients;
     this.keys = keys;
     this.disabledClients = disabledClientsCache;
+    this.metrics = metrics;
   }
 
   private <T> T act(HttpServletRequest req, String action, String target, Supplier<T> body) {
@@ -68,10 +71,12 @@ public class AdminController {
       T out = body.get();
       audit.atInfo().addKeyValue("admin_action", action).addKeyValue("actor", p.clientId())
           .addKeyValue("target", target).addKeyValue("result", "ok").log("admin action");
+      metrics.admin(action, "ok");
       return out;
     } catch (RuntimeException e) {
       audit.atInfo().addKeyValue("admin_action", action).addKeyValue("actor", p.clientId())
           .addKeyValue("target", target).addKeyValue("result", "error").log("admin action failed");
+      metrics.admin(action, "error");
       throw e;
     }
   }

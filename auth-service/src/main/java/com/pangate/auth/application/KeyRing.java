@@ -47,11 +47,11 @@ public final class KeyRing {
     snap = new Snapshot(active, byKid, new JWKSet(pub).toString());
   }
 
-  /** @throws IllegalStateException if no key can sign */
+  /** @throws NoSigningKeyException if no key can sign */
   public SigningKey active() {
     SigningKey k = snap.active;
     if (k == null) {
-      throw new IllegalStateException("no active signing key");
+      throw new NoSigningKeyException();
     }
     return k;
   }
@@ -67,6 +67,10 @@ public final class KeyRing {
 
   public String jwksJson() {
     return snap.jwks;
+  }
+
+  public long count(com.pangate.auth.domain.KeyState state) {
+    return snap.byKid.values().stream().filter(k -> k.state() == state).count();
   }
 
   public int size() {

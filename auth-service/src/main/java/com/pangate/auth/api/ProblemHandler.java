@@ -1,7 +1,10 @@
 package com.pangate.auth.api;
 
 import com.pangate.auth.domain.DomainException;
+import com.pangate.auth.application.NoSigningKeyException;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpHeaders;
+import org.springframework.transaction.TransactionException;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -27,6 +30,19 @@ public class ProblemHandler {
   @ExceptionHandler({HttpMessageNotReadableException.class, HttpMediaTypeNotSupportedException.class})
   ResponseEntity<ProblemDetail> malformed(Exception e) {
     return ResponseEntity.badRequest().body(Problems.of(400, "malformed_request", "request body is not valid JSON"));
+  }
+
+  /** PostgreSQL unavailable (spec §6): retry soon; JWKS never gets here. */
+  @ExceptionHandler({DataAccessException.class, TransactionException.class})
+  ResponseEntity<ProblemDetail> database(Exception e) {
+    return ResponseEntity.status(503).header(HttpHeaders.RETRY_AFTER, "5")
+        .body(Problems.of(503, "db_unavailable", "storage temporarily unavailable"));
+  }
+
+  @ExceptionHandler(NoSigningKeyException.class)
+  ResponseEntity<ProblemDetail> noKey(NoSigningKeyException e) {
+    return ResponseEntity.status(503).header(HttpHeaders.RETRY_AFTER, "5")
+        .body(Problems.of(503, "no_signing_key", "no signing key available"));
   }
 
   @ExceptionHandler(HttpRequestMethodNotSupportedException.class)

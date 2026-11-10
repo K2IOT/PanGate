@@ -1,7 +1,13 @@
 package com.pangate.auth.api;
 
 import com.pangate.auth.application.IssueClientToken;
+import com.pangate.auth.application.NoSigningKeyException;
 import com.pangate.auth.application.OAuthError;
+import com.pangate.auth.infrastructure.AuthMetrics;
+import com.pangate.auth.infrastructure.ratelimit.FailedAuthTracker;
+import com.pangate.auth.infrastructure.ratelimit.TokenBuckets;
+import org.springframework.dao.DataAccessException;
+import org.springframework.transaction.TransactionException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -21,9 +27,25 @@ import org.springframework.web.bind.annotation.RestController;
 public class TokenEndpoint {
 
   private final IssueClientToken issue;
+  private final TokenBuckets buckets;
+  private final FailedAuthTracker failures;
+  private final AuthMetrics metrics;
 
-  public TokenEndpoint(IssueClientToken issue) {
+  public TokenEndpoint(IssueClientToken issue, TokenBuckets buckets, FailedAuthTracker failures, AuthMetrics metrics) {
     this.issue = issue;
+    this.buckets = buckets;
+    this.failures = failures;
+    this.metrics = metrics;
+  }
+
+  /** Too many requests; carries Retry-After. */
+  static final class Limited extends RuntimeException {
+    final long retryAfterSec;
+
+    Limited(long ms) {
+      super(null, null, false, false);
+      this.retryAfterSec = RateLimitFilter.retryAfterSeconds(ms);
+    }
   }
 
   private record Credentials(String id, String secret) {}
@@ -31,7 +53,25 @@ public class TokenEndpoint {
   @PostMapping(value = "/oauth2/token", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE,
       produces = MediaType.APPLICATION_JSON_VALUE)
   ResponseEntity<Map<String, Object>> token(HttpServletRequest req) {
-    Credentials cred = credentials(req);
+    long start = System.nanoTime();
+    String source = req.getRemoteAddr();
+    failures.blockedFor(source).ifPresent(ms -> {
+      metrics.rateLimited("token");
+      throw new Limited(ms);
+    });
+    Credentials cred;
+    try {
+      cred = credentials(req);
+    } catch (OAuthError e) {
+      if ("invalid_client".equals(e.error())) {
+        failures.recordFailure(source);
+      }
+      throw e;
+    }
+    buckets.tryAcquire("token", cred.id()).ifPresent(ms -> {
+      metrics.rateLimited("token");
+      throw new Limited(ms);
+    });
     String grant = req.getParameter("grant_type");
     if (grant == null) {
       throw new OAuthError("invalid_request", 400, "grant_type is required");
@@ -39,7 +79,18 @@ public class TokenEndpoint {
     if (!"client_credentials".equals(grant)) {
       throw new OAuthError("unsupported_grant_type", 400, "only client_credentials is supported");
     }
-    var t = issue.issue(cred.id(), cred.secret().toCharArray(), req.getParameter("scope"));
+    IssueClientToken.IssuedToken t;
+    try {
+      t = issue.issue(cred.id(), cred.secret().toCharArray(), req.getParameter("scope"));
+    } catch (OAuthError e) {
+      metrics.issued("api", e.error());
+      if ("invalid_client".equals(e.error())) {
+        failures.recordFailure(source);
+      }
+      throw e;
+    }
+    metrics.issued("api", "ok");
+    metrics.latency("api", start);
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("access_token", t.accessToken());
     body.put("token_type", "Bearer");
@@ -75,6 +126,22 @@ public class TokenEndpoint {
     } catch (IllegalArgumentException e) {
       throw OAuthError.invalidClient();
     }
+  }
+
+  @ExceptionHandler(Limited.class)
+  ResponseEntity<Map<String, String>> limited(Limited e) {
+    return ResponseEntity.status(429).cacheControl(CacheControl.noStore()).contentType(MediaType.APPLICATION_JSON)
+        .header(HttpHeaders.RETRY_AFTER, Long.toString(e.retryAfterSec))
+        .body(Map.of("error", "rate_limited", "error_description", "too many requests"));
+  }
+
+  /** PostgreSQL down or no signing key (spec §6). */
+  @ExceptionHandler({DataAccessException.class, TransactionException.class, NoSigningKeyException.class})
+  ResponseEntity<Map<String, String>> unavailable(Exception e) {
+    metrics.issued("api", "unavailable");
+    return ResponseEntity.status(503).cacheControl(CacheControl.noStore()).contentType(MediaType.APPLICATION_JSON)
+        .header(HttpHeaders.RETRY_AFTER, "5")
+        .body(Map.of("error", "temporarily_unavailable", "error_description", "try again shortly"));
   }
 
   @ExceptionHandler(OAuthError.class)

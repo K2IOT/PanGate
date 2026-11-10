@@ -76,11 +76,16 @@ public class RevocationConfig {
 
   @Bean
   SchedulingConfigurer revocationSchedules(OutboxRelay relay, ExpireRevocations expire, JdbcOutbox outbox,
-      AdvisoryLock lock, AuthProperties props, Clock clock) {
+      AdvisoryLock lock, AuthProperties props, Clock clock, com.pangate.auth.infrastructure.AuthMetrics metrics) {
     return r -> {
       r.addFixedDelayTask(() -> guard("outbox relay", relay::runOnce), props.outbox().interval());
       r.addFixedDelayTask(() -> guard("revocation expiry",
           () -> lock.runExclusive("auth.expire-revocations", expire::runOnce)), props.expiryInterval());
+      r.addFixedDelayTask(() -> guard("outbox metrics", () -> {
+        var b = outbox.backlog();
+        metrics.outbox(b.pending(), b.oldest().map(t -> Math.max(0, Duration.between(t, clock.now()).toSeconds()))
+            .orElse(0L));
+      }), Duration.ofSeconds(5));
       r.addFixedDelayTask(() -> guard("outbox cleanup", () -> outbox.deleteSentBefore(
           clock.now().minus(props.outbox().keepSent()))), Duration.ofDays(1));
     };
