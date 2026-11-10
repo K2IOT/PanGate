@@ -9,7 +9,7 @@ cd "$root"
 fail=0
 err() { echo "ERR $*"; fail=1; }
 
-for pom in platform-parent platform-contracts platform-spring-starter platform-contracts-testkit gateway-devtools gateway-service auth-service; do
+for pom in platform-parent platform-contracts platform-spring-starter platform-contracts-testkit gateway-devtools gateway-service push-router-service auth-service; do
   f="$pom/pom.xml"
   # project <version> (a direct child of <project>, two-space indent; absent = inherited) and the internal parent's
   own=$(sed -n 's|^  <version>\(.*\)</version>.*|\1|p' "$f" | head -1)

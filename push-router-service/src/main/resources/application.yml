@@ -1,0 +1,44 @@
+# Production defaults (push-router spec §5). Profiles local and dev override selected values.
+spring:
+  application:
+    name: push-router-service
+  threads:
+    virtual:
+      enabled: true
+
+pangate:
+  service: router
+
+router:
+  cell: c1
+  kafka: { bootstrap: "kafka:9092", group: push-router, max-concurrency: 20000 }
+  ack-timeout: 6s
+  retries: [100ms, 400ms]
+  registry: { uri: "redis://redis-registry:6379", topology: cluster, cache: 2s, timeout: 200ms }
+  directory-refresh: 1s
+  batch: { max: 256, linger: 2ms }
+  max-in-flight-per-node: 10000
+  grpc: { plaintext: false }
+
+# Management only: actuator, /ready, /live.
+server:
+  port: 8081
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState
+          additional-path: "server:/ready"
+          show-details: always
+        liveness:
+          include: livenessState
+          additional-path: "server:/live"

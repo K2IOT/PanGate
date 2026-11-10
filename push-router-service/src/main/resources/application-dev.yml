@@ -1,0 +1,5 @@
+# Container in `make up` (platform-devenv/docker-compose.yml).
+router:
+  kafka: { bootstrap: "kafka:29092" }
+  registry: { uri: "redis://redis:6379", topology: standalone }
+  grpc: { plaintext: true }
