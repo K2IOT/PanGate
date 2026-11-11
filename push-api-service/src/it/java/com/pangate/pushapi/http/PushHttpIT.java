@@ -358,4 +358,23 @@ class PushHttpIT {
     }
     assertThat(seqs).hasSize(50).isSorted();
   }
+
+  /** Spec §6: produce, idempotency, seq latency and status lag reach the registry. */
+  @Test
+  void specMetricsAreEmitted() throws Exception {
+    io.micrometer.core.instrument.MeterRegistry m = api.ctx.getBean(io.micrometer.core.instrument.MeterRegistry.class);
+    String token = api.token("t1", "t1-backend", SEND);
+    HttpResponse<String> r = api.post(api.http, "/v1/push", token, push(u()), "Idempotency-Key", "metrics-" + u());
+    String id = json(r).get("msgId").asText();
+    PushRecord rec = scenario.awaitRequest(id);
+    scenario.produce(PushTopics.offline("c1").name(), rec.getPrincipalId(), OfflineRecord.newBuilder().setRecord(rec)
+        .setReason(OfflineRecord.Reason.REASON_NO_SESSION).setAtMs(System.currentTimeMillis()).build(),
+        "OfflineRecord", "t1");
+    await().atMost(Duration.ofSeconds(15)).until(() -> m.find("pushapi.status.lag").timer() != null
+        && m.find("pushapi.status.lag").timer().count() > 0);
+    assertThat(m.find("pushapi.produce").tag("result", "ok").counter()).isNotNull()
+        .satisfies(c -> assertThat(c.count()).isPositive());
+    assertThat(m.find("pushapi.idempotency").tag("result", "new").counter()).isNotNull();
+    assertThat(m.find("pushapi.seq.latency").timer()).isNotNull().satisfies(t -> assertThat(t.count()).isPositive());
+  }
 }

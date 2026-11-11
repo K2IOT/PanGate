@@ -33,6 +33,7 @@ public final class Idempotency {
   private final Duration waitFor;
   private final Sleeper sleeper;
   private final LongSupplier monoMs;
+  private final AcceptMetrics metrics;
 
   public Idempotency(IdemStore store, Duration ttl, Duration pendingTtl, Duration waitFor, Sleeper sleeper,
       LongSupplier monoMs) {
@@ -42,6 +43,18 @@ public final class Idempotency {
     this.waitFor = waitFor;
     this.sleeper = sleeper;
     this.monoMs = monoMs;
+    this.metrics = AcceptMetrics.NONE;
+  }
+
+  public Idempotency(IdemStore store, Duration ttl, Duration pendingTtl, Duration waitFor, Sleeper sleeper,
+      LongSupplier monoMs, AcceptMetrics metrics) {
+    this.store = store;
+    this.ttl = ttl;
+    this.pendingTtl = pendingTtl;
+    this.waitFor = waitFor;
+    this.sleeper = sleeper;
+    this.monoMs = monoMs;
+    this.metrics = metrics;
   }
 
   /**
@@ -52,22 +65,27 @@ public final class Idempotency {
     String k = PushApiKeys.idem(tenant, key);
     String last = PushApiKeys.idemLast(tenant, key);
     long deadline = monoMs.getAsLong() + waitFor.toMillis();
+    boolean waited = false;
     while (true) {
       Optional<String> v = store.get(k);
       if (v.isPresent() && v.get().startsWith(DONE)) {
+        metrics.idempotency(waited ? "pending_wait" : "duplicate");
         return new Done(decodeDone(v.get()).toBuilder().setDuplicate(true).build());
       }
       if (v.isPresent()) {
         if (monoMs.getAsLong() >= deadline) {
+          metrics.idempotency("pending_timeout");
           return new Busy();
         }
         pause();
+        waited = true;
         continue;
       }
       Reserved r = store.get(last).flatMap(s -> Reserved.decodeFor(s, request)).orElseGet(reserve);
       String value = r.encode(request);
       if (store.setIfAbsent(k, value, pendingTtl)) {
         store.set(last, value, ttl);
+        metrics.idempotency(waited ? "pending_wait" : "new");
         return new Owned(k, value, r);
       }
       // lost the race to another request with the same key: read again

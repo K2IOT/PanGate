@@ -77,6 +77,21 @@ class PushAcceptorTest {
   final ControlState control = new ControlState("c1", DEFAULTS, () -> NOW);
   RecordBuilder builder = new RecordBuilder("c1", () -> NOW, Duration.ofDays(1));
 
+  final List<String> metrics = new ArrayList<>();
+  final AcceptMetrics recording = new AcceptMetrics() {
+    @Override public void produce(String result) { metrics.add("produce " + result); }
+    @Override public void idempotency(String result) { metrics.add("idempotency " + result); }
+    @Override public void rateLimited(PushRequest.Kind kind) { metrics.add("ratelimited " + kind); }
+    @Override public void seqLatency(long nanos) { metrics.add("seq"); }
+  };
+
+  PushAcceptor measured() {
+    return new PushAcceptor(new SeqAllocator(seqStore, epochs, () -> { }), builder,
+        new Idempotency(idemStore, Duration.ofHours(1), Duration.ofSeconds(30), Duration.ofMillis(100),
+            d -> mono.addAndGet(d.toMillis()), mono::get, recording),
+        control, new RateLimiter(() -> mono.get() * 1_000_000L), producer, status, () -> NOW, recording);
+  }
+
   PushAcceptor acceptor() {
     return new PushAcceptor(new SeqAllocator(seqStore, epochs, () -> { }), builder,
         new Idempotency(idemStore, Duration.ofHours(1), Duration.ofSeconds(30), Duration.ofMillis(100),
@@ -318,5 +333,42 @@ class PushAcceptorTest {
       }
       assertThat(PushRecordCheck.violation(bad).isPresent()).as(bad.toString()).isEqualTo(testkit).isTrue();
     }
+  }
+
+  /** Spec §6 metrics: produce, idempotency, seq latency. */
+  @Test
+  void acceptReportsProduceIdempotencyAndSeqLatency() {
+    PushAcceptor a = measured();
+    PushRequest req = message().toBuilder().setIdempotencyKey("m1").build();
+    a.accept(API, req);
+    a.accept(API, req);
+    assertThat(metrics).containsExactlyInAnyOrder("idempotency new", "seq", "produce ok", "idempotency duplicate");
+  }
+
+  @Test
+  void failedProduceIsReported() {
+    failProduces = 1;
+    measured().accept(API, message());
+    assertThat(metrics).containsExactly("seq", "produce failed");
+  }
+
+  @Test
+  void rateLimitedIsReportedByKind() {
+    control.apply("tenantcfg:tenant:t1", com.pangate.contracts.v1.ControlEvent.newBuilder()
+        .setTenantCfg(com.pangate.contracts.v1.TenantCfg.newBuilder()
+            .setScope(com.pangate.contracts.v1.Scope.SCOPE_TENANT).setScopeId("t1")
+            .setLimits(com.pangate.contracts.v1.TenantLimits.newBuilder().setPushRate(1).setPushBurst(1)))
+        .build().toByteArray());
+    PushAcceptor a = measured();
+    a.accept(API, message().toBuilder().setClass_(DeliveryClass.DELIVERY_CLASS_EPHEMERAL).build());
+    a.accept(API, message().toBuilder().setClass_(DeliveryClass.DELIVERY_CLASS_EPHEMERAL).build());
+    assertThat(metrics).containsExactly("produce ok", "ratelimited KIND_MESSAGE");
+  }
+
+  @Test
+  void busyKeyIsPendingTimeout() {
+    idemValues.put("idem:{t1}:k9", "pending|M|1|0|0|x");
+    measured().accept(API, message().toBuilder().setIdempotencyKey("k9").build());
+    assertThat(metrics).containsExactly("idempotency pending_timeout");
   }
 }
