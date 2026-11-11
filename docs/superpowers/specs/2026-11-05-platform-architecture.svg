@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1080" width="1600" height="1080" font-family="Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif">
 <defs><marker id="a-60a5fa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#60a5fa"/></marker><marker id="a-a78bfa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#a78bfa"/></marker><marker id="a-f472b6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#f472b6"/></marker><marker id="a-4ade80" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#4ade80"/></marker><marker id="a-fb923c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#fb923c"/></marker><marker id="a-8b9bb4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#8b9bb4"/></marker><marker id="a-fbbf24" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#fbbf24"/></marker><marker id="a-2dd4bf" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#2dd4bf"/></marker></defs>
 <rect width="1600" height="1080" fill="#0b1220"/>
-<text x="20" y="32" font-size="20" font-weight="700" fill="#e2e8f0" text-anchor="start">PanGate platform — hướng kiến trúc sau gateway 0.1.0 (lộ trình 2026-11-05)</text>
+<text x="20" y="32" font-size="20" font-weight="700" fill="#e2e8f0" text-anchor="start">PanGate platform — kiến trúc sau gateway 0.1.0 (lộ trình 2026-11-05 · ①–④ đã merge 2026-11-11)</text>
 <text x="20" y="52" font-size="12" font-weight="normal" fill="#a3b1c6" text-anchor="start">1 cell chi tiết · monorepo, mỗi service một thư mục build độc lập · gateway và domain service chỉ gặp nhau ở Kafka và Push API (Push API là đường duy nhất xuống client)</text>
 <text x="20" y="92" font-size="11" font-weight="700" fill="#a3b1c6" text-anchor="start">CLIENT / TENANT</text>
 <rect x="20" y="104" width="200" height="70" rx="7" fill="#111827" stroke="#475569" stroke-width="1.3"/>
@@ -45,18 +45,18 @@
 <rect x="716" y="192" width="5" height="224" rx="2" fill="#4ade80"/>
 <text x="729" y="211" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">push-router-service ③</text>
 <text x="729" y="227" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">đọc c{N}.push.requests (64 partition)</text>
-<text x="729" y="241" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">watermark commit · ≤ 20k in-flight</text>
+<text x="729" y="241" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">Parallel Consumer · thứ tự theo key · ≤ 20k</text>
 <text x="729" y="255" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">HGETALL reg:{p} · lọc epoch sống</text>
 <text x="729" y="269" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">1 MESSAGE / conn_id (ADR 0007)</text>
-<text x="729" y="283" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">PushBatcher 256 msg / 2 ms</text>
+<text x="729" y="283" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">batch 256 / 2 ms · ACK theo delivery_id</text>
 <text x="729" y="297" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">BroadcastFanout: 1 / node</text>
 <text x="729" y="311" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">retry ×2 (100/400 ms) → push.offline</text>
 <text x="729" y="325" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">lease hết hạn → NODE_DOWN</text>
-<text x="729" y="339" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">local/dev: tìm gateway qua nodes:live</text>
-<text x="729" y="353" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">prod: + EndpointSlice</text>
+<text x="729" y="339" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">danh bạ: nodes:live + node:addr:{id}</text>
+<text x="729" y="353" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">KICK → mọi node sống · ghi lại khi lỗi</text>
 <rect x="1022" y="80" width="300" height="210" rx="7" fill="#111827" stroke="#be185d" stroke-width="1.3"/>
 <rect x="1022" y="80" width="5" height="210" rx="2" fill="#f472b6"/>
-<text x="1035" y="99" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">auth-service ① (A1 · spec đã duyệt)</text>
+<text x="1035" y="99" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">auth-service ① (A1 · đã merge)</text>
 <text x="1035" y="115" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">:8090 POST /oauth2/token (client credentials)</text>
 <text x="1035" y="129" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">:8090 POST /v1/tokens → connect JWT 10 m</text>
 <text x="1035" y="143" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">:8090 POST /v1/revocations → outbox</text>
@@ -79,22 +79,22 @@
 <rect x="1022" y="318" width="300" height="182" rx="7" fill="#111827" stroke="#c2410c" stroke-width="1.3"/>
 <rect x="1022" y="318" width="5" height="182" rx="2" fill="#fb923c"/>
 <text x="1035" y="337" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">push-api-service ④</text>
-<text x="1035" y="353" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">POST /v1/push · /v1/push:batch (207)</text>
+<text x="1035" y="353" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">POST /v1/push · /v1/push:batch · GET /v1/messages</text>
 <text x="1035" y="367" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">gRPC PushService.SendStream (+ KICK)</text>
 <text x="1035" y="381" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">xác thực token API qua JWKS (offline)</text>
-<text x="1035" y="395" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">1 Lua: idem SET NX + INCR seq/topic_seq</text>
-<text x="1035" y="409" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">seqEpoch (Postgres) · WAIT cho ORDERED</text>
-<text x="1035" y="423" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">quota 50/s/principal · 10/s/topic</text>
-<text x="1035" y="437" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">CellResolver ← gw.control CELLMAP</text>
-<text x="1035" y="451" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">→ c{N}.push.requests · push.audit</text>
+<text x="1035" y="395" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">idem pending + idemlast · INCR seq/topic_seq</text>
+<text x="1035" y="409" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">seqepochs theo run_id · ORDERED: thứ tự / pod</text>
+<text x="1035" y="423" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">rate limit tenant × kind / pod · kill switch</text>
+<text x="1035" y="437" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">revoke · TENANTCFG ← gw.control</text>
+<text x="1035" y="451" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">→ c{N}.push.requests · trạng thái msg:{t}</text>
 <rect x="1360" y="318" width="220" height="82" rx="7" fill="#111827" stroke="#6d28d9" stroke-width="1.3"/>
 <text x="1373" y="337" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Redis state (cell)</text>
 <text x="1373" y="353" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">seq:{p} · topicseq:{t}</text>
 <text x="1373" y="367" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">idem:{tenant}:{key} 1 h</text>
-<text x="1373" y="381" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">seqepochs · tenantconns:{t}</text>
+<text x="1373" y="381" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">seqepochs · runids · idem · msg:{t}</text>
 <rect x="1360" y="414" width="220" height="50" rx="7" fill="#111827" stroke="#475569" stroke-width="1.3"/>
-<text x="1373" y="433" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">PostgreSQL (push-api)</text>
-<text x="1373" y="449" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">seqEpoch theo slot Redis</text>
+<text x="1373" y="433" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">PostgreSQL (push-api): không dùng</text>
+<text x="1373" y="449" font-size="10.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">epoch nằm trong Redis (seqepochs)</text>
 <rect x="372" y="560" width="1208" height="150" rx="9" fill="#0b1f3a" stroke="#2563eb" stroke-width="1.3"/>
 <text x="386" y="580" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Kafka (KRaft) · topic theo cell c{N}. · gw.control toàn cục</text>
 <rect x="386" y="594" width="228" height="48" rx="6" fill="#111827" stroke="#1e40af" stroke-width="1.2"/>
@@ -110,7 +110,7 @@
 <text x="1103" y="613" font-size="10.5" font-weight="700" fill="#e2e8f0" text-anchor="start">c{N}.push.requests</text>
 <text x="1103" y="629" font-size="9.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">push-api → router · inbox</text>
 <rect x="1330" y="594" width="228" height="48" rx="6" fill="#111827" stroke="#1e40af" stroke-width="1.2"/>
-<text x="1339" y="613" font-size="10.5" font-weight="700" fill="#e2e8f0" text-anchor="start">c{N}.push.offline · .delivered · .audit</text>
+<text x="1339" y="613" font-size="10.5" font-weight="700" fill="#e2e8f0" text-anchor="start">c{N}.push.offline · .delivered</text>
 <text x="1339" y="629" font-size="9.5" font-weight="normal" fill="#a3b1c6" text-anchor="start">router / push-api → offline, receipts, audit</text>
 <text x="386" y="664" font-size="10" font-weight="normal" fill="#8b9bb4" text-anchor="start" font-style="italic">PushRequest đầy đủ (target · class · ttl · priority · collapseKey · seq/topic_seq) và các record offline/delivered/audit: sub-project ②</text>
 <text x="386" y="680" font-size="10" font-weight="normal" fill="#8b9bb4" text-anchor="start" font-style="italic">Revoke.client_id + khoá revoke:c:&lt;client_id&gt; (thêm ở A1; gateway bỏ qua có chủ đích)</text>
@@ -195,13 +195,13 @@
 <rect x="20" y="930" width="14" height="14" rx="2" fill="#2dd4bf"/>
 <text x="40" y="941" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">gateway-service 0.1.0 — đã merge vào main</text>
 <rect x="420" y="930" width="14" height="14" rx="2" fill="#f472b6"/>
-<text x="440" y="941" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">① auth-service — spec đã duyệt, plan A1 chờ duyệt</text>
+<text x="440" y="941" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">① auth-service — đã merge (PR #2)</text>
 <rect x="820" y="930" width="14" height="14" rx="2" fill="#fbbf24"/>
-<text x="840" y="941" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">② contracts cho đường push</text>
+<text x="840" y="941" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">② contracts cho đường push — đã merge</text>
 <rect x="20" y="954" width="14" height="14" rx="2" fill="#4ade80"/>
-<text x="40" y="965" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">③ push-router-service</text>
+<text x="40" y="965" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">③ push-router-service — đã merge</text>
 <rect x="420" y="954" width="14" height="14" rx="2" fill="#fb923c"/>
-<text x="440" y="965" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">④ push-api-service (đủ: unicast · device · topic · topic_seq · control · KICK)</text>
+<text x="440" y="965" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">④ push-api-service P1 — đã merge (unicast · device · topic · control · KICK)</text>
 <rect x="1220" y="954" width="14" height="14" rx="2" fill="#0f172a" stroke="#64748b" stroke-dasharray="3 2"/>
 <text x="1240" y="965" font-size="11" font-weight="normal" fill="#a3b1c6" text-anchor="start">nét đứt: sau lộ trình này</text>
 <text x="20" y="992" font-size="11.5" font-weight="700" fill="#e2e8f0" text-anchor="start">Luồng</text>

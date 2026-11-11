@@ -30,3 +30,4 @@ Quyết định kiến trúc của gateway-service (spec §13). Mỗi ADR gồm:
 | [0024](0024-seqepochs-run-id.md) | Phát hiện failover Redis state qua `run_id`; bump `seqepochs` bằng script CAS |
 | [0025](0025-message-status-in-redis.md) | Trạng thái message trong Redis, TTL theo message; `delivered` cần `receipt` |
 | [0026](0026-push-rate-per-pod.md) | Rate limit push là token bucket mỗi pod, cấu hình qua `TenantLimits` |
+| [0027](0027-ordered-per-pod.md) | Thứ tự ORDERED chỉ được đảm bảo trong một pod Push API; client sắp lại theo seq |

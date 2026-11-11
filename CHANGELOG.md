@@ -5,6 +5,8 @@
 ### push-api-service: spec §6 metrics
 - `pushapi.produce{result}`, `pushapi.idempotency{result}`, `pushapi.ratelimited{kind}`, `pushapi.seq.latency` and
   `pushapi.status.lag` are emitted; the core reports them through `AcceptMetrics` (no Micrometer in the core).
+- ADR 0027: ORDERED order is guaranteed per Push API pod only; clients reorder by seq.
+- Platform architecture diagram shows sub-projects ①–④ as merged and the Push API as built in P1.
 - `SeqEpochWatcherClusterIT`: failover detection on a 3-master Redis Cluster (restarting one master bumps only its
   slots, once).
 
