@@ -5,6 +5,8 @@
 ### push-api-service: spec §6 metrics
 - `pushapi.produce{result}`, `pushapi.idempotency{result}`, `pushapi.ratelimited{kind}`, `pushapi.seq.latency` and
   `pushapi.status.lag` are emitted; the core reports them through `AcceptMetrics` (no Micrometer in the core).
+- `SeqEpochWatcherClusterIT`: failover detection on a 3-master Redis Cluster (restarting one master bumps only its
+  slots, once).
 
 ### push-api-service (sub-project 4, P1)
 - New module `push-api-service` (spec `docs/superpowers/specs/2026-11-10-push-api-design.md`):
