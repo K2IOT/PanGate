@@ -58,7 +58,12 @@ public final class RedisSeqReader implements SeqReader {
 
   @Override
   public int seqEpoch(String principal) {
-    return epochs.get()[SlotHash.getSlot(principal)];
+    return epochs.get()[epochSlot(principal)];
+  }
+
+  /** The slot of {@code seq:{p}}: the shard whose failover resets the seq is the one whose epochs are bumped. */
+  static int epochSlot(String principal) {
+    return SlotHash.getSlot(RegistryKeys.seq(principal));
   }
 
   /** Async; keeps the previous table on error. */

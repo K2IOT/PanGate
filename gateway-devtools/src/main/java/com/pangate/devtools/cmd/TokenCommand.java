@@ -9,16 +9,26 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
+import picocli.CommandLine.ArgGroup;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 
-@Command(name = "token", description = "Sign a connect JWT offline and print it.")
+@Command(name = "token", description = "Print a connect JWT: signed offline (--key) or minted by auth-service "
+    + "(--auth-url).")
 public final class TokenCommand implements Callable<Integer> {
 
-  @Option(names = "--key", required = true, description = "ES256 key file (SEC1 PEM); created if missing.")
-  Path key;
+  static final class Source {
+    @Option(names = "--key", required = true, description = "ES256 key file (SEC1 PEM); created if missing.")
+    Path key;
 
-  @Option(names = "--tenant", required = true)
+    @ArgGroup(exclusive = false)
+    AuthOptions auth;
+  }
+
+  @ArgGroup(exclusive = true, multiplicity = "1")
+  Source source;
+
+  @Option(names = "--tenant", description = "Tenant claim (offline signing only; Auth takes it from the client).")
   String tenant;
 
   @Option(names = "--principal", required = true, description = "tenantId:userId")
@@ -35,8 +45,13 @@ public final class TokenCommand implements Callable<Integer> {
 
   @Override
   public Integer call() {
-    System.out.println(new JwtMinter(DevKeys.loadOrCreateEs256(key), "pangate-devtools")
-        .mint(new TokenRequest(tenant, principal, device, topics, ttl), Instant.now()));
+    if (source.auth != null) {
+      System.out.println(source.auth.client().connectToken(principal, device, topics));
+      return 0;
+    }
+    String t = tenant != null ? tenant : principal.substring(0, Math.max(0, principal.indexOf(':')));
+    System.out.println(new JwtMinter(DevKeys.loadOrCreateEs256(source.key), "pangate-devtools")
+        .mint(new TokenRequest(t, principal, device, topics, ttl), Instant.now()));
     return 0;
   }
 }

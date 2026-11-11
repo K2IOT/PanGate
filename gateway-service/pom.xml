@@ -166,6 +166,13 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+      <!-- Push-path contract cases (registry value v2 golden strings), push contracts spec §6 -->
+      <groupId>com.pangate</groupId>
+      <artifactId>platform-contracts-testkit</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>org.testcontainers</groupId>
       <artifactId>kafka</artifactId>
       <scope>test</scope>
@@ -185,6 +192,26 @@
 
   <build>
     <plugins>
+      <plugin>
+        <!-- Extra jar with only com.pangate.gateway.auth (depends on Nimbus + SLF4J): auth-service uses it in a
+             test-scope contract test against the real JwtVerifier. -->
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>verifier-jar</id>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+            <configuration>
+              <classifier>verifier</classifier>
+              <includes>
+                <include>com/pangate/gateway/auth/**</include>
+              </includes>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-enforcer-plugin</artifactId>
@@ -265,6 +292,8 @@
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
+        <!-- the plain jar stays the main artifact: push-router-service's IT runs a real gateway from it -->
+        <configuration><classifier>exec</classifier></configuration>
         <executions>
           <execution>
             <goals>

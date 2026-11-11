@@ -1,0 +1,8 @@
+# Container `push-api` in `make up` (platform-devenv/docker-compose.yml).
+push-api:
+  kafka: { bootstrap: "kafka:29092" }
+  redis: { uri: "redis://redis:6379", topology: standalone }
+  auth:
+    jwks-uri: "http://auth:8090/.well-known/jwks.json"
+    issuer: "http://auth:8090"
+  grpc: { plaintext: true }

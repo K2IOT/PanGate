@@ -1,6 +1,6 @@
 # PanGate dev environment (spec §2.4, §9.1). One file, compose profiles:
-#   (default)  infrastructure (Kafka, Redis); `make infra-up` exposes it on localhost for the IDE (profile local)
-#   app        issuer + fake-pushapi + gateway, built with `make images`
+#   (default)  infrastructure (Kafka, Redis, PostgreSQL); `make infra-up` exposes it on localhost (profile local)
+#   app        auth + push-api + gateway + router, built with `make images`
 #   tools      devtools container for `make smoke`
 name: pangate
 
@@ -50,6 +50,10 @@ services:
           $$t --bootstrap-server $$b --create --if-not-exists --topic c1.gw.upstream.$$ty --partitions 64
         done
         $$t --bootstrap-server $$b --create --if-not-exists --topic gw.control --partitions 8 --config cleanup.policy=compact
+        # push path (docs/superpowers/specs/2026-11-10-push-contracts-design.md §2)
+        $$t --bootstrap-server $$b --create --if-not-exists --topic c1.push.requests --partitions 64 --config retention.ms=86400000
+        $$t --bootstrap-server $$b --create --if-not-exists --topic c1.push.offline --partitions 16 --config retention.ms=604800000
+        $$t --bootstrap-server $$b --create --if-not-exists --topic c1.push.delivered --partitions 16 --config retention.ms=86400000
         echo topics ready
 
   redis:
@@ -60,28 +64,74 @@ services:
       <<: *hc
       test: ["CMD", "redis-cli", "ping"]
 
-  issuer:
+  postgres:
+    image: postgres:16.4
+    environment:
+      POSTGRES_USER: pangate
+      POSTGRES_PASSWORD: pangate
+      POSTGRES_DB: pangate
+    ports:
+      - "5432:5432"
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "pg_isready", "-U", "pangate", "-d", "pangate"]
+
+  # Auth & Token service (docs/superpowers/specs/2026-11-05-auth-service-design.md): JWKS for the gateway, API and
+  # connect tokens, revocations to gw.control. Seed secrets in /dev-secrets/auth/clients.json for devtools.
+  auth:
     profiles: ["app"]
-    image: pangate/gateway-devtools:dev
+    image: pangate/auth-service:dev
     user: "0"
-    command: ["issuer", "--port", "8090", "--key", "/dev-secrets/es256.pem"]
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      JAVA_TOOL_OPTIONS: "-Xmx256m"
     volumes:
       - dev-secrets:/dev-secrets
     ports:
       - "8090:8090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     healthcheck:
       <<: *hc
-      test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.devtools.Main", "health",
-             "http://127.0.0.1:8090/.well-known/jwks.json"]
+      test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.auth.tools.HealthCheck",
+             "http://127.0.0.1:8081/ready"]
 
-  # Push API stand-in (spec §2.4, §6.6): receives the gateway's KICK and sends it back as a CONTROL item.
-  # It dials gateway:9090 only when a KICK arrives, so it can start before the gateway.
-  fake-pushapi:
+  # Push API (docs/superpowers/specs/2026-11-10-push-api-design.md): POST /v1/push for tenant backends, gRPC
+  # SendStream for the gateway's KICK; produces PushRecords to c1.push.requests for the router.
+  push-api:
     profiles: ["app"]
-    image: pangate/gateway-devtools:dev
-    command: ["fake-pushapi", "--port", "9443", "--router", "gateway:9090"]
+    image: pangate/push-api-service:dev
+    stop_grace_period: 20s
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      JAVA_TOOL_OPTIONS: "-Xmx512m"
     ports:
+      - "8085:8080"
       - "9443:9443"
+      - "8084:8081"
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.pushapi.tools.HealthCheck",
+             "http://127.0.0.1:8081/ready"]
+
+  # Push API stand-in, kept as a dev tool (profile tools): KICK → PushRecord CONTROL on Kafka.
+  fake-pushapi:
+    profiles: ["tools"]
+    image: pangate/gateway-devtools:dev
+    command: ["fake-pushapi", "--port", "9443", "--kafka", "kafka:29092"]
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
     healthcheck:
       <<: *hc
       test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.devtools.Main", "health",
@@ -104,9 +154,9 @@ services:
       - "9090:9090"
       - "8081:8081"
     depends_on:
-      issuer:
+      auth:
         condition: service_healthy
-      fake-pushapi:
+      push-api:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
@@ -117,9 +167,32 @@ services:
       test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.gateway.tools.HealthCheck",
              "http://127.0.0.1:8081/ready"]
 
+  # push-router (docs/superpowers/specs/2026-11-10-push-router-design.md): c1.push.requests → gateway gRPC.
+  router:
+    profiles: ["app"]
+    image: pangate/push-router-service:dev
+    stop_grace_period: 20s
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      JAVA_TOOL_OPTIONS: "-Xmx512m"
+    ports:
+      - "8083:8081"
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.router.tools.HealthCheck",
+             "http://127.0.0.1:8081/ready"]
+
   devtools:
     profiles: ["tools"]
     image: pangate/gateway-devtools:dev
+    user: "0"   # reads /dev-secrets/auth/clients.json (mode 600, written by auth as root)
     volumes:
       - dev-secrets:/dev-secrets:ro
 

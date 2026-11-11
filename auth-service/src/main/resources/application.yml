@@ -1,0 +1,64 @@
+# Production defaults (spec §8). Profiles local and dev override selected values.
+spring:
+  application:
+    name: auth-service
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://postgres:5432/pangate
+    username: pangate
+    password: ${AUTH_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 16
+      connection-timeout: 2000   # ms
+  flyway:
+    schemas: auth
+    default-schema: auth
+  jdbc:
+    template:
+      query-timeout: 5s
+
+pangate:
+  service: auth
+
+auth:
+  issuer: https://auth.pangate
+  api-token-ttl: 15m
+  connect-token-max-ttl: 10m
+  revocation-ttl: 24h
+  expiry-interval: 60s
+  keys: { lifetime: 30d, overlap: 7d, publish-ahead: 1h, kek-id: v1, cache-refresh: 60s, rotate-interval: 1h }
+  outbox: { interval: 200ms, batch: 500, keep-sent: 7d }
+  kafka: { control-topic: gw.control, bootstrap-servers: "kafka:9092" }
+  admin-port: 8081
+  seed: { enabled: false }
+
+# Public API on :8090 (server.port); actuator, /ready, /live and /admin/v1 on a second connector :8081
+# (auth.admin-port). PortRoutingFilter keeps each path on its port (spec §1).
+server:
+  port: 8090
+  # Behind the API ingress the client address comes from X-Forwarded-For, trusted only from internal proxies
+  # (server.tomcat.remoteip.internal-proxies, default: private and loopback ranges). The failed-auth IP block of
+  # /oauth2/token depends on it (spec §7); set internal-proxies to the ingress range in each environment.
+  forward-headers-strategy: native
+  shutdown: graceful
+  max-http-request-header-size: 16KB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db,signingKeys
+          additional-path: "server:/ready"
+          show-details: always
+        liveness:
+          include: livenessState
+          additional-path: "server:/live"

@@ -50,10 +50,12 @@ jobs:
           java-version: "21"
           cache: maven
       - run: make bootstrap
-      - name: Kafka + Redis on localhost (spec §9.1 local)
+      - name: Kafka + Redis + PostgreSQL on localhost (spec §9.1 local)
         run: make infra-up
       - name: Start, connect, stop, restart (spec §9.1 R1, R3, R4)
         run: make local-check
+      - name: auth-service from the jar, token through it (auth spec §12 item 2)
+        run: make auth-local-check
       - name: Idle heap per session (10k sessions, < 5 KB)
         run: make memory-check
       - name: Idle load (18k sessions, loop lag p99 < 20 ms)
@@ -81,7 +83,7 @@ jobs:
       - run: make smoke
       - name: Gateway logs on failure
         if: failure()
-        run: docker compose -f platform-devenv/docker-compose.yml --profile app logs --tail 200 gateway fake-pushapi kafka redis
+        run: docker compose -f platform-devenv/docker-compose.yml --profile app logs --tail 200 gateway auth fake-pushapi kafka redis postgres
       - name: Tear down
         if: always()
         run: make down

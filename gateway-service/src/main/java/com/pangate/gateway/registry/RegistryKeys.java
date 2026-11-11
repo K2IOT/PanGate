@@ -16,6 +16,11 @@ public final class RegistryKeys {
     return "node:{" + nodeId + "}";
   }
 
+  /** gRPC address {@code host:port} of the node for push routers (push-router spec §3.1); TTL as the lease. */
+  public static String addr(String nodeId) {
+    return "node:addr:{" + nodeId + "}";
+  }
+
   /** Set while the node drains (spec §7.1, §7.5), so routers stop placing new work on it. */
   public static String draining(String nodeId) {
     return "node:draining:{" + nodeId + "}";

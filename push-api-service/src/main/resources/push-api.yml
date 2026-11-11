@@ -1,0 +1,56 @@
+# Production defaults (push-api spec §6). Profiles local and dev override selected values.
+spring:
+  application:
+    name: push-api-service
+  threads:
+    virtual:
+      enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 10s   # spec §5; compose stop_grace_period is 20 s
+
+pangate:
+  service: push-api
+
+push-api:
+  cell: c1
+  management-port: 8081
+  kafka: { bootstrap: "kafka:9092", produce-timeout: 5s, status-group: push-api-status }
+  redis: { uri: "redis://redis-state:6379", topology: cluster, timeout: 200ms }
+  auth:
+    jwks-uri: "https://auth.pangate/.well-known/jwks.json"
+    issuer: "https://auth.pangate"
+    audience: pangate-api
+  limits: { push-rate: 1000, push-burst: 2000, broadcast-rate: 10, status-rate: 100 }
+  ttl: { default-ttl: 86400s, max: 604800s }
+  idempotency: { ttl: 1h, pending-ttl: 30s, wait-for: 2s }
+  seqepochs: { refresh: 5s }
+  grpc:
+    port: 9443
+    plaintext: false
+    max-in-flight-per-stream: 1000
+    allowed-spiffe: [spiffe://pangate/cell-1/gateway, spiffe://pangate/cell-1/push-router]
+  http: { max-body: 128KB, max-batch: 100, max-batch-body: 1MB }
+
+# Public API on :8080 (server.port); actuator, /ready, /live and /admin/v1 on a second connector :8081
+# (push-api.management-port), as in auth-service.
+server:
+  port: 8080
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,pushapi
+          additional-path: "server:/ready"
+          show-details: always
+        liveness:
+          include: livenessState
+          additional-path: "server:/live"

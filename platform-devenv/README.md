@@ -5,7 +5,7 @@ Local and dev environments for PanGate (spec §2.4, §9.1).
 | Environment | What runs where | Commands |
 |---|---|---|
 | **local** | Gateway in your IDE (profile `local`); infra (Kafka `localhost:9092`, Redis `localhost:6379`) on `localhost` | `make bootstrap infra-up`, then run `GatewayApplication` with profile `local` (or `make run-local`); `make infra-down` to stop |
-| **dev** | Everything in Docker: Kafka, Redis, issuer, `fake-pushapi`, gateway | `make bootstrap images up smoke`, `make down` |
+| **dev** | Everything in Docker: Kafka, Redis, PostgreSQL, auth, `fake-pushapi`, gateway | `make bootstrap images up smoke`, `make down` |
 
 Kafka and Redis can also be installed natively, as long as they listen on `localhost:9092` / `localhost:6379`
 (override with `GATEWAY_KAFKA_BOOTSTRAP`, `GATEWAY_REDIS_REGISTRY_URI`, `GATEWAY_REDIS_STATE_URI`). Topics are created by

@@ -47,7 +47,7 @@ gateway:
     jwks-uri: https://auth/.well-known/jwks.json
     jwks-refresh: 5m
     audience: pangate-gw
-    issuer: ""
+    issuer: https://auth.pangate   # auth-service (spec auth §4.3); profile local overrides
     clock-skew: 30s
   broadcast: { rate-per-loop: 10000 }
   outbound-budget: 4GB
@@ -57,6 +57,7 @@ gateway:
   shed: { cpu: true }
   grpc:
     port: 9090
+    advertise-host: ${HOSTNAME:localhost}   # node:addr:{id} for push routers (push-router spec §3.1)
     plaintext: false
     allowed-spiffe: [spiffe://pangate/cell-1/push-router]
     tls:

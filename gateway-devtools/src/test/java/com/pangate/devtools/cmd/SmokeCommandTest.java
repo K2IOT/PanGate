@@ -20,4 +20,87 @@ class SmokeCommandTest {
     assertThat(code).isEqualTo(2);
     assertThat(err.toString()).contains("--router");
   }
+
+  @Test
+  void kafkaReplacesTheRouterOption() {
+    StringWriter err = new StringWriter();
+    int code = run(err, "smoke", "--url", "wss://localhost:1/v1/ws", "--issuer", "http://localhost:1", "--insecure",
+        "--kafka", "localhost:1");
+    assertThat(code).isEqualTo(1);   // ran (and failed to reach the issuer), no usage error
+    assertThat(err.toString()).doesNotContain("--router");
+  }
+
+  @Test
+  void noRouterFlagNeedsTheRouterOptionAgain() {
+    StringWriter err = new StringWriter();
+    int code = run(err, "smoke", "--url", "wss://localhost:1/v1/ws", "--issuer", "http://localhost:1", "--insecure",
+        "--kafka", "localhost:1", "--no-router");
+    assertThat(code).isEqualTo(2);
+    assertThat(err.toString()).contains("--router");
+  }
+
+  @Test
+  void pushApiOptionReplacesKafkaAndRouter() {
+    StringWriter err = new StringWriter();
+    int code = run(err, "smoke", "--url", "wss://localhost:1/v1/ws", "--auth-url", "http://localhost:1",
+        "--client-file", "/nonexistent.json", "--insecure", "--push-api", "http://localhost:2");
+    assertThat(code).isEqualTo(1);   // ran (and failed to reach auth), no usage error
+    assertThat(err.toString()).doesNotContain("--router");
+  }
+
+  @Test
+  void pushApiNeedsAuthUrl() {
+    StringWriter err = new StringWriter();
+    int code = run(err, "smoke", "--url", "wss://localhost:1/v1/ws", "--issuer", "http://localhost:1", "--insecure",
+        "--push-api", "http://localhost:2");
+    assertThat(code).isEqualTo(2);
+    assertThat(err.toString()).contains("--push-api").contains("--auth-url");
+  }
+
+  private static int run(StringWriter err, String... args) {
+    CommandLine cmd = new CommandLine(new Main());
+    cmd.setErr(new PrintWriter(err));
+    return cmd.execute(args);
+  }
+
+  @Test
+  void issuerAndAuthUrlAreMutuallyExclusive() {
+    StringWriter err = new StringWriter();
+    int code = run(err, "smoke", "--url", "wss://localhost:1/v1/ws", "--router", "r:1", "--insecure",
+        "--issuer", "http://localhost:1", "--auth-url", "http://localhost:2", "--client-file", "/x");
+    assertThat(code).isEqualTo(2);
+    assertThat(err.toString()).contains("mutually exclusive");
+  }
+
+  @Test
+  void oneTokenSourceIsRequired() {
+    StringWriter err = new StringWriter();
+    int code = run(err, "smoke", "--url", "wss://localhost:1/v1/ws", "--router", "r:1", "--insecure");
+    assertThat(code).isEqualTo(2);
+    assertThat(err.toString()).contains("--issuer").contains("--auth-url");
+  }
+
+  @Test
+  void authUrlNeedsAClientFile() {
+    StringWriter err = new StringWriter();
+    int code = run(err, "smoke", "--url", "wss://localhost:1/v1/ws", "--router", "r:1", "--insecure",
+        "--auth-url", "http://localhost:2");
+    assertThat(code).isEqualTo(2);
+    assertThat(err.toString()).contains("--client-file");
+  }
+
+  @Test
+  void tokenCommandNeedsAKeyOrAnAuthUrl() {
+    StringWriter err = new StringWriter();
+    int code = run(err, "token", "--tenant", "t1", "--principal", "t1:u", "--device", "d");
+    assertThat(code).isEqualTo(2);
+    assertThat(err.toString()).contains("--key").contains("--auth-url");
+  }
+
+  @Test
+  void authRunsUseAFreshPrincipalBecauseTheRevokeStepLastsADay() {
+    assertThat(SmokeCommand.principalFor(false)).isEqualTo("t1:smoke");
+    String a = SmokeCommand.principalFor(true);
+    assertThat(a).startsWith("t1:smoke-").isNotEqualTo(SmokeCommand.principalFor(true));
+  }
 }

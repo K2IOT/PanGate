@@ -141,8 +141,30 @@ public final class NodeIdentity implements SmartLifecycle {
         return CompletableFuture.completedFuture(null);
       }
       lastOkMono = monoMillis.getAsLong();
-      return redis.registry().zadd(RegistryKeys.NODES_LIVE, wallMillis.getAsLong(), nodeId).thenApply(x -> null);
+      return redis.registry().zadd(RegistryKeys.NODES_LIVE, wallMillis.getAsLong(), nodeId)
+          .thenCompose(x -> refreshAddress()).thenApply(x -> null);
     });
+  }
+
+  private volatile String address;
+
+  /**
+   * Publishes this node's gRPC address ({@code host:port}) for push routers at once and with every lease renewal,
+   * with the lease's TTL (push-router spec §3.1).
+   */
+  public void advertise(String hostPort) {
+    address = hostPort;
+    try {
+      refreshAddress().toCompletableFuture().get(5, TimeUnit.SECONDS);
+    } catch (Exception e) {
+      log.warn("node {} address not published yet: {}", nodeId, e.toString());
+    }
+  }
+
+  private CompletionStage<?> refreshAddress() {
+    String a = address;
+    return a == null ? CompletableFuture.completedFuture(null)
+        : redis.registry().setex(RegistryKeys.addr(nodeId), LEASE_TTL_SEC, a);
   }
 
   /**
@@ -226,6 +248,9 @@ public final class NodeIdentity implements SmartLifecycle {
       return;
     }
     try {
+      if (address != null) {
+        redis.registry().del(RegistryKeys.addr(nodeId)).get(2, TimeUnit.SECONDS);
+      }
       RELEASE.run(redis.registry(), RegistryKeys.node(nodeId), Long.toString(epoch)).toCompletableFuture()
           .get(2, TimeUnit.SECONDS);
       // Only drop the live marker if no newer incarnation holds the lease.

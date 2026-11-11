@@ -100,6 +100,14 @@ public class PushConfig {
   }
 
   @Bean
+  com.pangate.gateway.downstream.NodeAddressPublisher nodeAddressPublisher(
+      com.pangate.gateway.registry.NodeIdentity identity, GrpcServerLifecycle grpc,
+      @org.springframework.beans.factory.annotation.Value("${gateway.grpc.advertise-host:${HOSTNAME:localhost}}")
+      String advertiseHost) {
+    return new com.pangate.gateway.downstream.NodeAddressPublisher(identity, grpc, advertiseHost);
+  }
+
+  @Bean
   GrpcServerLifecycle grpcServerLifecycle(GatewayProperties p, PushStreamService svc,
       GrpcExecutor grpcExecutor) {
     return new GrpcServerLifecycle(p.grpc(), svc, grpcExecutor.service());

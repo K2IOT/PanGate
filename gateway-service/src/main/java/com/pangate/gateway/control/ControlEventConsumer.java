@@ -2,6 +2,7 @@ package com.pangate.gateway.control;
 
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.pangate.contracts.v1.ControlEvent;
+import com.pangate.contracts.v1.Revoke;
 import com.pangate.gateway.lifecycle.ProcessExit;
 import com.pangate.gateway.metrics.GatewayMetrics;
 import com.pangate.gateway.server.NodeState;
@@ -174,6 +175,7 @@ public final class ControlEventConsumer {
   private void tombstone(String key) {
     switch (ControlKeys.parse(key)) {
       case ControlKeys.RevokeKey k -> each(h -> h.onRevokeRemoved(k.revocationKey()));
+      case ControlKeys.ClientRevokeKey c -> { }
       case ControlKeys.CellMapKey k -> each(h -> h.onCellMapRemoved(k.tenant()));
       case ControlKeys.TenantCfgKey k -> each(h -> h.onTenantCfgRemoved(k.scope(), k.id()));
       case ControlKeys.TraceKey k -> each(h -> h.onTraceRemoved(k.principal()));
@@ -185,6 +187,10 @@ public final class ControlEventConsumer {
   private void event(ControlEvent e) {
     switch (e.getEventCase()) {
       case REVOKE -> {
+        if (e.getRevoke().getTargetCase() == Revoke.TargetCase.CLIENT_ID) {
+          count("revoke_client");  // API-client revocation for Push API; no session to close here
+          return;
+        }
         var key = RevocationList.keyOf(e.getRevoke());
         if (key.isEmpty()) {
           badRecords.increment();

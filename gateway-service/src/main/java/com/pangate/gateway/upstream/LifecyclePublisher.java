@@ -57,6 +57,7 @@ public final class LifecyclePublisher implements SessionListener {
 
   public void publish(Session s, EventType type) {
     Session.Identity id = s.identity();
+    long now = wallMillis.getAsLong();  // one read: at_ms and the event_id time agree
     ConnectionEvent.Builder e = ConnectionEvent.newBuilder()
         .setType(type)
         .setConnId(s.connId())
@@ -68,7 +69,8 @@ public final class LifecyclePublisher implements SessionListener {
         .setCellId(cell)
         .setPlatform(id.platform())
         .setSdkVersion(id.sdkVersion())
-        .setAtMs(wallMillis.getAsLong());
+        .setAtMs(now)
+        .setEventId(EventIds.next(now, java.util.concurrent.ThreadLocalRandom.current()));
     if (type != EventType.EVENT_TYPE_CONNECTED && s.closeCode() != null) {
       e.setCloseCode(s.closeCode().code());
     }

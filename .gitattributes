@@ -1,0 +1,2 @@
+# Golden encodings are binary: never normalise line endings
+*.bin binary

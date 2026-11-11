@@ -87,9 +87,16 @@ public final class GrpcServerLifecycle implements SmartLifecycle {
     service.completeAll();
     s.shutdown();
     try {
-      if (!s.awaitTermination(5, TimeUnit.SECONDS)) {
-        s.shutdownNow();
-        s.awaitTermination(1, TimeUnit.SECONDS);
+      // A call accepted just before shutdown() can reach the service after the first completeAll(); the router never
+      // half-closes, so keep ending late streams while waiting instead of sitting out the whole 5 s.
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+      while (!s.awaitTermination(50, TimeUnit.MILLISECONDS)) {
+        if (System.nanoTime() >= deadline) {
+          s.shutdownNow();
+          s.awaitTermination(1, TimeUnit.SECONDS);
+          break;
+        }
+        service.completeAll();
       }
     } catch (InterruptedException e) {
       s.shutdownNow();

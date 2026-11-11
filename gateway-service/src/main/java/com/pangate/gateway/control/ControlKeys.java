@@ -6,10 +6,13 @@ import com.pangate.gateway.auth.ResumeTicketService;
 /** Parses gw.control record keys (contract in control.proto); used for tombstones, whose value is empty. */
 public final class ControlKeys {
 
-  public sealed interface Parsed permits RevokeKey, CellMapKey, TenantCfgKey, TraceKey, Unknown {}
+  public sealed interface Parsed permits RevokeKey, ClientRevokeKey, CellMapKey, TenantCfgKey, TraceKey, Unknown {}
 
   /** {@code revocationKey} is already in {@link RevocationList} form (jti hashed). */
   public record RevokeKey(String revocationKey) implements Parsed {}
+
+  /** {@code revoke:c:<client_id>}: an auth-service API client; not a session revocation, so the gateway ignores it. */
+  public record ClientRevokeKey(String clientId) implements Parsed {}
 
   public record CellMapKey(String tenant) implements Parsed {}
 
@@ -34,6 +37,9 @@ public final class ControlKeys {
     }
     if (key.startsWith("revoke:j:") && key.length() > 9) {
       return new RevokeKey(RevocationList.jtiKey(ResumeTicketService.jtiHash(key.substring(9))));
+    }
+    if (key.startsWith("revoke:c:") && key.length() > 9) {
+      return new ClientRevokeKey(key.substring(9));
     }
     if (key.startsWith("cellmap:") && key.length() > 8) {
       return new CellMapKey(key.substring(8));

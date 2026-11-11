@@ -3,6 +3,7 @@ package com.pangate.devtools.router;
 import com.pangate.contracts.v1.PushRequest;
 import com.pangate.contracts.v1.PushResponse;
 import com.pangate.contracts.v1.PushServiceGrpc;
+import com.pangate.devtools.push.PushProducer;
 import io.grpc.Server;
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
 import io.grpc.protobuf.services.HealthStatusManager;
@@ -16,18 +17,22 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * Stand-in for the Push API (spec §2.3, §6.6): receives the gateways' KICK on {@code PushService.SendStream} and
- * forwards it as {@code PushItem CONTROL} to every configured gateway through a {@link FakeRouter}. Serves gRPC health.
+ * Stand-in for the Push API (spec §2.3, §6.6): receives the gateways' KICK on {@code PushService.SendStream}. With a
+ * {@link PushProducer} it produces {@code PushRecord{CONTROL}} to {@code cN.push.requests} for the push-router, and
+ * answers once Kafka acked; without one (no router running) it forwards {@code PushItem CONTROL} straight to every
+ * configured gateway through a {@link FakeRouter}. Serves gRPC health.
  */
 public final class FakePushApi implements AutoCloseable {
 
   private final Server server;
   private final List<String> routerTargets;
+  private final PushProducer kafka;
   private final Map<String, FakeRouter> routers = new ConcurrentHashMap<>();
   private final List<PushRequest> received = new CopyOnWriteArrayList<>();
 
-  private FakePushApi(int port, List<String> routerTargets) {
+  private FakePushApi(int port, List<String> routerTargets, PushProducer kafka) {
     this.routerTargets = List.copyOf(routerTargets);
+    this.kafka = kafka;
     HealthStatusManager health = new HealthStatusManager();
     try {
       server = NettyServerBuilder.forPort(port).addService(new Service()).addService(health.getHealthService())
@@ -38,8 +43,14 @@ public final class FakePushApi implements AutoCloseable {
     health.setStatus("", io.grpc.health.v1.HealthCheckResponse.ServingStatus.SERVING);
   }
 
+  /** Forwards CONTROL directly to these gateways (devenv without the push-router). */
   public static FakePushApi start(int port, List<String> routerTargets) {
-    return new FakePushApi(port, routerTargets);
+    return new FakePushApi(port, routerTargets, null);
+  }
+
+  /** Produces CONTROL to Kafka for the push-router. */
+  public static FakePushApi start(int port, PushProducer kafka) {
+    return new FakePushApi(port, List.of(), kafka);
   }
 
   public int port() {
@@ -67,12 +78,17 @@ public final class FakePushApi implements AutoCloseable {
             if (r.getKind() != PushRequest.Kind.KIND_CONTROL) {
               throw new IllegalArgumentException("unsupported kind " + r.getKind());
             }
-            for (String t : routerTargets) {
-              router(t).control(r.getTenantId(), r.getPrincipalId(), r.getControl());
+            if (kafka != null) {
+              res.setMsgId(kafka.control(r.getPrincipalId(), r.getControl()).getMsgId());
+            } else {
+              for (String t : routerTargets) {
+                router(t).control(r.getTenantId(), r.getPrincipalId(), r.getControl());
+              }
             }
-            res.setOk(true);
-          } catch (RuntimeException e) {
-            res.setOk(false).setError(e.toString());
+            res.setOk(true).setCode(PushResponse.Code.CODE_OK);
+          } catch (RuntimeException | AssertionError e) {
+            res.setOk(false).setCode(e instanceof IllegalArgumentException || e instanceof AssertionError
+                ? PushResponse.Code.CODE_INVALID : PushResponse.Code.CODE_UNAVAILABLE).setError(e.toString());
           }
           synchronized (out) {
             out.onNext(res.build());
@@ -96,5 +112,8 @@ public final class FakePushApi implements AutoCloseable {
   public void close() {
     routers.values().forEach(FakeRouter::close);
     server.shutdownNow();
+    if (kafka != null) {
+      kafka.close();
+    }
   }
 }

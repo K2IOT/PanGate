@@ -33,7 +33,7 @@ public final class RevocationList {
       case DEVICE -> r.getDevice().getPrincipalId().isEmpty() || r.getDevice().getDeviceId().isEmpty()
           ? Optional.empty() : Optional.of(deviceKey(r.getDevice().getPrincipalId(), r.getDevice().getDeviceId()));
       case JTI -> r.getJti().isEmpty() ? Optional.empty() : Optional.of(jtiKey(ResumeTicketService.jtiHash(r.getJti())));
-      case TARGET_NOT_SET -> Optional.empty();
+      case CLIENT_ID, TARGET_NOT_SET -> Optional.empty();
     };
   }
 

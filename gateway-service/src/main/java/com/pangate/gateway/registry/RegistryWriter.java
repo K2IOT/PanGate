@@ -15,7 +15,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 /**
- * Writes {@code reg:{principal}} (spec §6.2): field = connId, value = {@code nodeId|epoch|connectedAtMs|platform}.
+ * Writes {@code reg:{principal}} (spec §6.2): field = connId, value v2 = {@code nodeId|epoch|connectedAtMs|platform|device}
+ * (push contracts spec §4: device last, may contain '|'; readers split with a limit of 5 and accept 4-part v1).
  * Fire-and-forget from the event loop; failures go to the {@link RetryQueue}. Stale entries are swept by the push
  * router, not the gateway.
  */
@@ -50,8 +51,10 @@ public final class RegistryWriter implements SessionListener {
     this.redisErrors = metrics.counter("gw.registry.write.errors", "reason", "redis");
   }
 
-  static String value(String nodeId, long epoch, long connectedAtMs, String platform) {
-    return nodeId + "|" + epoch + "|" + connectedAtMs + "|" + (platform == null ? "" : platform);
+  static String value(String nodeId, long epoch, long connectedAtMs, String platform, String device) {
+    // platform comes from the client's HELLO: a '|' in it would shift the device (push contracts spec §4, §5)
+    return nodeId + "|" + epoch + "|" + connectedAtMs + "|" + (platform == null ? "" : platform.replace('|', '_'))
+        + "|" + (device == null ? "" : device);
   }
 
   /**
@@ -127,7 +130,7 @@ public final class RegistryWriter implements SessionListener {
     }
   }
 
-  /** {@code nodeId|epoch|connectedAtMs|platform} → connectedAtMs, or -1 if malformed. */
+  /** v1 or v2 value → connectedAtMs (third part), or -1 if malformed. */
   static long connectedAtMs(String value) {
     String[] parts = value.split("\\|", -1);
     try {
@@ -159,7 +162,8 @@ public final class RegistryWriter implements SessionListener {
     String principal = s.identity().principalId();
     try {
       return REGISTER.<List<Object>>run(redis.registry(), RegistryKeys.reg(principal), s.connId(),
-          value(node.nodeId(), node.epoch(), s.connectedAtMs(), s.identity().platform()), single ? "1" : "0")
+          value(node.nodeId(), node.epoch(), s.connectedAtMs(), s.identity().platform(),
+              s.identity().deviceId()), single ? "1" : "0")
           .thenApply(RegistryWriter::toMap);
     } catch (RuntimeException e) {
       return CompletableFuture.failedFuture(e);

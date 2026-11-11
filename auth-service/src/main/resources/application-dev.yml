@@ -1,0 +1,10 @@
+# Container in `make up` (platform-devenv/docker-compose.yml).
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/pangate
+    username: pangate
+    password: pangate
+auth:
+  issuer: http://auth:8090
+  kafka: { bootstrap-servers: "kafka:29092" }
+  seed: { enabled: true, dir: /dev-secrets/auth }

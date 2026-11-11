@@ -1,0 +1,7 @@
+# Run from the IDE or `make router-local` against `make infra-up` and a local gateway.
+router:
+  kafka: { bootstrap: "localhost:9092" }
+  registry: { uri: "redis://localhost:6379", topology: standalone }
+  grpc: { plaintext: true }
+server:
+  port: 8083

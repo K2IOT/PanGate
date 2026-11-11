@@ -4,6 +4,7 @@
 //   revoke:p:<principal>            Revoke{principal_id}
 //   revoke:d:<principal>/<device>   Revoke{device}
 //   revoke:j:<jti>                  Revoke{jti}
+//   revoke:c:<client_id>            Revoke{client_id} (API clients; the gateway ignores it)
 //   cellmap:<tenant>                CellMap
 //   tenantcfg:fleet                 TenantCfg{scope=FLEET}
 //   tenantcfg:cell:<cell>           TenantCfg{scope=CELL}
@@ -31,6 +32,7 @@ message Revoke {
     string principal_id = 1;
     DeviceRef device = 2;  // a device id is only unique within its principal
     string jti = 3;
+    string client_id = 5;  // an API client of auth-service; enforced by Push API, ignored by the gateway
   }
   int64 expires_at_ms = 4;
 }
@@ -75,6 +77,9 @@ message TenantLimits {
   optional string min_sdk_version = 5;
   repeated string origin_allowlist = 6;  // empty = does not override (an empty effective list allows every origin)
   optional bool single_session = 7;
+  optional uint32 push_rate = 8;       // Push API: MESSAGE records/s per Push API pod (push-api spec §4.1); gateway ignores
+  optional uint32 push_burst = 9;      // Push API: MESSAGE bucket size per pod
+  optional uint32 broadcast_rate = 10; // Push API: BROADCAST records/s per pod (burst = rate)
 }
 
 message KillSwitches {
