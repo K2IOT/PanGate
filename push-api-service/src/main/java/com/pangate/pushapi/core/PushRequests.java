@@ -79,7 +79,7 @@ public final class PushRequests {
       check(bytes(r.getDeviceId()) <= MAX_DEVICE_BYTES && r.getDeviceId().indexOf('/') < 0, "V6",
           "device_id is 1..128 bytes without '/'");
     }
-    check(r.getPayload().size() <= MAX_PAYLOAD_BYTES && r.getTtlSec() <= MAX_TTL_SEC, "V7",
+    check(r.getPayload().size() <= MAX_PAYLOAD_BYTES && Integer.toUnsignedLong(r.getTtlSec()) <= MAX_TTL_SEC, "V7",
         "payload at most 65536 bytes, ttl_sec at most 604800");
     check(!r.getTenantId().isEmpty() && !WARMUP_TENANT.equals(r.getTenantId()), "V8", "tenant_id is required");
     DeliveryClass c = r.getClass_();

@@ -162,7 +162,7 @@ Lõi (`PushRequests`, `HttpMapping`, `Callers`, `TenantPolicies`, `RateLimiter`,
 ### 3.1 Cấp seq
 
 - `INCR seq:{p}` / `INCR topicseq:{t}` trên Redis state, timeout `redis.timeout` (200 ms) → `CODE_UNAVAILABLE`.
-- `seq_epoch` = `seqepochs[SeqKeys.slot(principal)]` từ cache `int[16384]` (slot không có = 0), làm mới bằng `HGETALL seqepochs` mỗi `seqepochs.refresh` (5 s) và ngay sau mỗi lần bump. BROADCAST không có epoch.
+- `seq_epoch` = `seqepochs[SeqKeys.epochSlot(principal)]` (slot của key `seq:{p}`) từ cache `int[16384]` (slot không có = 0), làm mới bằng `HGETALL seqepochs` mỗi `seqepochs.refresh` (5 s) và ngay sau mỗi lần bump. BROADCAST không có epoch.
 - **Seq lùi:** một LRU 100 000 mục giữ seq lớn nhất pod đã cấp cho mỗi principal. Nếu `INCR` trả giá trị ≤ giá trị đó, `SeqAllocator` gọi `SeqEpochWatcher` ngay, chờ bump xong rồi cấp lại (`pushapi.seqepoch.bumps{reason=regression}` nếu watcher bump).
 
 ### 3.2 Phát hiện failover (`SeqEpochWatcher`)

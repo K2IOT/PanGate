@@ -27,7 +27,7 @@ public final class RedisSeqEpochs implements SeqEpochs {
 
   @Override
   public int epoch(String principal) {
-    return epochs[SeqKeys.slot(principal)];
+    return epochs[SeqKeys.epochSlot(principal)];
   }
 
   @Override

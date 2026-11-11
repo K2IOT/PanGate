@@ -17,4 +17,12 @@ class SeqKeysTest {
     assertThat(SeqKeys.slot("hello")).isEqualTo(866);
     assertThat(SeqKeys.slot("t1:u1")).isBetween(0, 16383);
   }
+
+  /** PR review: the epoch of a principal lives at the slot of its seq key, the shard whose failover resets it. */
+  @Test
+  void epochSlotIsTheSlotOfTheSeqKey() {
+    assertThat(SeqKeys.epochSlot("t1:{user}")).isEqualTo(SeqKeys.slot("seq:{t1:{user}}"))
+        .isNotEqualTo(SeqKeys.slot("t1:{user}"));
+    assertThat(SeqKeys.epochSlot("t1:u1")).isEqualTo(SeqKeys.slot("t1:u1"));   // no braces: unchanged
+  }
 }

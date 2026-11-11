@@ -61,6 +61,15 @@ class RedisStoresIT {
     assertThat(epochs.epoch("t1:other-slot-xyz")).isZero();
   }
 
+  /** PR review: a principal with braces reads its epoch at the slot of its seq key. */
+  @Test
+  void epochOfAPrincipalWithBracesFollowsItsSeqKey() throws Exception {
+    RedisSeqEpochs epochs = new RedisSeqEpochs(state);
+    state.async().hset(SeqKeys.SEQ_EPOCHS, Integer.toString(SeqKeys.slot("seq:{t1:{user}}")), "4").get();
+    epochs.refreshNow();
+    assertThat(epochs.epoch("t1:{user}")).isEqualTo(4);
+  }
+
   /** Final review: a refresh that reads a lost hash (restart without persistence) must not lower the bump floor. */
   @Test
   void aRefreshNeverLowersAnEpoch() throws Exception {

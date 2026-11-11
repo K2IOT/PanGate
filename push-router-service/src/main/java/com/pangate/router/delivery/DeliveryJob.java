@@ -27,6 +27,8 @@ import java.util.function.Supplier;
  */
 public final class DeliveryJob {
 
+  private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(DeliveryJob.class);
+
   private final Connections conns;
   private final Links links;
   private final Supplier<Collection<Node>> liveNodes;
@@ -218,13 +220,33 @@ public final class DeliveryJob {
     PushItem item = PushItem.newBuilder().setKind(PushItem.Kind.KIND_CONTROL).setTenantId(r.getTenantId())
         .setPrincipalId(r.getPrincipalId()).setControl(r.getControl()).setPriority(r.getPriority())
         .setEnqueuedAtMs(r.getAcceptedAtMs()).build();
-    List<CompletableFuture<Status>> written = new ArrayList<>();
-    nodes.forEach(n -> written.add(sendTo(n, item)));
-    if (!r.getControl().hasKick()) {
-      awaitAll(written);
+    // a CONTROL future completes once the item is written to the gateway's stream (no client ACK). A write that
+    // failed fast (link closed, not found, queue full) is sent again while the node is live, on the retry schedule;
+    // a write that does not complete within ack-timeout is not resent, so one stuck link holds the key that long only
+    List<String> pending = new ArrayList<>(nodes);
+    for (int round = 0; round <= retries.size() && !pending.isEmpty(); round++) {
+      if (round > 0) {
+        pause(retries.get(round - 1));
+        Set<String> live = new java.util.HashSet<>();
+        liveNodes.get().forEach(n -> live.add(n.id()));
+        pending.retainAll(live);
+      }
+      List<CompletableFuture<Status>> written = new ArrayList<>(pending.size());
+      pending.forEach(n -> written.add(sendTo(n, item)));
+      long deadline = System.nanoTime() + ackTimeout.toNanos();
+      List<String> failed = new ArrayList<>();
+      for (int i = 0; i < pending.size(); i++) {
+        Status s = await(written.get(i), deadline);
+        if (s == Status.STATUS_NACK_CLOSED || s == Status.STATUS_NACK_NOT_FOUND || s == Status.STATUS_NACK_OVERFLOW) {
+          failed.add(pending.get(i));
+        }
+      }
+      pending = failed;
     }
-    // a KICK reaches every live node, and its ack changes nothing (no retry, no outcome): waiting would hold the
-    // partition for the slowest node in the fleet; each link still writes it in order before later items
+    if (!pending.isEmpty()) {
+      log.warn("CONTROL {} for {} not written to {} after {} retries", r.getMsgId(), r.getPrincipalId(), pending,
+          retries.size());
+    }
     return DeliveryResult.DELIVERED;
   }
 

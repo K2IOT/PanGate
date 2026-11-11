@@ -258,7 +258,7 @@ Gateway đọc state mà Push API ghi (spec gateway §6.7, §14.1). Contract nà
 | State | Định dạng | Ai ghi / ai đọc |
 |---|---|---|
 | `seq:{<principal>}` (Redis state) | Số thập phân, `INCR` một lần cho mỗi MESSAGE RELIABLE/ORDERED tới **principal**; chưa có key = 0 | Push API ghi; gateway `GET` khi HELLO để điền `CONNECTED.seq` |
-| `seqepochs` (hash, Redis state) | field là slot (thập phân 0..16383), value là `seqEpoch` (thập phân); slot không có = 0. Slot = slot Redis Cluster của chuỗi principal (CRC16-XMODEM mod 16384, có tôn trọng hash tag), như `SlotHash.getSlot` của Lettuce | Push API ghi khi bump epoch sau failover; gateway `HGETALL` mỗi 5 s |
+| `seqepochs` (hash, Redis state) | field là slot (thập phân 0..16383), value là `seqEpoch` (thập phân); slot không có = 0. Slot = slot Redis Cluster của key `seq:{principal}` (CRC16-XMODEM mod 16384, có tôn trọng hash tag, như `SlotHash.getSlot` của Lettuce; `SeqKeys.epochSlot`), tức shard giữ seq đó. Với principal không có `{`/`}` thì trùng slot của chuỗi principal (review PR #2) | Push API ghi khi bump epoch sau failover; gateway `HGETALL` mỗi 5 s |
 | `topicseq:{<topic>}` (Redis state) | Như `seq:{p}`, cho mỗi BROADCAST RELIABLE/ORDERED | Chỉ Push API |
 | Idempotency `idem:{<tenant>}:{<idempotency_key>}` | Lưu `PushResponse` đầu tiên, TTL 1 h. Request trùng key trong cùng tenant trả **đúng response đó** với `duplicate = true` và `CODE_OK`, không produce lần nữa. **Không** so sánh body: cùng key với body khác vẫn là duplicate | Chỉ Push API |
 

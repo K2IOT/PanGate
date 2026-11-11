@@ -93,6 +93,8 @@ public final class PushRequestCases {
     c.add(new Case("V7 payload 65537 bytes", "V7", message().setPayload(bytes(65_537)).build(), Code.CODE_INVALID));
     c.add(new Case("V7 ttl 604800", "V7", message().setTtlSec(604_800).build(), Code.CODE_OK));
     c.add(new Case("V7 ttl 604801", "V7", message().setTtlSec(604_801).build(), Code.CODE_INVALID));
+    // ttl_sec is uint32: 4 294 967 295 reads as -1 in Java and must not pass an int comparison
+    c.add(new Case("V7 ttl 4294967295 (uint32)", "V7", message().setTtlSec(-1).build(), Code.CODE_INVALID));
 
     c.add(new Case("V8 tenant t1", "V8", message().build(), Code.CODE_OK));
     c.add(new Case("V8 empty tenant", "V8", message().setTenantId("").setPrincipalId(":u1").build(),

@@ -18,6 +18,14 @@ public final class SeqKeys {
     return "seq:{" + principal + "}";
   }
 
+  /**
+   * The {@code seqepochs} field of a principal: the slot of its {@code seq:{principal}} key, so the epoch is bumped
+   * with the shard that holds the seq. Same as the principal's own slot unless the principal contains braces.
+   */
+  public static int epochSlot(String principal) {
+    return slot(seq(principal));
+  }
+
   public static int slot(String key) {
     byte[] b = key.getBytes(StandardCharsets.UTF_8);
     int start = 0;

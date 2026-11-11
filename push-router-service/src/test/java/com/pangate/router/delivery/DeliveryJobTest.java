@@ -357,16 +357,38 @@ class DeliveryJobTest {
     assertThat(sent).containsExactlyInAnyOrder("n1/KIND_CONTROL/", "n2/KIND_CONTROL/", "nd/KIND_CONTROL/");
   }
 
-  /** Final review minor: a KICK goes to every node, so it must not wait for the slowest one (ack timeout 30 s here). */
+  /** PR review: a KICK whose write never completes costs at most ack-timeout and is not resent. */
   @Test
-  void kickDoesNotWaitForASilentNode() {
-    answer = (n, i) -> n.equals("n1") ? new CompletableFuture<>() : done(Status.STATUS_ACKED);
-    DeliveryJob j = new DeliveryJob(conns, links, () -> nodes.values(), recorder, () -> now, Duration.ofSeconds(30),
-        List.of(Duration.ofMillis(100), Duration.ofMillis(400)), sleeps::add);
+  void kickToASilentNodeGivesUpAfterTheAckTimeout() {
+    answer = (n, i) -> n.equals("n1") ? new CompletableFuture<>() : done(Status.STATUS_WRITTEN);
     PushRecord c = Fixtures.control("t1:u1", Fixtures.kick("NEW", 1));
-    assertThat(org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(Duration.ofSeconds(2), () -> j.run(c)))
+    assertThat(org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(Duration.ofSeconds(2), () -> job().run(c)))
         .isEqualTo(DeliveryResult.DELIVERED);
     assertThat(sent).hasSize(3);
+  }
+
+  /** PR review: a KICK that failed to reach a live gateway (link closed) is written again. */
+  @Test
+  void kickWriteThatFailedIsRetried() {
+    java.util.concurrent.atomic.AtomicInteger n1 = new java.util.concurrent.atomic.AtomicInteger();
+    answer = (n, i) -> n.equals("n1") && n1.incrementAndGet() == 1 ? done(Status.STATUS_NACK_CLOSED)
+        : done(Status.STATUS_WRITTEN);
+    PushRecord c = Fixtures.control("t1:u1", Fixtures.kick("NEW", 1));
+    assertThat(job().run(c)).isEqualTo(DeliveryResult.DELIVERED);
+    assertThat(sent.stream().filter(x -> x.startsWith("n1/"))).hasSize(2);
+    assertThat(sent.stream().filter(x -> x.startsWith("n2/"))).hasSize(1);
+    assertThat(sleeps).containsExactly(Duration.ofMillis(100));
+  }
+
+  /** PR review: a CONTROL whose gateway keeps failing is given up after the retries, never retried forever. */
+  @Test
+  void controlToAFailingNodeGivesUpAfterTheRetries() {
+    sessionsAnswer = List.of(conn("C1", "n1"));
+    answer = (n, i) -> done(Status.STATUS_NACK_OVERFLOW);
+    PushRecord c = Fixtures.control("t1:u1", Fixtures.subscribe("t1:news"));
+    assertThat(job().run(c)).isEqualTo(DeliveryResult.DELIVERED);
+    assertThat(sent).hasSize(3);
+    assertThat(sleeps).containsExactly(Duration.ofMillis(100), Duration.ofMillis(400));
   }
 
   /** Flow review (contracts §1.1a): an expired BROADCAST is dropped, not delivered late. */

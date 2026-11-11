@@ -17,4 +17,12 @@ class SeqStateContractTest {
     }
     assertThat(RegistryKeys.SEQ_EPOCHS).isEqualTo(SeqKeys.SEQ_EPOCHS);
   }
+
+  /** PR review: the epoch is read at the slot of the seq key, where Push API bumps it, braces included. */
+  @Test
+  void epochSlotIsTheSlotOfTheSeqKey() {
+    for (String p : new String[] {"t1:u1", "t1:{user}", "t1:a}b", "t1:é"}) {
+      assertThat(RedisSeqReader.epochSlot(p)).as(p).isEqualTo(SeqKeys.epochSlot(p));
+    }
+  }
 }
