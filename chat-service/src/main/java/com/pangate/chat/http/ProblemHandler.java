@@ -26,6 +26,21 @@ public class ProblemHandler {
     return b.body(Problems.of(e.status(), e.code(), e.getMessage()));
   }
 
+  @ExceptionHandler(com.pangate.chat.core.ChatRefusal.class)
+  ResponseEntity<ProblemDetail> refusal(com.pangate.chat.core.ChatRefusal e) {
+    int status = switch (e.code()) {
+      case com.pangate.chat.core.ChatRefusal.FORBIDDEN -> 403;
+      case com.pangate.chat.core.ChatRefusal.NOT_FOUND -> 404;
+      default -> 400;
+    };
+    return ResponseEntity.status(status).body(Problems.of(status, e.code(), e.getMessage()));
+  }
+
+  @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
+  ProblemDetail badParameter(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException e) {
+    return Problems.of(400, "invalid_request", "bad parameter " + e.getName());
+  }
+
   @ExceptionHandler(HttpMessageNotReadableException.class)
   ProblemDetail unreadable(HttpMessageNotReadableException e) {
     return Problems.of(400, "invalid_request", "the body must be a JSON object");

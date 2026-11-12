@@ -7,11 +7,14 @@ import com.pangate.chat.auth.RevocationListener;
 import com.pangate.chat.auth.Revocations;
 import com.pangate.chat.core.ChatStores;
 import com.pangate.chat.core.ChatStores.StoredMessage;
+import com.pangate.chat.core.Conversations;
 import com.pangate.chat.core.Ingest;
+import com.pangate.chat.core.SyncService;
 import com.pangate.chat.core.MemberLookup;
 import com.pangate.chat.core.Notifier;
 import com.pangate.chat.core.PushNotifier;
 import com.pangate.chat.core.Sequencer;
+import com.pangate.chat.http.ApiMetrics;
 import com.pangate.chat.http.AuthFilter;
 import com.pangate.chat.http.PortRoutingFilter;
 import com.pangate.chat.kafka.CommandProducer;
@@ -116,6 +119,26 @@ public class ChatConfig {
       public void put(StoredMessage m) {
         store.put(m);
         cache.put(m);
+      }
+    };
+  }
+
+  @Bean
+  Conversations conversations(ScyllaChatStore store, RedisChatCache cache, ChatProperties p) {
+    return new Conversations(store, store, new MemberLookup(store, cache), p.limits());
+  }
+
+  @Bean
+  SyncService syncService(ScyllaChatStore store) {
+    return new SyncService(store, store, store);
+  }
+
+  @Bean
+  org.springframework.web.servlet.config.annotation.WebMvcConfigurer apiMetrics(MeterRegistry meters) {
+    return new org.springframework.web.servlet.config.annotation.WebMvcConfigurer() {
+      @Override
+      public void addInterceptors(org.springframework.web.servlet.config.annotation.InterceptorRegistry r) {
+        r.addInterceptor(new ApiMetrics(meters));
       }
     };
   }
