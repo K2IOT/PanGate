@@ -21,7 +21,7 @@ import org.slf4j.LoggerFactory;
  * ({@code dedup:{conv}:{sender}:{clientMsgId}}, TTL 24 h). A cache: every Redis failure reads as a miss and a write
  * is dropped, so a Redis outage only costs ScyllaDB reads.
  */
-public final class RedisChatCache implements ChatStores.MemberCache, AutoCloseable {
+public final class RedisChatCache implements ChatStores.MemberCache, ChatStores.DedupStore, AutoCloseable {
 
   private static final Logger log = LoggerFactory.getLogger(RedisChatCache.class);
   static final Duration DEDUP_TTL = Duration.ofHours(24);
@@ -127,6 +127,16 @@ public final class RedisChatCache implements ChatStores.MemberCache, AutoCloseab
     } catch (RuntimeException e) {
       return Optional.empty();
     }
+  }
+
+  @Override
+  public Optional<StoredMessage> find(String convId, String senderId, String clientMsgId) {
+    return dedup(convId, senderId, clientMsgId);
+  }
+
+  @Override
+  public void put(StoredMessage m) {
+    putDedup(m);
   }
 
   public void putDedup(StoredMessage m) {

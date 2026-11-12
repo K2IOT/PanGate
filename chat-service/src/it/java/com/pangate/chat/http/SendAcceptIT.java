@@ -58,7 +58,7 @@ import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.scylladb.ScyllaDBContainer;
 import org.testcontainers.utility.DockerImageName;
 
-/** The whole service on real Kafka, ScyllaDB and Redis: auth, ports, readiness and the 202 send path (Task 4). */
+/** The whole service on real Kafka, ScyllaDB and Redis: auth, ports, readiness and the accepted send path. */
 class SendAcceptIT {
 
   static final String ISS = "https://auth.pangate";
@@ -166,8 +166,8 @@ class SendAcceptIT {
 
     assertThat(send(http, conv, null, k).statusCode()).isEqualTo(401);
     HttpResponse<String> ok = send(http, conv, t, k);
-    assertThat(ok.statusCode()).isEqualTo(202);
-    assertThat(ok.body()).contains(k);
+    assertThat(ok.statusCode()).isIn(201, 202);   // 201 once the sequencer answers within the wait
+    assertThat(ok.body()).contains(ok.statusCode() == 202 ? k : "\"convSeq\":1");
     assertThat(send(http, Ids.next(), t, Ids.next()).statusCode()).isEqualTo(404);
     assertThat(send(http, conv, token("chat:u2", "d1", System.currentTimeMillis() - 1_000), Ids.next())
         .statusCode()).isEqualTo(403);

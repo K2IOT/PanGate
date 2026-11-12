@@ -24,13 +24,19 @@ public final class CommandProducer implements CommandSink, AutoCloseable {
 
   private final Producer<String, byte[]> producer;
   private final Duration timeout;
+  private final String commandsTopic;
 
-  public CommandProducer(Producer<String, byte[]> producer, Duration timeout) {
+  public CommandProducer(Producer<String, byte[]> producer, Duration timeout, String commandsTopic) {
     this.producer = producer;
     this.timeout = timeout;
+    this.commandsTopic = commandsTopic;
   }
 
   public static CommandProducer create(String bootstrap, Duration timeout) {
+    return create(bootstrap, timeout, ChatTopics.COMMANDS);
+  }
+
+  public static CommandProducer create(String bootstrap, Duration timeout, String commandsTopic) {
     int ms = (int) timeout.toMillis();
     Map<String, Object> cfg = new HashMap<>();
     cfg.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap);
@@ -42,12 +48,13 @@ public final class CommandProducer implements CommandSink, AutoCloseable {
     cfg.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, ms);
     cfg.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, ms + 2);
     cfg.put(ProducerConfig.CLIENT_ID_CONFIG, "chat-ingest");
-    return new CommandProducer(new KafkaProducer<>(cfg, new StringSerializer(), new ByteArraySerializer()), timeout);
+    return new CommandProducer(new KafkaProducer<>(cfg, new StringSerializer(), new ByteArraySerializer()), timeout,
+        commandsTopic);
   }
 
   @Override
   public void publish(ChatCommand c) {
-    send(new ProducerRecord<>(ChatTopics.COMMANDS, c.getSend().getConversationId(), c.toByteArray()));
+    send(new ProducerRecord<>(commandsTopic, c.getSend().getConversationId(), c.toByteArray()));
   }
 
   /** The original record, with a {@code reason} header. */

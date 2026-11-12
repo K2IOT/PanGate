@@ -42,7 +42,8 @@ class SendControllerTest {
       }
       return new ConnectTokenVerifier.Caller("u1", "d1", "J1");
     });
-    mvc = MockMvcBuilders.standaloneSetup(new SendController(ingest)).setControllerAdvice(new ProblemHandler())
+    mvc = MockMvcBuilders.standaloneSetup(new SendController(ingest, stores, com.pangate.chat.core.SendResults.NONE,
+        "http:test", java.time.Duration.ZERO)).setControllerAdvice(new ProblemHandler())
         .addFilters(auth).build();
   }
 
@@ -57,7 +58,20 @@ class SendControllerTest {
       assertThat(c.getSend().getClientMsgId()).isEqualTo(key);
       assertThat(c.getSenderId()).isEqualTo("u1");
       assertThat(c.getSenderDeviceId()).isEqualTo("d1");
+      assertThat(c.getReplyTo()).isEqualTo("http:test");
     });
+  }
+
+  @Test
+  void aKeyAlreadySequencedIs201WithoutANewCommand() throws Exception {
+    String key = Ids.next();
+    stores.put(new com.pangate.chat.core.ChatStores.StoredMessage(conv, 7, "01JD0M5G00000000000000000M", "u1", key,
+        "", "", List.of(), 1234));
+    mvc.perform(post("/v1/conversations/" + conv + "/messages").header("Authorization", "Bearer u1")
+        .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content("{\"text\":\"hi\"}"))
+        .andExpect(status().isCreated()).andExpect(jsonPath("$.convSeq").value(7))
+        .andExpect(jsonPath("$.msgId").value("01JD0M5G00000000000000000M")).andExpect(jsonPath("$.sentAt").value(1234));
+    assertThat(published).isEmpty();
   }
 
   @Test

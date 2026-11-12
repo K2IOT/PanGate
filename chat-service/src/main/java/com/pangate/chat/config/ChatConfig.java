@@ -5,18 +5,26 @@ import com.pangate.chat.auth.ConnectTokenVerifier;
 import com.pangate.chat.auth.HttpJwksSource;
 import com.pangate.chat.auth.RevocationListener;
 import com.pangate.chat.auth.Revocations;
+import com.pangate.chat.core.ChatStores;
+import com.pangate.chat.core.ChatStores.StoredMessage;
 import com.pangate.chat.core.Ingest;
 import com.pangate.chat.core.Notifier;
+import com.pangate.chat.core.Sequencer;
 import com.pangate.chat.http.AuthFilter;
 import com.pangate.chat.http.PortRoutingFilter;
 import com.pangate.chat.kafka.CommandProducer;
+import com.pangate.chat.kafka.EventProducer;
+import com.pangate.chat.kafka.SequencerLoop;
 import com.pangate.chat.kafka.UpstreamCommandListener;
 import com.pangate.chat.store.RedisChatCache;
+import com.pangate.chat.store.RedisSendResults;
 import com.pangate.chat.store.SchemaMigrator;
 import com.pangate.chat.store.ScyllaChatStore;
 import com.pangate.chat.store.ScyllaSession;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.time.Duration;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -27,6 +35,7 @@ import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Bean;
@@ -70,6 +79,58 @@ public class ChatConfig {
       MeterRegistry meters) {
     return new Ingest(store, store, cache, producer, p.limits(), System::nanoTime, System::currentTimeMillis,
         reason -> meters.counter("chat.send.rejected", "reason", reason).increment());
+  }
+
+  /** {@code http:<pod>}: HOSTNAME (the pod name) plus a random suffix, so two processes on one host never share it. */
+  @Bean
+  String httpReplyTo() {
+    String host = System.getenv().getOrDefault("HOSTNAME", "chat");
+    return RedisSendResults.replyTo(host + "-" + UUID.randomUUID().toString().substring(0, 8));
+  }
+
+  @Bean
+  Duration httpSendWait(ChatProperties p) {
+    return p.http().sendWait();
+  }
+
+  @Bean(destroyMethod = "")
+  RedisSendResults redisSendResults(ChatProperties p, @Qualifier("httpReplyTo") String replyTo) {
+    return new RedisSendResults(p.redis(), replyTo.substring("http:".length()));
+  }
+
+  /** Earlier sends with a key: Redis first, then ScyllaDB (chat spec §4.4 step 1). */
+  @Bean
+  ChatStores.DedupStore priorSends(RedisChatCache cache, ScyllaChatStore store) {
+    return new ChatStores.DedupStore() {
+      @Override
+      public Optional<StoredMessage> find(String convId, String senderId, String clientMsgId) {
+        Optional<StoredMessage> hit = cache.find(convId, senderId, clientMsgId);
+        return hit.isPresent() ? hit : store.find(convId, senderId, clientMsgId);
+      }
+
+      @Override
+      public void put(StoredMessage m) {
+        store.put(m);
+        cache.put(m);
+      }
+    };
+  }
+
+  @Bean
+  Sequencer sequencer(ScyllaChatStore store, RedisChatCache cache) {
+    return new Sequencer(store, store, store, cache, System::currentTimeMillis);
+  }
+
+  @Bean(destroyMethod = "")
+  EventProducer eventProducer(ChatProperties p) {
+    return EventProducer.create(p.kafka().bootstrap(), p.kafka().eventsTopic(), p.kafka().produceTimeout());
+  }
+
+  @Bean(destroyMethod = "")
+  SequencerLoop sequencerLoop(ChatProperties p, Sequencer sequencer, EventProducer events, RedisSendResults results,
+      CommandProducer producer, MeterRegistry meters) {
+    return new SequencerLoop(SequencerLoop.consumer(p.kafka().bootstrap(), SequencerLoop.GROUP),
+        p.kafka().commandsTopic(), sequencer, events, results, producer, meters);
   }
 
   /** Until fan-out exists (Task 6) a refused WebSocket send is only logged. */
@@ -130,7 +191,8 @@ public class ChatConfig {
   @Bean
   SmartLifecycle chatBackground(CqlSession cql, ChatHealth health, ConnectTokenVerifier verifier,
       RevocationListener revocationListener, UpstreamCommandListener upstream, CommandProducer producer,
-      RedisChatCache redis, MeterRegistry meters, Revocations revocations) {
+      RedisChatCache redis, MeterRegistry meters, Revocations revocations, SequencerLoop sequencerLoop,
+      EventProducer events, RedisSendResults results) {
     return new SmartLifecycle() {
       private volatile boolean running;
       private ScheduledExecutorService timers;
@@ -154,6 +216,7 @@ public class ChatConfig {
         }, 0, 2, TimeUnit.SECONDS);
         meters.gauge("chat.revocations.active", revocations, Revocations::size);
         revocationListener.start();
+        sequencerLoop.start();
         upstream.start();
         running = true;
       }
@@ -162,8 +225,11 @@ public class ChatConfig {
       public void stop() {
         running = false;
         upstream.close();
+        sequencerLoop.close();
         revocationListener.close();
         producer.close();
+        events.close();
+        results.close();
         timers.shutdownNow();
         redis.close();
         cql.close();
