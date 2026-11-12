@@ -1,12 +1,15 @@
 package com.pangate.chat.kafka;
 
 import com.google.protobuf.InvalidProtocolBufferException;
+import com.pangate.chat.core.ChannelSubscriptions;
 import com.pangate.chat.core.Ingest;
 import com.pangate.chat.core.Notifier;
 import com.pangate.chat.core.Rejection;
 import com.pangate.chat.core.SendInput;
 import com.pangate.chat.core.UserIds;
 import com.pangate.contracts.testkit.ChatTopics;
+import com.pangate.contracts.v1.ChannelClose;
+import com.pangate.contracts.v1.ChannelOpen;
 import com.pangate.contracts.v1.ChatRejected;
 import com.pangate.contracts.v1.ChatSend;
 import com.pangate.contracts.v1.UpstreamRecord;
@@ -28,15 +31,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * The WebSocket send path (chat spec §4.1): {@code cN.gw.upstream.cmd} in group {@code chat-ingest}. Only tenant
- * {@code chat} records with header {@code op=chat.send} are taken; a record that does not parse goes to
- * {@code chat.commands.dlq}; a refused send is told to the sender through {@link Notifier}. Offsets are committed after
+ * The WebSocket command path (chat spec §4.1, §6): {@code cN.gw.upstream.cmd} in group {@code chat-ingest}. Only
+ * tenant {@code chat} records are taken, with header {@code op} = {@code chat.send}, {@code chat.channel.open} or
+ * {@code chat.channel.close}; a record that does not parse goes to
+ * {@code chat.commands.dlq}; a refused command is told to the sender through {@link Notifier}. Offsets are committed after
  * each poll was handled; when the store or Kafka fails, the partition rewinds to the failed record and is retried.
  */
 public final class UpstreamCommandListener implements AutoCloseable {
 
   public static final String GROUP = "chat-ingest";
   public static final String OP_SEND = "chat.send";
+  public static final String OP_OPEN = "chat.channel.open";
+  public static final String OP_CLOSE = "chat.channel.close";
   private static final Logger log = LoggerFactory.getLogger(UpstreamCommandListener.class);
 
   private final org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer;
@@ -45,18 +51,21 @@ public final class UpstreamCommandListener implements AutoCloseable {
   private final Notifier notifier;
   private final CommandProducer dlq;
   private final Consumer<String> onOutcome;
+  private final ChannelSubscriptions channels;
   private volatile boolean running = true;
   private Thread thread;
 
   /** {@code onOutcome}: accepted, rejected, ignored, malformed or error (metric {@code chat.ingest.records}). */
   public UpstreamCommandListener(org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer, String topic,
-      Ingest ingest, Notifier notifier, CommandProducer dlq, Consumer<String> onOutcome) {
+      Ingest ingest, Notifier notifier, CommandProducer dlq, Consumer<String> onOutcome,
+      ChannelSubscriptions channels) {
     this.consumer = consumer;
     this.topic = topic;
     this.ingest = ingest;
     this.notifier = notifier;
     this.dlq = dlq;
     this.onOutcome = onOutcome;
+    this.channels = channels;
   }
 
   public static KafkaConsumer<String, byte[]> consumer(String bootstrap) {
@@ -130,7 +139,14 @@ public final class UpstreamCommandListener implements AutoCloseable {
       dlq.deadLetter(r.key(), r.value(), "malformed UpstreamRecord");
       return "malformed";
     }
-    if (!ChatTopics.TENANT.equals(u.getTenantId()) || !OP_SEND.equals(u.getHeadersOrDefault("op", ""))) {
+    String op = u.getHeadersOrDefault("op", "");
+    if (!ChatTopics.TENANT.equals(u.getTenantId())) {
+      return "ignored";
+    }
+    if (op.equals(OP_OPEN) || op.equals(OP_CLOSE)) {
+      return channel(r, u, op);
+    }
+    if (!OP_SEND.equals(op)) {
       return "ignored";
     }
     ChatSend send;
@@ -149,6 +165,29 @@ public final class UpstreamCommandListener implements AutoCloseable {
       notifier.rejected(sender, ChatRejected.newBuilder().setConversationId(send.getConversationId())
           .setClientMsgId(send.getClientMsgId()).setReason(rejected.get().reason()).build());
     }
+    return "rejected";
+  }
+
+  private String channel(ConsumerRecord<String, byte[]> r, UpstreamRecord u, String op) {
+    String convId;
+    try {
+      convId = op.equals(OP_OPEN) ? ChannelOpen.parseFrom(u.getPayload()).getConversationId()
+          : ChannelClose.parseFrom(u.getPayload()).getConversationId();
+    } catch (InvalidProtocolBufferException e) {
+      dlq.deadLetter(r.key(), r.value(), "malformed " + op);
+      return "malformed";
+    }
+    Optional<String> user = UserIds.fromPrincipal(u.getPrincipalId());
+    if (user.isEmpty()) {
+      return "rejected";
+    }
+    Optional<Rejection> rejected = op.equals(OP_OPEN) ? channels.open(user.get(), convId)
+        : channels.close(user.get(), convId);
+    if (rejected.isEmpty()) {
+      return "accepted";
+    }
+    notifier.rejected(user.get(), ChatRejected.newBuilder().setConversationId(convId)
+        .setReason(rejected.get().reason()).build());
     return "rejected";
   }
 

@@ -3,6 +3,7 @@ package com.pangate.chat.kafka;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import com.pangate.chat.core.ChannelSubscriptions;
 import com.pangate.chat.core.ChatStores.Conversation;
 import com.pangate.chat.core.ChatStores.Member;
 import com.pangate.chat.core.ChatStores.Role;
@@ -10,15 +11,19 @@ import com.pangate.chat.core.FakeStores;
 import com.pangate.chat.core.Ids;
 import com.pangate.chat.core.Ingest;
 import com.pangate.contracts.testkit.ChatTopics;
+import com.pangate.contracts.v1.ChannelClose;
+import com.pangate.contracts.v1.ChannelOpen;
 import com.pangate.contracts.v1.ChatCommand;
 import com.pangate.contracts.v1.ChatRejected;
 import com.pangate.contracts.v1.ChatSend;
 import com.pangate.contracts.v1.ConversationKind;
+import com.pangate.contracts.v1.PushRequest;
 import com.pangate.contracts.v1.UpstreamRecord;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -88,7 +93,8 @@ class UpstreamCommandListenerIT {
             kafka.getBootstrapServers()), UPSTREAM,
             new Ingest(stores, stores, stores, producer, FakeStores.LIMITS, System::nanoTime,
                 System::currentTimeMillis),
-            (sender, r) -> rejected.add(r), producer, outcome -> { })) {
+            (sender, r) -> rejected.add(r), producer, outcome -> { },
+            new ChannelSubscriptions(stores, stores, r -> new CompletableFuture<>()))) {
       listener.start();
       ChatSend ok = ChatSend.newBuilder().setConversationId(conv).setClientMsgId(Ids.next()).setText("hi").build();
       ChatSend notMine = ChatSend.newBuilder().setConversationId(Ids.next()).setClientMsgId(Ids.next())
@@ -120,5 +126,60 @@ class UpstreamCommandListenerIT {
             assertThat(r.getClientMsgId()).isEqualTo(notMine.getClientMsgId());
           }));
     }
+  }
+
+  @Test
+  void channelOpenAndCloseBecomeServerSideSubscriptions() throws Exception {
+    String upstream = "c1.gw.upstream.ch";
+    try (Admin a = Admin.create(Map.of("bootstrap.servers", kafka.getBootstrapServers()))) {
+      a.createTopics(List.of(new NewTopic(upstream, 1, (short) 1))).all().get();
+    }
+    FakeStores stores = new FakeStores();
+    String channel = Ids.next();
+    stores.create(new Conversation(channel, ConversationKind.CONVERSATION_KIND_CHANNEL, "c", "own", 0, true, 1),
+        List.of(new Member("own", Role.OWNER)));
+    String group = Ids.next();
+    stores.create(new Conversation(group, ConversationKind.CONVERSATION_KIND_GROUP, "g", "own", 0, false, 1),
+        List.of(new Member("own", Role.OWNER)));
+    List<PushRequest> controls = new CopyOnWriteArrayList<>();
+    List<ChatRejected> rejected = new CopyOnWriteArrayList<>();
+    try (CommandProducer producer = CommandProducer.create(kafka.getBootstrapServers(), Duration.ofSeconds(5));
+        UpstreamCommandListener listener = new UpstreamCommandListener(consumerFor(kafka.getBootstrapServers()),
+            upstream, new Ingest(stores, stores, stores, producer, FakeStores.LIMITS, System::nanoTime,
+                System::currentTimeMillis), (sender, r) -> rejected.add(r), producer, outcome -> { },
+            new ChannelSubscriptions(stores, stores, r -> {
+              controls.add(r);
+              return new CompletableFuture<>();
+            }))) {
+      listener.start();
+      try (KafkaProducer<String, byte[]> p = new KafkaProducer<>(Map.of("bootstrap.servers",
+          kafka.getBootstrapServers()), new StringSerializer(), new ByteArraySerializer())) {
+        p.send(new ProducerRecord<>(upstream, "chat:fan", upstream("chat", "chat:fan", "chat.channel.open",
+            ChannelOpen.newBuilder().setConversationId(channel).build().toByteArray())));
+        p.send(new ProducerRecord<>(upstream, "chat:fan", upstream("chat", "chat:fan", "chat.channel.close",
+            ChannelClose.newBuilder().setConversationId(channel).build().toByteArray())));
+        p.send(new ProducerRecord<>(upstream, "chat:fan", upstream("chat", "chat:fan", "chat.channel.open",
+            ChannelOpen.newBuilder().setConversationId(group).build().toByteArray())));
+        p.flush();
+      }
+      await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
+        assertThat(controls).hasSize(2);
+        assertThat(rejected).singleElement().satisfies(r -> {
+          assertThat(r.getConversationId()).isEqualTo(group);
+          assertThat(r.getReason()).isEqualTo("invalid");
+        });
+      });
+      assertThat(controls.get(0).getPrincipalId()).isEqualTo("chat:fan");
+      assertThat(controls.get(0).getControl().getSubscribe().getTopicsList()).containsExactly("chat:chan:" + channel);
+      assertThat(controls.get(1).getControl().getUnsubscribe().getTopicsList())
+          .containsExactly("chat:chan:" + channel);
+    }
+  }
+
+  /** Its own group: the other test's listener must not take these partitions. */
+  static KafkaConsumer<String, byte[]> consumerFor(String bootstrap) {
+    return new KafkaConsumer<>(Map.of("bootstrap.servers", bootstrap, "group.id", "ingest-" + Ids.next(),
+        "enable.auto.commit", false, "auto.offset.reset", "earliest"), new StringDeserializer(),
+        new ByteArrayDeserializer());
   }
 }

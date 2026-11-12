@@ -5,6 +5,7 @@ import com.pangate.chat.auth.ConnectTokenVerifier;
 import com.pangate.chat.auth.HttpJwksSource;
 import com.pangate.chat.auth.RevocationListener;
 import com.pangate.chat.auth.Revocations;
+import com.pangate.chat.core.ChannelSubscriptions;
 import com.pangate.chat.core.ChatStores;
 import com.pangate.chat.core.ChatStores.StoredMessage;
 import com.pangate.chat.core.Conversations;
@@ -179,10 +180,16 @@ public class ChatConfig {
 
   @Bean(destroyMethod = "")
   UpstreamCommandListener upstreamCommandListener(ChatProperties p, Ingest ingest, Notifier notifier,
-      CommandProducer producer, MeterRegistry meters) {
+      CommandProducer producer, MeterRegistry meters, ChannelSubscriptions channels) {
     return new UpstreamCommandListener(UpstreamCommandListener.consumer(p.kafka().bootstrap()),
         p.kafka().upstreamTopic(), ingest, notifier, producer,
-        outcome -> meters.counter("chat.ingest.records", "result", outcome).increment());
+        outcome -> meters.counter("chat.ingest.records", "result", outcome).increment(), channels);
+  }
+
+  @Bean
+  ChannelSubscriptions channelSubscriptions(ScyllaChatStore store, PushApiClient pusher, MeterRegistry meters) {
+    return new ChannelSubscriptions(store, store, pusher,
+        result -> meters.counter("chat.channel.control", "result", result).increment());
   }
 
   @Bean
