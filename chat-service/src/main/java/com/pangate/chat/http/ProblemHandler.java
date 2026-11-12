@@ -51,8 +51,8 @@ public class ProblemHandler {
     return Problems.of(415, "invalid_request", "Content-Type must be application/json");
   }
 
-  /** ScyllaDB or Kafka did not answer (chat spec §8): 503 with Retry-After. */
-  @ExceptionHandler({StoreUnavailableException.class, IllegalStateException.class})
+  /** ScyllaDB or Kafka did not answer (chat spec §8): 503 with Retry-After. Anything else stays a 500. */
+  @ExceptionHandler({StoreUnavailableException.class, com.pangate.chat.core.QueueUnavailableException.class})
   ResponseEntity<ProblemDetail> unavailable(RuntimeException e) {
     log.warn("unavailable: {}", e.toString());
     return ResponseEntity.status(503).header(HttpHeaders.RETRY_AFTER, "1")

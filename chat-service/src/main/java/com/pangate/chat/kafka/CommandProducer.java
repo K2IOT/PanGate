@@ -18,7 +18,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 /**
  * {@code chat.commands} keyed by conversation id (chat spec §2), and {@code chat.commands.dlq} for records that cannot
  * be parsed (§8). Each send waits for the ack, at most the produce timeout; a failure throws
- * {@link IllegalStateException} so the caller answers 503 or retries.
+ * {@link com.pangate.chat.core.QueueUnavailableException} so the caller answers 503 or retries.
  */
 public final class CommandProducer implements CommandSink, AutoCloseable {
 
@@ -70,9 +70,9 @@ public final class CommandProducer implements CommandSink, AutoCloseable {
       producer.send(r).get(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      throw new IllegalStateException("interrupted producing to " + r.topic(), e);
+      throw new com.pangate.chat.core.QueueUnavailableException("interrupted producing to " + r.topic(), e);
     } catch (Exception e) {
-      throw new IllegalStateException("produce to " + r.topic() + " failed", e);
+      throw new com.pangate.chat.core.QueueUnavailableException("produce to " + r.topic() + " failed", e);
     }
   }
 

@@ -48,7 +48,7 @@ public final class EventProducer implements AutoCloseable {
     sendAll(List.of(e));
   }
 
-  /** Sends all, then waits for every ack within one timeout; throws {@link IllegalStateException} on failure. */
+  /** Sends all, then waits for every ack within one timeout; throws {@link com.pangate.chat.core.QueueUnavailableException} on failure. */
   public void sendAll(List<ChatEvent> events) {
     long deadline = System.nanoTime() + timeout.toNanos();
     List<Future<?>> acks = new ArrayList<>(events.size());
@@ -61,9 +61,9 @@ public final class EventProducer implements AutoCloseable {
       }
     } catch (InterruptedException ex) {
       Thread.currentThread().interrupt();
-      throw new IllegalStateException("interrupted producing to " + topic, ex);
+      throw new com.pangate.chat.core.QueueUnavailableException("interrupted producing to " + topic, ex);
     } catch (Exception ex) {
-      throw new IllegalStateException("produce to " + topic + " failed", ex);
+      throw new com.pangate.chat.core.QueueUnavailableException("produce to " + topic + " failed", ex);
     }
   }
 

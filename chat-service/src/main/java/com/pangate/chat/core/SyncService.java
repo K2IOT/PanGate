@@ -10,8 +10,9 @@ import java.util.Optional;
 /**
  * {@code POST /v1/sync} (chat spec §7): per conversation the messages after the client's cursor, at most
  * {@code perConv} (default 50, at most 100); a larger gap answers {@code tooMany} so the client loads the latest page.
- * A cursor at or past the conversation's {@code last_seq} gets nothing (no error). Conversations the user may not read
- * are left out.
+ * A cursor at or past the conversation's {@code last_seq} gets nothing (no error). Otherwise {@code lastSeq} is the
+ * highest seq delivered (the cursor when nothing was), never a seq only reserved; with {@code tooMany} it is the
+ * conversation's {@code last_seq}. Conversations the user may not read are left out.
  */
 public final class SyncService {
 
@@ -59,7 +60,9 @@ public final class SyncService {
       } else if (last - c.lastSeq() > limit) {
         out.add(new SyncResult(c.convId(), List.of(), true, last));
       } else {
-        out.add(new SyncResult(c.convId(), messages.after(c.convId(), c.lastSeq(), limit), false, last));
+        List<StoredMessage> ms = messages.after(c.convId(), c.lastSeq(), limit);
+        // the highest seq delivered, not last_seq: a seq reserved but not written yet must stay ahead of the cursor
+        out.add(new SyncResult(c.convId(), ms, false, ms.isEmpty() ? c.lastSeq() : ms.getLast().convSeq()));
       }
     }
     return out;

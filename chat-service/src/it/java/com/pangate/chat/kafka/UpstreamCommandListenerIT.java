@@ -101,6 +101,8 @@ class UpstreamCommandListenerIT {
           .setText("hi").build();
       try (KafkaProducer<String, byte[]> p = new KafkaProducer<>(Map.of("bootstrap.servers",
           kafka.getBootstrapServers()), new StringSerializer(), new ByteArraySerializer())) {
+        // another tenant's record that does not parse is not ours to dead-letter (key = its principal)
+        p.send(new ProducerRecord<>(UPSTREAM, "t1:x", new byte[] {(byte) 0xff, 0x0f}));
         p.send(new ProducerRecord<>(UPSTREAM, "chat:u1", upstream("chat", "chat:u1", "chat.send", ok.toByteArray())));
         p.send(new ProducerRecord<>(UPSTREAM, "chat:u1", upstream("chat", "chat:u1", "other", ok.toByteArray())));
         p.send(new ProducerRecord<>(UPSTREAM, "x", upstream("t1", "x", "chat.send", ok.toByteArray())));
@@ -119,7 +121,7 @@ class UpstreamCommandListenerIT {
         assertThat(c.getSenderDeviceId()).isEqualTo("d1");
         assertThat(c.getSend()).isEqualTo(ok);
       });
-      assertThat(drain(ChatTopics.DLQ, 2)).hasSize(2);
+      assertThat(drain(ChatTopics.DLQ, 2)).hasSize(2).allSatisfy(r -> assertThat(r.key()).isEqualTo("chat:u1"));
       await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(rejected).singleElement()
           .satisfies(r -> {
             assertThat(r.getReason()).isEqualTo("not_found");

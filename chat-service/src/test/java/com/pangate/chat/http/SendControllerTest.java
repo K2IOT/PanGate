@@ -112,4 +112,29 @@ class SendControllerTest {
     }
     assertThat(last).isEqualTo(429);
   }
+  /** Final review minor: only a Kafka that did not ack is 503; any other IllegalStateException is a bug (500). */
+  @Test
+  void kafkaWithoutAckIs503AndOtherIllegalStateIsNot() throws Exception {
+    MockMvc queueDown = mvcWithSink(c -> {
+      throw new com.pangate.chat.core.QueueUnavailableException("chat.commands not acked", null);
+    });
+    queueDown.perform(post("/v1/conversations/" + conv + "/messages").header("Authorization", "Bearer u1")
+        .header("Idempotency-Key", Ids.next()).contentType(MediaType.APPLICATION_JSON).content("{\"text\":\"hi\"}"))
+        .andExpect(status().isServiceUnavailable()).andExpect(header().exists("Retry-After"));
+    MockMvc bug = mvcWithSink(c -> {
+      throw new IllegalStateException("a bug");
+    });
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> bug.perform(post("/v1/conversations/" + conv
+        + "/messages").header("Authorization", "Bearer u1").header("Idempotency-Key", Ids.next())
+        .contentType(MediaType.APPLICATION_JSON).content("{\"text\":\"hi\"}")))
+        .hasRootCauseInstanceOf(IllegalStateException.class);
+  }
+
+  private MockMvc mvcWithSink(com.pangate.chat.core.CommandSink sink) {
+    Ingest failing = new Ingest(stores, stores, stores, sink, FakeStores.LIMITS, () -> 0L, System::currentTimeMillis);
+    return MockMvcBuilders.standaloneSetup(new SendController(failing, stores,
+        com.pangate.chat.core.SendResults.NONE, "http:test", java.time.Duration.ZERO))
+        .setControllerAdvice(new ProblemHandler()).addFilters(new AuthFilter(token -> new ConnectTokenVerifier.Caller(
+            "u1", "d1", "J1"))).build();
+  }
 }

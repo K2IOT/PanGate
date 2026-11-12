@@ -38,8 +38,8 @@ import org.slf4j.LoggerFactory;
 /**
  * The WebSocket command path (chat spec §4.1, §6): {@code cN.gw.upstream.cmd} in group {@code chat-ingest}. Only
  * tenant {@code chat} records are taken, with header {@code op} = {@code chat.send}, {@code chat.channel.open} or
- * {@code chat.channel.close}; a record that does not parse goes to
- * {@code chat.commands.dlq}; a refused command is told to the sender through {@link Notifier}. Offsets are committed after
+ * {@code chat.channel.close}; a record of a {@code chat:} principal (the record key) that does not parse goes
+ * to {@code chat.commands.dlq}; a refused command is told to the sender through {@link Notifier}. Offsets are committed after
  * each poll was handled; partitions run in parallel; when the store or Kafka fails, the partition rewinds to the
  * failed record and is retried.
  */
@@ -169,6 +169,9 @@ public final class UpstreamCommandListener implements AutoCloseable {
     try {
       u = UpstreamRecord.parseFrom(r.value() == null ? new byte[0] : r.value());
     } catch (InvalidProtocolBufferException e) {
+      if (UserIds.fromPrincipal(r.key()).isEmpty()) {
+        return "ignored";   // the key is the sender's principal: another tenant's record is not ours to dead-letter
+      }
       dlq.deadLetter(r.key(), r.value(), "malformed UpstreamRecord");
       return "malformed";
     }

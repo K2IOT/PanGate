@@ -91,4 +91,21 @@ class SyncTest {
     assertThatThrownBy(() -> sync.sync("u1", List.of(new SyncCursor(Ids.next(), -1)), 0))
         .isInstanceOf(ChatRefusal.class);
   }
+  /**
+   * Final review minor: seqs reserved but not yet written (a sequencer between its LWT and its insert) must not move
+   * the client's cursor past them, or those messages are never synced.
+   */
+  @Test
+  void lastSeqIsTheHighestDeliveredNotTheReserved() {
+    String c = conv(ConversationKind.CONVERSATION_KIND_GROUP, false, 3, "u1");
+    stores.lastSeq.put(c, 5L);   // 4 and 5 reserved, not written yet
+    assertThat(sync.sync("u1", List.of(new SyncCursor(c, 1)), 0)).singleElement().satisfies(x -> {
+      assertThat(x.messages()).extracting(StoredMessage::convSeq).containsExactly(2L, 3L);
+      assertThat(x.lastSeq()).isEqualTo(3);
+    });
+    assertThat(sync.sync("u1", List.of(new SyncCursor(c, 3)), 0)).singleElement().satisfies(x -> {
+      assertThat(x.messages()).isEmpty();
+      assertThat(x.lastSeq()).isEqualTo(3);
+    });
+  }
 }

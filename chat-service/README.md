@@ -53,6 +53,10 @@ message twice, never as two messages.
 | `POST /v1/conversations/{id}/members` · `DELETE …/members/{userId}` | owner or admin; anyone may leave |
 | `POST /v1/conversations/{id}/join` | public channels |
 
+A client's sync cursor is the highest `convSeq` it has received. `lastSeq` from `/v1/sync` (without `tooMany`) is
+exactly that; `lastSeq` elsewhere (conversation, history, `tooMany`) is the conversation's reserved `last_seq`, which
+can run ahead of what is written for a moment: use it to see that something is new, not as the next cursor.
+
 ## Configuration (`chat.*`, `chat.yml`)
 
 | Key | Default | |

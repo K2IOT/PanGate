@@ -34,7 +34,8 @@ public final class RedisSendResults implements SendResults, AutoCloseable {
 
   private final RedisClient client;
   private final String channel;
-  private final Map<String, CompletableFuture<String>> waiting = new ConcurrentHashMap<>();
+  /** Every request waiting on a key: two sends with the same key on this pod both get the result. */
+  private final Map<String, java.util.Set<CompletableFuture<String>>> waiting = new ConcurrentHashMap<>();
   private volatile StatefulRedisConnection<String, String> conn;
   private volatile StatefulRedisPubSubConnection<String, String> sub;
   private volatile long nextConnectAt;
@@ -68,9 +69,10 @@ public final class RedisSendResults implements SendResults, AutoCloseable {
               public void message(String ch, String message) {
                 int nl = message.indexOf('\n');
                 if (nl > 0) {
-                  CompletableFuture<String> f = waiting.get(message.substring(0, nl));
-                  if (f != null) {
-                    f.complete(message.substring(nl + 1));
+                  java.util.Set<CompletableFuture<String>> fs = waiting.get(message.substring(0, nl));
+                  if (fs != null) {
+                    String v = message.substring(nl + 1);
+                    fs.forEach(f -> f.complete(v));
                   }
                 }
               }
@@ -120,7 +122,11 @@ public final class RedisSendResults implements SendResults, AutoCloseable {
       return Optional.empty();
     }
     CompletableFuture<String> f = new CompletableFuture<>();
-    waiting.put(key, f);
+    waiting.compute(key, (k, fs) -> {
+      java.util.Set<CompletableFuture<String>> set = fs == null ? ConcurrentHashMap.newKeySet() : fs;
+      set.add(f);
+      return set;
+    });
     try {
       String now = conn.sync().get(key);   // after registering: a result published in between is not missed
       if (now != null) {
@@ -133,7 +139,10 @@ public final class RedisSendResults implements SendResults, AutoCloseable {
       Thread.currentThread().interrupt();
       return Optional.empty();
     } finally {
-      waiting.remove(key, f);
+      waiting.computeIfPresent(key, (k, fs) -> {
+        fs.remove(f);
+        return fs.isEmpty() ? null : fs;
+      });
     }
   }
 
