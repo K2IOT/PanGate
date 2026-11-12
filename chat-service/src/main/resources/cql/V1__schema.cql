@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS ${keyspace}.members (
 );
 CREATE TABLE IF NOT EXISTS ${keyspace}.user_convs (
   user_id text, conv_id text, kind int, last_seq bigint, read_seq bigint, last_msg_at bigint, muted boolean,
+  -- `left` instead of a row delete: last_seq/last_msg_at are written USING TIMESTAMP <conv_seq>, which a
+  -- wall-clock tombstone would shadow for ever after a re-add
+  left boolean,
   PRIMARY KEY (user_id, conv_id)
 );
 CREATE TABLE IF NOT EXISTS ${keyspace}.dm_index (
