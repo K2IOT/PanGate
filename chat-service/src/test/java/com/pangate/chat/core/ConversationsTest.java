@@ -131,6 +131,26 @@ class ConversationsTest {
     stores.evictFails = true;
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> convs.removeMember("own", c.id(), "m1"))
         .isInstanceOf(StoreUnavailableException.class);
+    // Codex review P1: fail closed — nothing applied while a stale cached list could survive; the retry removes
+    assertThat(stores.member(c.id(), "m1")).isPresent();
+    stores.evictFails = false;
+    convs.removeMember("own", c.id(), "m1");
+    assertThat(stores.member(c.id(), "m1")).isEmpty();
+  }
+
+  /** Codex review P1: the cache is dropped before the change too, so a failing Redis leaves nothing half done. */
+  @Test
+  void additionAndChannelLeaveAreNotAppliedWhenTheCacheCannotBeEvicted() {
+    Conversation g = convs.create("own", ConversationKind.CONVERSATION_KIND_GROUP, "g", List.of(), false);
+    Conversation ch = convs.create("own", ConversationKind.CONVERSATION_KIND_CHANNEL, "c", List.of("m1"), false);
+    stores.evictFails = true;
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> convs.addMember("own", g.id(), "m2"))
+        .isInstanceOf(StoreUnavailableException.class);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> convs.removeMember("m1", ch.id(), "m1"))
+        .isInstanceOf(StoreUnavailableException.class);
+    assertThat(stores.member(g.id(), "m2")).isEmpty();
+    assertThat(stores.member(ch.id(), "m1")).isPresent();
+    assertThat(unsubscribed).isEmpty();
   }
 
   /** Final review I6: leaving a channel ends the open subscriptions too. */

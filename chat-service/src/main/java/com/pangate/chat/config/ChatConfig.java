@@ -90,7 +90,8 @@ public class ChatConfig {
 
   @Bean(destroyMethod = "")
   CommandProducer commandProducer(ChatProperties p) {
-    return CommandProducer.create(p.kafka().bootstrap(), p.kafka().produceTimeout());
+    return CommandProducer.create(p.kafka().bootstrap(), p.kafka().produceTimeout(), p.kafka().commandsTopic(),
+        p.kafka().dlqTopic());
   }
 
   @Bean
@@ -138,7 +139,7 @@ public class ChatConfig {
   @Bean
   Conversations conversations(ScyllaChatStore store, RedisChatCache cache, ChatProperties p,
       ChannelSubscriptions channels) {
-    return new Conversations(store, store, new MemberLookup(store, cache), p.limits(), channels::close);
+    return new Conversations(store, store, new MemberLookup(store, cache), p.limits(), channels::revoke);
   }
 
   @Bean

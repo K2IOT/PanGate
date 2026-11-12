@@ -25,11 +25,18 @@ public final class CommandProducer implements CommandSink, AutoCloseable {
   private final Producer<String, byte[]> producer;
   private final Duration timeout;
   private final String commandsTopic;
+  private final String dlqTopic;
 
   public CommandProducer(Producer<String, byte[]> producer, Duration timeout, String commandsTopic) {
+    this(producer, timeout, commandsTopic, ChatTopics.DLQ);
+  }
+
+  public CommandProducer(Producer<String, byte[]> producer, Duration timeout, String commandsTopic,
+      String dlqTopic) {
     this.producer = producer;
     this.timeout = timeout;
     this.commandsTopic = commandsTopic;
+    this.dlqTopic = dlqTopic;
   }
 
   public static CommandProducer create(String bootstrap, Duration timeout) {
@@ -37,6 +44,10 @@ public final class CommandProducer implements CommandSink, AutoCloseable {
   }
 
   public static CommandProducer create(String bootstrap, Duration timeout, String commandsTopic) {
+    return create(bootstrap, timeout, commandsTopic, ChatTopics.DLQ);
+  }
+
+  public static CommandProducer create(String bootstrap, Duration timeout, String commandsTopic, String dlqTopic) {
     int ms = (int) timeout.toMillis();
     Map<String, Object> cfg = new HashMap<>();
     cfg.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap);
@@ -49,7 +60,7 @@ public final class CommandProducer implements CommandSink, AutoCloseable {
     cfg.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, ms + 2);
     cfg.put(ProducerConfig.CLIENT_ID_CONFIG, "chat-ingest");
     return new CommandProducer(new KafkaProducer<>(cfg, new StringSerializer(), new ByteArraySerializer()), timeout,
-        commandsTopic);
+        commandsTopic, dlqTopic);
   }
 
   @Override
@@ -59,7 +70,7 @@ public final class CommandProducer implements CommandSink, AutoCloseable {
 
   /** The original record, with a {@code reason} header. */
   public void deadLetter(String key, byte[] value, String reason) {
-    ProducerRecord<String, byte[]> r = new ProducerRecord<>(ChatTopics.DLQ, key, value);
+    ProducerRecord<String, byte[]> r = new ProducerRecord<>(dlqTopic, key, value);
     r.headers().add("reason", reason.getBytes(StandardCharsets.UTF_8));
     send(r);
   }

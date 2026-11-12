@@ -71,4 +71,26 @@ class ChannelSubscriptionsTest {
     });
     assertThat(subs.close("fan", "nope")).get().extracting(Rejection::reason).isEqualTo("invalid");
   }
+  /**
+   * Codex review P1: a member who left a private channel must lose its subscription even when Push API fails at
+   * first: the server-side unsubscribe is retried until it is accepted.
+   */
+  @Test
+  void revokeIsRetriedUntilPushApiAcceptsIt() throws Exception {
+    java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+    ChannelSubscriptions flaky = new ChannelSubscriptions(stores, stores, r -> {
+      sent.add(r);
+      return switch (calls.incrementAndGet()) {
+        case 1 -> CompletableFuture.failedFuture(new PushUnavailableException("no stream", null));
+        case 2 -> CompletableFuture.completedFuture(PushResponse.newBuilder().setRequestId(r.getRequestId())
+            .setCode(PushResponse.Code.CODE_UNAVAILABLE).build());
+        default -> CompletableFuture.completedFuture(PushResponse.newBuilder().setRequestId(r.getRequestId())
+            .setCode(PushResponse.Code.CODE_OK).setOk(true).build());
+      };
+    });
+    String c = conv(ConversationKind.CONVERSATION_KIND_CHANNEL, false);
+    assertThat(flaky.revoke("m1", c).get(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+    assertThat(sent).hasSize(3).allSatisfy(r ->
+        assertThat(r.getControl().getUnsubscribe().getTopicsList()).containsExactly("chat:chan:" + c));
+  }
 }

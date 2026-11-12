@@ -133,11 +133,20 @@ public final class Conversations {
         && members.members(convId).size() + 1 > limits.maxGroupMembers()) {
       throw ChatRefusal.invalid("a group has at most " + limits.maxGroupMembers() + " members");
     }
-    members.add(convId, new Member(userId, Role.MEMBER));
+    changeMembers(convId, () -> members.add(convId, new Member(userId, Role.MEMBER)));
+  }
+
+  /**
+   * Drops the cached member list before the change and again after it. The first eviction also blocks refills for a
+   * moment, so a list read before the change cannot be cached after it; and when Redis fails there, nothing is applied
+   * (503, the caller retries) instead of a change that a surviving cached list would hide.
+   */
+  private void changeMembers(String convId, Runnable change) {
+    evict(convId);
+    change.run();
     evict(convId);
   }
 
-  /** The change is done; a cached list that could not be dropped would keep it from showing: report failure. */
   private void evict(String convId) {
     if (!lookup.evict(convId)) {
       throw new StoreUnavailableException("member cache of " + convId + " not evicted; retry", null);
@@ -157,8 +166,7 @@ public final class Conversations {
         throw ChatRefusal.forbidden("only the owner removes an admin; nobody removes the owner");
       }
     }
-    members.remove(convId, userId);
-    evict(convId);
+    changeMembers(convId, () -> members.remove(convId, userId));
     if (c.kind() == ConversationKind.CONVERSATION_KIND_CHANNEL) {
       leftChannel.accept(userId, convId);   // its open subscriptions end now, not at the next reconnect
     }
@@ -171,8 +179,7 @@ public final class Conversations {
       throw ChatRefusal.forbidden("only public channels can be joined");
     }
     if (members.member(convId, userId).isEmpty()) {
-      members.add(convId, new Member(userId, Role.MEMBER));
-      evict(convId);
+      changeMembers(convId, () -> members.add(convId, new Member(userId, Role.MEMBER)));
     }
   }
 }
