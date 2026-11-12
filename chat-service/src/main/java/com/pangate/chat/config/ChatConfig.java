@@ -8,12 +8,16 @@ import com.pangate.chat.auth.Revocations;
 import com.pangate.chat.core.ChatStores;
 import com.pangate.chat.core.ChatStores.StoredMessage;
 import com.pangate.chat.core.Ingest;
+import com.pangate.chat.core.MemberLookup;
 import com.pangate.chat.core.Notifier;
+import com.pangate.chat.core.PushNotifier;
 import com.pangate.chat.core.Sequencer;
 import com.pangate.chat.http.AuthFilter;
 import com.pangate.chat.http.PortRoutingFilter;
 import com.pangate.chat.kafka.CommandProducer;
+import com.pangate.chat.grpc.PushApiClient;
 import com.pangate.chat.kafka.EventProducer;
+import com.pangate.chat.kafka.FanOutLoop;
 import com.pangate.chat.kafka.SequencerLoop;
 import com.pangate.chat.kafka.UpstreamCommandListener;
 import com.pangate.chat.store.RedisChatCache;
@@ -133,10 +137,21 @@ public class ChatConfig {
         p.kafka().commandsTopic(), sequencer, events, results, producer, meters);
   }
 
-  /** Until fan-out exists (Task 6) a refused WebSocket send is only logged. */
+  @Bean(destroyMethod = "")
+  PushApiClient pushApiClient(ChatProperties p) {
+    return PushApiClient.create(p.pushApi());
+  }
+
   @Bean
-  Notifier notifier() {
-    return (sender, r) -> log.debug("send of {} refused: {}", sender, r.getReason());
+  Notifier notifier(PushApiClient pusher, MeterRegistry meters) {
+    return new PushNotifier(pusher, result -> meters.counter("chat.rejected.push", "result", result).increment());
+  }
+
+  @Bean(destroyMethod = "")
+  FanOutLoop fanOutLoop(ChatProperties p, ScyllaChatStore store, RedisChatCache cache, PushApiClient pusher,
+      MeterRegistry meters) {
+    return new FanOutLoop(SequencerLoop.consumer(p.kafka().bootstrap(), FanOutLoop.GROUP), p.kafka().eventsTopic(),
+        new MemberLookup(store, cache), store, pusher, meters);
   }
 
   @Bean(destroyMethod = "")
@@ -192,7 +207,7 @@ public class ChatConfig {
   SmartLifecycle chatBackground(CqlSession cql, ChatHealth health, ConnectTokenVerifier verifier,
       RevocationListener revocationListener, UpstreamCommandListener upstream, CommandProducer producer,
       RedisChatCache redis, MeterRegistry meters, Revocations revocations, SequencerLoop sequencerLoop,
-      EventProducer events, RedisSendResults results) {
+      EventProducer events, RedisSendResults results, FanOutLoop fanOut, PushApiClient pusher) {
     return new SmartLifecycle() {
       private volatile boolean running;
       private ScheduledExecutorService timers;
@@ -217,6 +232,7 @@ public class ChatConfig {
         meters.gauge("chat.revocations.active", revocations, Revocations::size);
         revocationListener.start();
         sequencerLoop.start();
+        fanOut.start();
         upstream.start();
         running = true;
       }
@@ -226,6 +242,8 @@ public class ChatConfig {
         running = false;
         upstream.close();
         sequencerLoop.close();
+        fanOut.close();
+        pusher.close();
         revocationListener.close();
         producer.close();
         events.close();

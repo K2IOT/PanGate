@@ -43,6 +43,8 @@
     </dependency>
 
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
+    <!-- Push API in the same JVM for PushApiClientIT and the end-to-end IT (installed before chat-service) -->
+    <dependency><groupId>com.pangate</groupId><artifactId>push-api-service</artifactId><version>${project.version}</version><scope>test</scope></dependency>
     <dependency><groupId>org.awaitility</groupId><artifactId>awaitility</artifactId><scope>test</scope></dependency>
     <dependency><groupId>io.grpc</groupId><artifactId>grpc-inprocess</artifactId><scope>test</scope></dependency>
     <dependency><groupId>org.testcontainers</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>

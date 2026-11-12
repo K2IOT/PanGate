@@ -28,7 +28,7 @@ push-api:
     port: 9443
     plaintext: false
     max-in-flight-per-stream: 1000
-    allowed-spiffe: [spiffe://pangate/cell-1/gateway, spiffe://pangate/cell-1/push-router]
+    allowed-spiffe: [spiffe://pangate/cell-1/gateway, spiffe://pangate/cell-1/push-router, spiffe://pangate/cell-1/chat-service]
   http: { max-body: 128KB, max-batch: 100, max-batch-body: 1MB }
 
 # Public API on :8080 (server.port); actuator, /ready, /live and /admin/v1 on a second connector :8081

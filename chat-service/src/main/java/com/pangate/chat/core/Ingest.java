@@ -6,7 +6,6 @@ import com.pangate.chat.core.ChatStores.Member;
 import com.pangate.chat.core.ChatStores.Role;
 import com.pangate.contracts.v1.ChatCommand;
 import com.pangate.contracts.v1.ConversationKind;
-import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
@@ -18,8 +17,7 @@ import java.util.function.LongSupplier;
 public final class Ingest {
 
   private final ChatStores.ConversationStore conversations;
-  private final ChatStores.MemberStore members;
-  private final ChatStores.MemberCache cache;
+  private final MemberLookup members;
   private final CommandSink sink;
   private final ChatProperties.Limits limits;
   private final LongSupplier clockMs;
@@ -38,8 +36,7 @@ public final class Ingest {
       ChatStores.MemberCache cache, CommandSink sink, ChatProperties.Limits limits, LongSupplier nanos,
       LongSupplier clockMs, Consumer<String> onRejected) {
     this.conversations = conversations;
-    this.members = members;
-    this.cache = cache;
+    this.members = new MemberLookup(members, cache);
     this.sink = sink;
     this.limits = limits;
     this.clockMs = clockMs;
@@ -73,7 +70,7 @@ public final class Ingest {
     if (conv.isEmpty()) {
       return Optional.of(new Rejection(Rejection.NOT_FOUND, "no such conversation"));
     }
-    Optional<Member> me = membersOf(convId).stream().filter(m -> m.userId().equals(in.senderId())).findFirst();
+    Optional<Member> me = members.of(convId).stream().filter(m -> m.userId().equals(in.senderId())).findFirst();
     if (me.isEmpty()) {
       return Optional.of(new Rejection(Rejection.NOT_MEMBER, "not a member"));
     }
@@ -87,16 +84,5 @@ public final class Ingest {
       return Optional.of(new Rejection(Rejection.RATE_LIMITED, "too many messages in this conversation"));
     }
     return Optional.empty();
-  }
-
-  /** Through the cache; a miss reads the store and fills the cache. */
-  List<Member> membersOf(String convId) {
-    Optional<List<Member>> hit = cache.cachedMembers(convId);
-    if (hit.isPresent()) {
-      return hit.get();
-    }
-    List<Member> ms = members.members(convId);
-    cache.putMembers(convId, ms);
-    return ms;
   }
 }
