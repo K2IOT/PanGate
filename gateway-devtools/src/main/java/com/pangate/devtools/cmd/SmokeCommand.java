@@ -65,6 +65,9 @@ public final class SmokeCommand implements Callable<Integer> {
   @Option(names = "--push-api", description = "Push API base URL: push through POST /v1/push (needs --auth-url)")
   URI pushApi;
 
+  @Option(names = "--chat", description = "chat-service base URL: CHAT 1-1, group and channel steps (needs --auth-url)")
+  URI chat;
+
   @picocli.CommandLine.Spec
   picocli.CommandLine.Model.CommandSpec spec;
 
@@ -116,6 +119,10 @@ public final class SmokeCommand implements Callable<Integer> {
     if (pushApi != null && source.auth == null) {
       throw new picocli.CommandLine.ParameterException(spec.commandLine(),
           "--push-api needs an API token: use --auth-url and --client-file");
+    }
+    if (chat != null && source.auth == null) {
+      throw new picocli.CommandLine.ParameterException(spec.commandLine(),
+          "--chat needs connect tokens of tenant chat: use --auth-url and --client-file");
     }
     if (pushApi == null && !viaKafka() && router == null) {
       throw new picocli.CommandLine.ParameterException(spec.commandLine(),
@@ -212,6 +219,16 @@ public final class SmokeCommand implements Callable<Integer> {
         }
       }
 
+      if (chat != null) {
+        String[] chatStep = {""};
+        try {
+          new ChatSmoke(chat, url, tls, new com.pangate.devtools.auth.AuthClient(source.auth.authUrl,
+              source.auth.clientFile, ChatSmoke.CLIENT)).run(s -> chatStep[0] = s);
+        } finally {
+          step = chatStep[0];
+        }
+      }
+
       step = "reconnect + HELLO (resume ticket)";
       try (GatewayClient c = GatewayClient.connect(url, tls, T)) {
         Connected second = c.hello(Hellos.ticket(first.getResumeTicket(), DEVICE), T);
@@ -234,7 +251,7 @@ public final class SmokeCommand implements Callable<Integer> {
           System.out.printf("revoke -> close 4003 in %.1f ms%n", (System.nanoTime() - t0) / 1e6);
         }
         System.out.println("SMOKE OK (connected, pong, upstream-ack, push-ack, " + (viaRouter() ? "offline, " : "")
-            + "resume, revoke)");
+            + (chat != null ? "chat 1-1, chat group, chat channel, " : "") + "resume, revoke)");
         return 0;
       }
       System.out.println("SMOKE OK (connected, pong, upstream-ack, push-ack, " + (viaRouter() ? "offline, " : "")

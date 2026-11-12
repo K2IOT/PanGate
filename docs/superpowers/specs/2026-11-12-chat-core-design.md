@@ -1,7 +1,7 @@
 # chat-service (Chat core) — Design Spec
 
 - **Ngày:** 2026-11-12
-- **Trạng thái:** Đã duyệt thiết kế khi brainstorm; chờ duyệt spec trước khi lập plan.
+- **Trạng thái:** Đã hiện thực (CH1, plan `docs/superpowers/plans/2026-11-12-chat-core-ch1.md`). Đo trên máy dev 4 vCPU (`chat-service/README.md`): 1-1 qua WebSocket p99 219 ms ở 20 tin/s, 443 ms ở 100 tin/s (trên mức 300 ms của tiêu chí); nhóm 500 p99 276 ms; kênh 10 000 phiên p99 300 ms.
 - **Các spec liên quan:**
   - "spec gateway": `docs/superpowers/specs/2026-11-03-gateway-service-design.md`: upstream `UPSTREAM` / `UPSTREAM_ACK` (§5.5), SUBSCRIBE và giới hạn topic (§5.7), CONTROL (§6.6).
   - "spec auth": `docs/superpowers/specs/2026-11-05-auth-service-design.md`: tenant, client, connect token (`aud=pangate-gw`), JWKS.

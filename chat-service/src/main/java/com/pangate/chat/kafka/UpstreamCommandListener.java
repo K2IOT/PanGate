@@ -18,10 +18,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.function.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
@@ -35,7 +40,8 @@ import org.slf4j.LoggerFactory;
  * tenant {@code chat} records are taken, with header {@code op} = {@code chat.send}, {@code chat.channel.open} or
  * {@code chat.channel.close}; a record that does not parse goes to
  * {@code chat.commands.dlq}; a refused command is told to the sender through {@link Notifier}. Offsets are committed after
- * each poll was handled; when the store or Kafka fails, the partition rewinds to the failed record and is retried.
+ * each poll was handled; partitions run in parallel; when the store or Kafka fails, the partition rewinds to the
+ * failed record and is retried.
  */
 public final class UpstreamCommandListener implements AutoCloseable {
 
@@ -52,6 +58,7 @@ public final class UpstreamCommandListener implements AutoCloseable {
   private final CommandProducer dlq;
   private final Consumer<String> onOutcome;
   private final ChannelSubscriptions channels;
+  private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
   private volatile boolean running = true;
   private Thread thread;
 
@@ -100,35 +107,61 @@ public final class UpstreamCommandListener implements AutoCloseable {
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     } finally {
+      workers.shutdownNow();
       consumer.close(Duration.ofSeconds(2));
     }
   }
 
+  /** Partitions run in parallel (one virtual thread each), records in order; seek and commit on the poll thread. */
   private void step() throws InterruptedException {
     ConsumerRecords<String, byte[]> batch = consumer.poll(Duration.ofMillis(500));
-    Map<TopicPartition, Long> retryFrom = new HashMap<>();
-    for (ConsumerRecord<String, byte[]> r : batch) {
-      TopicPartition tp = new TopicPartition(r.topic(), r.partition());
-      if (retryFrom.containsKey(tp)) {
-        continue;
+    Map<TopicPartition, Future<Long>> work = new HashMap<>();
+    for (TopicPartition tp : batch.partitions()) {
+      List<ConsumerRecord<String, byte[]>> recs = batch.records(tp);
+      work.put(tp, workers.submit(() -> handleAll(tp, recs)));
+    }
+    Map<TopicPartition, OffsetAndMetadata> done = new HashMap<>();
+    boolean failed = false;
+    for (Map.Entry<TopicPartition, Future<Long>> w : work.entrySet()) {
+      TopicPartition tp = w.getKey();
+      List<ConsumerRecord<String, byte[]>> recs = batch.records(tp);
+      long stop;
+      try {
+        stop = w.getValue().get();
+      } catch (ExecutionException e) {
+        stop = recs.getFirst().offset();
       }
+      if (stop < 0) {
+        done.put(tp, new OffsetAndMetadata(recs.getLast().offset() + 1));
+      } else {
+        // a repeated send is one message (the sequencer dedups), so re-reading from here is safe
+        if (stop > recs.getFirst().offset()) {
+          done.put(tp, new OffsetAndMetadata(stop));
+        }
+        consumer.seek(tp, stop);
+        failed = true;
+      }
+    }
+    if (!done.isEmpty()) {
+      consumer.commitSync(done);
+    }
+    if (failed) {
+      Thread.sleep(500);
+    }
+  }
+
+  /** -1 when every record was handled, else the offset to retry from. */
+  private long handleAll(TopicPartition tp, List<ConsumerRecord<String, byte[]>> recs) {
+    for (ConsumerRecord<String, byte[]> r : recs) {
       try {
         onOutcome.accept(handle(r));
       } catch (RuntimeException e) {
         onOutcome.accept("error");
-        log.warn("send at {}@{} not handled: {}", tp, r.offset(), e.toString());
-        retryFrom.put(tp, r.offset());
+        log.warn("command at {}@{} not handled: {}", tp, r.offset(), e.toString());
+        return r.offset();
       }
     }
-    if (retryFrom.isEmpty()) {
-      if (!batch.isEmpty()) {
-        consumer.commitSync();
-      }
-    } else {
-      // the other partitions repeat their records too: a repeated send is one message (the sequencer dedups)
-      retryFrom.forEach(consumer::seek);
-      Thread.sleep(500);
-    }
+    return -1;
   }
 
   private String handle(ConsumerRecord<String, byte[]> r) {

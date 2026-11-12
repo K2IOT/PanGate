@@ -19,6 +19,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -31,7 +35,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * {@code chat.events} in group {@code chat-fanout} → Push API (chat spec §6). Events of a partition go one by one, in
- * order. A transient failure (no answer, UNAVAILABLE, RATE_LIMITED) retries the failed requests with backoff
+ * order; partitions go in parallel. A transient failure (no answer, UNAVAILABLE, RATE_LIMITED) retries the failed requests with backoff
  * 100 ms → 5 s; after {@link #GIVE_UP} the partition rewinds to that event and is polled again, so nothing is committed
  * before it was sent. A permanent failure (INVALID, FORBIDDEN, QUOTA_EXCEEDED) is counted and skipped. DIRECT and GROUP
  * events then raise each member's {@code user_convs} row.
@@ -50,6 +54,7 @@ public final class FanOutLoop implements AutoCloseable {
   private final Pusher pusher;
   private final MeterRegistry meters;
   private final Timer lag;
+  private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
   private volatile boolean running = true;
   private Thread thread;
 
@@ -86,32 +91,61 @@ public final class FanOutLoop implements AutoCloseable {
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     } finally {
+      workers.shutdownNow();
       consumer.close(Duration.ofSeconds(2));
     }
   }
 
+  /**
+   * Partitions run in parallel (one virtual thread each), their events in order; the consumer is only touched here,
+   * on the poll thread: each partition commits what it delivered and rewinds to the first event it did not.
+   */
   private void step() throws InterruptedException {
     ConsumerRecords<String, byte[]> batch = consumer.poll(Duration.ofMillis(200));
-    Map<TopicPartition, OffsetAndMetadata> done = new HashMap<>();
+    Map<TopicPartition, Future<Long>> work = new HashMap<>();
     for (TopicPartition tp : batch.partitions()) {
-      for (ConsumerRecord<String, byte[]> r : batch.records(tp)) {
-        boolean sent;
-        try {
-          sent = deliver(r);
-        } catch (RuntimeException e) {
-          log.warn("event {}@{} not delivered: {}", tp, r.offset(), e.toString());
-          sent = false;
+      List<ConsumerRecord<String, byte[]>> recs = batch.records(tp);
+      work.put(tp, workers.submit(() -> deliverAll(tp, recs)));
+    }
+    Map<TopicPartition, OffsetAndMetadata> done = new HashMap<>();
+    for (Map.Entry<TopicPartition, Future<Long>> w : work.entrySet()) {
+      TopicPartition tp = w.getKey();
+      List<ConsumerRecord<String, byte[]>> recs = batch.records(tp);
+      long stop;
+      try {
+        stop = w.getValue().get();
+      } catch (ExecutionException e) {
+        stop = recs.getFirst().offset();
+      }
+      if (stop < 0) {
+        done.put(tp, new OffsetAndMetadata(recs.getLast().offset() + 1));
+      } else {
+        if (stop > recs.getFirst().offset()) {
+          done.put(tp, new OffsetAndMetadata(stop));
         }
-        if (!sent) {
-          consumer.seek(tp, r.offset());
-          break;
-        }
-        done.put(tp, new OffsetAndMetadata(r.offset() + 1));
+        consumer.seek(tp, stop);
       }
     }
     if (!done.isEmpty()) {
       consumer.commitSync(done);
     }
+  }
+
+  /** -1 when every event went out, else the offset of the first one to retry. */
+  private long deliverAll(TopicPartition tp, List<ConsumerRecord<String, byte[]>> recs) throws InterruptedException {
+    for (ConsumerRecord<String, byte[]> r : recs) {
+      boolean sent;
+      try {
+        sent = deliver(r);
+      } catch (RuntimeException e) {
+        log.warn("event {}@{} not delivered: {}", tp, r.offset(), e.toString());
+        sent = false;
+      }
+      if (!sent) {
+        return r.offset();
+      }
+    }
+    return -1;
   }
 
   /** True once every request got a final answer; false to retry the event later. */

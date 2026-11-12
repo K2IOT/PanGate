@@ -182,4 +182,54 @@ class UpstreamCommandListenerIT {
         "enable.auto.commit", false, "auto.offset.reset", "earliest"), new StringDeserializer(),
         new ByteArrayDeserializer());
   }
+
+  /** Upstream partitions are independent: a slow command sink in one does not hold the others. */
+  @Test
+  void partitionsAreIngestedInParallel() throws Exception {
+    String upstream = "c1.gw.upstream.par";
+    try (Admin a = Admin.create(Map.of("bootstrap.servers", kafka.getBootstrapServers()))) {
+      a.createTopics(List.of(new NewTopic(upstream, 8, (short) 1))).all().get();
+    }
+    FakeStores stores = new FakeStores();
+    List<String> users = new ArrayList<>();
+    List<String> convs = new ArrayList<>();
+    for (int i = 0; i < 16; i++) {
+      String c = Ids.next();
+      stores.create(new Conversation(c, ConversationKind.CONVERSATION_KIND_DIRECT, "", "p" + i, 0, false, 1),
+          List.of(new Member("p" + i, Role.MEMBER)));
+      users.add("p" + i);
+      convs.add(c);
+    }
+    List<Long> published = new CopyOnWriteArrayList<>();
+    com.pangate.chat.core.CommandSink slow = cmd -> {
+      try {
+        Thread.sleep(300);   // every command takes 300 ms to be acked
+      } catch (InterruptedException e) {
+        throw new IllegalStateException(e);
+      }
+      published.add(System.nanoTime());
+    };
+    try (CommandProducer producer = CommandProducer.create(kafka.getBootstrapServers(), Duration.ofSeconds(5));
+        UpstreamCommandListener listener = new UpstreamCommandListener(consumerFor(kafka.getBootstrapServers()),
+            upstream, new Ingest(stores, stores, stores, slow, FakeStores.LIMITS, System::nanoTime,
+                System::currentTimeMillis), (sender, r) -> { }, producer, outcome -> { },
+            new ChannelSubscriptions(stores, stores, r -> new CompletableFuture<>()))) {
+      listener.start();
+      Thread.sleep(3_000);   // joined the group
+      long t0 = System.nanoTime();
+      try (KafkaProducer<String, byte[]> p = new KafkaProducer<>(Map.of("bootstrap.servers",
+          kafka.getBootstrapServers()), new StringSerializer(), new ByteArraySerializer())) {
+        for (int i = 0; i < 16; i++) {
+          p.send(new ProducerRecord<>(upstream, "chat:" + users.get(i), upstream("chat", "chat:" + users.get(i),
+              "chat.send", ChatSend.newBuilder().setConversationId(convs.get(i)).setClientMsgId(Ids.next())
+                  .setText("x").build().toByteArray())));
+        }
+        p.flush();
+      }
+      await().atMost(Duration.ofSeconds(20)).until(() -> published.size() == 16);
+      long took = (published.stream().mapToLong(Long::longValue).max().orElseThrow() - t0) / 1_000_000;
+      // 16 commands, 300 ms each: one thread needs ≥ 4.8 s
+      assertThat(took).as("ms for 16 commands").isLessThan(2_500);
+    }
+  }
 }

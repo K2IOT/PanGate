@@ -19,6 +19,10 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -35,7 +39,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * {@code chat.commands} in group {@code chat-sequencer} (chat spec §4.4). Per partition of a poll: commands grouped by
+ * {@code chat.commands} in group {@code chat-sequencer} (chat spec §4.4). Partitions of a poll run in parallel. Per
+ * partition: commands grouped by
  * conversation in offset order → {@link Sequencer#process} → events → HTTP results → commit of that partition. A fence
  * or a store / Kafka failure rewinds the partition to the first record of the poll; the retry finds what was already
  * written through dedup, so no message gets a second seq.
@@ -54,6 +59,7 @@ public final class SequencerLoop implements AutoCloseable {
   private final MeterRegistry meters;
   private final Timer latency;
   private final Timer lag;
+  private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
   private volatile boolean running = true;
   private Thread thread;
 
@@ -117,26 +123,37 @@ public final class SequencerLoop implements AutoCloseable {
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     } finally {
+      workers.shutdownNow();
       consumer.close(Duration.ofSeconds(2));
     }
   }
 
+  /** Partitions are sequenced in parallel (one virtual thread each); seek and commit stay on the poll thread. */
   private void step() throws InterruptedException {
     ConsumerRecords<String, byte[]> batch = consumer.poll(Duration.ofMillis(200));
-    Map<TopicPartition, OffsetAndMetadata> done = new HashMap<>();
-    boolean failed = false;
+    Map<TopicPartition, Future<?>> work = new HashMap<>();
     for (TopicPartition tp : batch.partitions()) {
       List<ConsumerRecord<String, byte[]>> recs = batch.records(tp);
-      try {
+      work.put(tp, workers.submit(() -> {
         partition(recs);
+        return null;
+      }));
+    }
+    Map<TopicPartition, OffsetAndMetadata> done = new HashMap<>();
+    boolean failed = false;
+    for (Map.Entry<TopicPartition, Future<?>> w : work.entrySet()) {
+      TopicPartition tp = w.getKey();
+      List<ConsumerRecord<String, byte[]>> recs = batch.records(tp);
+      try {
+        w.getValue().get();
         done.put(tp, new OffsetAndMetadata(recs.getLast().offset() + 1));
-      } catch (FencedException e) {
-        meters.counter("chat.lwt.conflicts").increment();
-        log.info("{}: {}; re-reading the partition", tp, e.getMessage());
-        consumer.seek(tp, recs.getFirst().offset());
-        failed = true;
-      } catch (RuntimeException e) {
-        log.warn("{} not sequenced: {}; retrying", tp, e.toString());
+      } catch (ExecutionException e) {
+        if (e.getCause() instanceof FencedException f) {
+          meters.counter("chat.lwt.conflicts").increment();
+          log.info("{}: {}; re-reading the partition", tp, f.getMessage());
+        } else {
+          log.warn("{} not sequenced: {}; retrying", tp, String.valueOf(e.getCause()));
+        }
         consumer.seek(tp, recs.getFirst().offset());
         failed = true;
       }

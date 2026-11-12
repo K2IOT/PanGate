@@ -62,6 +62,7 @@ images:
 	$(MVNW) -q -f push-router-service/pom.xml compile jib:dockerBuild
 	$(MVNW) -q -f push-api-service/pom.xml compile jib:dockerBuild
 	$(MVNW) -q -f auth-service/pom.xml compile jib:dockerBuild
+	$(MVNW) -q -f chat-service/pom.xml compile jib:dockerBuild
 
 up:
 	$(COMPOSE) --profile app up -d --wait --wait-timeout 90
@@ -75,7 +76,7 @@ logs:
 smoke:
 	$(COMPOSE) --profile tools run --rm devtools smoke --url wss://gateway:8443/v1/ws \
 	  --auth-url http://auth:8090 --client-file /dev-secrets/auth/clients.json --ca /dev-secrets/ca.crt \
-	  --push-api http://push-api:8080
+	  --push-api http://push-api:8080 --chat http://chat:8080
 
 AUTH_JAR := auth-service/target/auth-service-$(VERSION)-exec.jar
 ROUTER_JAR := push-router-service/target/push-router-service-$(VERSION)-exec.jar

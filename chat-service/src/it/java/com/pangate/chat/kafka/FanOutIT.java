@@ -231,4 +231,51 @@ class FanOutIT {
       }
     }
   }
+
+  /** Partitions are independent: a slow Push API answer in one does not hold the others (spec §9 p99). */
+  @Test
+  void partitionsAreSentInParallel() throws Exception {
+    String t = "events-par-" + (++topicNo);
+    try (Admin a = Admin.create(Map.of("bootstrap.servers", kafka.getBootstrapServers()))) {
+      a.createTopics(List.of(new NewTopic(t, 8, (short) 1))).all().get();
+    }
+    FakeStores stores = new FakeStores();
+    Map<String, Long> delivered = new ConcurrentHashMap<>();
+    // every answer takes 300 ms
+    com.pangate.chat.core.Pusher slow = r -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+      try {
+        Thread.sleep(300);
+        delivered.put(ChatMessage.parseFrom(r.getPayload()).getConversationId(), System.nanoTime());
+      } catch (Exception e) {
+        throw new IllegalStateException(e);
+      }
+      return PushResponse.newBuilder().setRequestId(r.getRequestId()).setOk(true)
+          .setCode(PushResponse.Code.CODE_OK).build();
+    });
+    List<String> convs = new java.util.ArrayList<>();
+    for (int i = 0; i < 16; i++) {
+      String c = Ids.next();
+      stores.create(new Conversation(c, ConversationKind.CONVERSATION_KIND_DIRECT, "", "u1", 0, false, 1),
+          List.of(new Member("u" + i, Role.MEMBER)));
+      convs.add(c);
+    }
+    try (FanOutLoop loop = new FanOutLoop(SequencerLoop.consumer(kafka.getBootstrapServers(), "par-" + t), t,
+        new MemberLookup(stores, stores), stores, slow, new SimpleMeterRegistry());
+        EventProducer events = EventProducer.create(kafka.getBootstrapServers(), t, Duration.ofSeconds(5))) {
+      loop.start();
+      // warm up: the group has joined once the first event is through
+      events.send(SequencerLoop.event(msg(convs.getFirst(), 1), ConversationKind.CONVERSATION_KIND_DIRECT));
+      await().atMost(Duration.ofSeconds(20)).until(() -> delivered.size() == 1);
+      long t0 = System.nanoTime();
+      List<com.pangate.contracts.v1.ChatEvent> batch = new java.util.ArrayList<>();
+      for (String c : convs.subList(1, convs.size())) {
+        batch.add(SequencerLoop.event(msg(c, 1), ConversationKind.CONVERSATION_KIND_DIRECT));
+      }
+      events.sendAll(batch);
+      await().atMost(Duration.ofSeconds(20)).until(() -> delivered.size() == 16);
+      long took = (delivered.values().stream().mapToLong(Long::longValue).max().orElseThrow() - t0) / 1_000_000;
+      // 15 events over 8 partitions, 300 ms each: one thread needs ≥ 4.5 s, one per partition ≈ 0.6–0.9 s
+      assertThat(took).as("ms for 15 events").isLessThan(2_000);
+    }
+  }
 }
