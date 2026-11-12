@@ -18,4 +18,17 @@ class ClientCommandTest {
     assertThat(ClientCommand.pingOffsetNanos(17_999, 18_000, interval)).isLessThan(interval.toNanos());
     assertThat(ClientCommand.pingOffsetNanos(1, 18_000, interval)).isEqualTo(interval.toNanos() / 18_000);
   }
+
+  /** CI load check: a run that misses its session count must say why the sessions failed. */
+  @Test
+  void loadFailuresAreCountedByReason() {
+    ClientCommand.Failures f = new ClientCommand.Failures();
+    f.record(new IllegalStateException("HELLO timed out"));
+    f.record(new IllegalStateException("HELLO timed out"));
+    f.record(new java.io.UncheckedIOException(new java.io.IOException("Connection reset")));
+    assertThat(f.total()).isEqualTo(3);
+    assertThat(f.summary())
+        .isEqualTo("reasons={IllegalStateException: HELLO timed out=2, UncheckedIOException: Connection reset=1}");
+    assertThat(new ClientCommand.Failures().summary()).isEmpty();
+  }
 }

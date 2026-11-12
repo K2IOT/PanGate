@@ -152,7 +152,7 @@ Lõi (`PushRequests`, `HttpMapping`, `Callers`, `TenantPolicies`, `RateLimiter`,
 
 - `Content-Type: application/json`; body đơn ≤ 128 KB. `payload` là JSON bất kỳ, ghi thành bytes UTF-8; `headers["content-type"] = application/json`.
 - Ánh xạ field đúng bảng §3.2 của spec contracts; header `Idempotency-Key` → `idempotency_key`.
-- `POST /v1/push` đơn cũng đi qua hàng đợi theo target key như batch, nên các push cùng principal tới một pod cùng lúc vào Kafka đúng thứ tự seq. Giữa nhiều pod thì không đảm bảo (review luồng P1).
+- `POST /v1/push` đơn cũng đi qua hàng đợi theo target key như batch, nên các push cùng principal tới một pod cùng lúc vào Kafka đúng thứ tự seq. Giữa nhiều pod thì không đảm bảo (ADR 0027): client sắp lại theo seq; Inbox & Sync (Phase 2) giải quyết triệt để.
 - Lỗi là `application/problem+json` với `code` ổn định: `invalid_request`, `payload_too_large`, `rule_V1`…`rule_V14`, `forbidden`, `tenant_blocked`, `rate_limited`, `unavailable`, `invalid_token`.
 
 ---

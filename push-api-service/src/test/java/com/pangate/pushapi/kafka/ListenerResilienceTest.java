@@ -94,4 +94,26 @@ class ListenerResilienceTest {
     return OfflineRecord.newBuilder().setRecord(PushRecord.newBuilder().setMsgId(msgId).setTenantId("t1")).build()
         .toByteArray();
   }
+
+  /** Spec §6 pushapi.status.lag: from the outcome's at_ms to the status write. */
+  @Test
+  void statusLagIsMeasuredFromTheOutcomeTime() {
+    MockConsumer<String, byte[]> c = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
+    TopicPartition tp = new TopicPartition("c1.push.offline", 0);
+    java.util.List<Long> lags = new java.util.concurrent.CopyOnWriteArrayList<>();
+    StatusListener l = new StatusListener(c, "c1", status, (t, r) -> { }, lags::add);
+    l.start();
+    try {
+      await().atMost(WAIT).until(() -> !c.subscription().isEmpty());
+      c.updateBeginningOffsets(Map.of(tp, 0L));
+      c.rebalance(List.of(tp));
+      long at = System.currentTimeMillis() - 5_000;
+      c.addRecord(new ConsumerRecord<>(tp.topic(), 0, 0, "k", OfflineRecord.newBuilder().setRecord(PushRecord
+          .newBuilder().setMsgId("L1").setTenantId("t1")).setAtMs(at).build().toByteArray()));
+      await().atMost(WAIT).until(() -> !lags.isEmpty());
+      assertThat(lags.get(0)).isBetween(5_000L, 15_000L);
+    } finally {
+      l.close();
+    }
+  }
 }

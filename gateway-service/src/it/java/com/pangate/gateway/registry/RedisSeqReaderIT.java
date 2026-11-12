@@ -20,8 +20,9 @@ class RedisSeqReaderIT {
 
   @BeforeEach
   void setUp() {
-    // Command timeout far above 200 ms: a fast answer below proves the reader's own budget cut it short.
-    fx = new RedisFixture(Duration.ofSeconds(5));
+    // Command timeout far above 200 ms (30 s): an answer within 5 s below proves the reader's own budget cut it short,
+    // with room for a CI runner that stalls the JVM for a second or two (one such stall failed a 2 s budget).
+    fx = new RedisFixture(Duration.ofSeconds(30));
     reader = new RedisSeqReader(fx.redis, tick, Duration.ofMillis(200));
   }
 
@@ -32,7 +33,7 @@ class RedisSeqReaderIT {
   }
 
   private OptionalLong read(String p) throws Exception {
-    return reader.read(p).toCompletableFuture().get(2, TimeUnit.SECONDS);
+    return reader.read(p).toCompletableFuture().get(10, TimeUnit.SECONDS);
   }
 
   @Test
@@ -70,7 +71,7 @@ class RedisSeqReaderIT {
       OptionalLong r = read("t1:u1");
 
       assertThat(r).isEmpty();
-      assertThat(Duration.ofNanos(System.nanoTime() - t0)).isLessThan(Duration.ofSeconds(1));
+      assertThat(Duration.ofNanos(System.nanoTime() - t0)).isLessThan(Duration.ofSeconds(5));
     } finally {
       RedisFixture.unpause();
     }

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### push-api-service: spec §6 metrics
+- `pushapi.produce{result}`, `pushapi.idempotency{result}`, `pushapi.ratelimited{kind}`, `pushapi.seq.latency` and
+  `pushapi.status.lag` are emitted; the core reports them through `AcceptMetrics` (no Micrometer in the core).
+- ADR 0027: ORDERED order is guaranteed per Push API pod only; clients reorder by seq.
+- Platform architecture diagram shows sub-projects ①–④ as merged and the Push API as built in P1.
+- `SeqEpochWatcherClusterIT`: failover detection on a 3-master Redis Cluster (restarting one master bumps only its
+  slots, once).
+
 ### push-api-service (sub-project 4, P1)
 - New module `push-api-service` (spec `docs/superpowers/specs/2026-11-10-push-api-design.md`):
   - `POST /v1/push`, `POST /v1/push:batch` (≤ 100 items, per-principal order), `GET /v1/messages/{msgId}`, with API tokens of auth-service checked offline against its JWKS;

@@ -60,7 +60,9 @@ Errors are `application/problem+json` with `code`: `invalid_request`, `rule_V1`â
 
 `pushapi.requests{surface, code}`, `pushapi.accept.latency{kind}`, `pushapi.seqepoch.bumps{reason}`,
 `pushapi.seq.regressions`, `pushapi.seqepoch.cache_age_seconds`, `pushapi.control.records{result=malformed}`,
-`pushapi.revocations.active`, `pushapi.status.updates{topic, result}`.
+`pushapi.revocations.active`, `pushapi.status.updates{topic, result}`, `pushapi.produce{result=ok|failed}`,
+`pushapi.idempotency{result=new|duplicate|pending_wait|pending_timeout}`, `pushapi.ratelimited{kind}`,
+`pushapi.seq.latency`, `pushapi.status.lag` (router outcome `at_ms` â†’ status written).
 
 ## Failure behaviour
 

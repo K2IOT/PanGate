@@ -91,10 +91,11 @@ public class PushApiConfig {
       meters.counter("pushapi.seq.regressions").increment();
       watcher.checkNow("regression");
     });
+    MicrometerAcceptMetrics measured = new MicrometerAcceptMetrics(meters);
     Idempotency idem = new Idempotency(new RedisIdemStore(redis), p.idempotency().ttl(), p.idempotency().pendingTtl(),
-        p.idempotency().waitFor(), d -> Thread.sleep(d), PushApiConfig::monoMs);
+        p.idempotency().waitFor(), d -> Thread.sleep(d), PushApiConfig::monoMs, measured);
     return new PushAcceptor(seq, new RecordBuilder(p.cell(), System::currentTimeMillis, p.ttl().defaultTtl()), idem,
-        control, new RateLimiter(System::nanoTime), producer, status, System::currentTimeMillis);
+        control, new RateLimiter(System::nanoTime), producer, status, System::currentTimeMillis, measured);
   }
 
   @Bean(destroyMethod = "close")
@@ -132,8 +133,11 @@ public class PushApiConfig {
         ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
         ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG, CooperativeStickyAssignor.class.getName()),
         new StringDeserializer(), new ByteArrayDeserializer());
+    io.micrometer.core.instrument.Timer lag = io.micrometer.core.instrument.Timer.builder("pushapi.status.lag")
+        .register(meters);
     return new StatusListener(c, p.cell(), status,
-        (topic, result) -> meters.counter("pushapi.status.updates", "topic", topic, "result", result).increment());
+        (topic, result) -> meters.counter("pushapi.status.updates", "topic", topic, "result", result).increment(),
+        ms -> lag.record(ms, java.util.concurrent.TimeUnit.MILLISECONDS));
   }
 
   @Bean

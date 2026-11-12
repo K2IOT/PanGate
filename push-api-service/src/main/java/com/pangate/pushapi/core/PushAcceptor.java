@@ -31,6 +31,7 @@ public final class PushAcceptor {
   private final RecordProducer producer;
   private final MessageStatus status;
   private final LongSupplier wallMs;
+  private final AcceptMetrics metrics;
 
   public PushAcceptor(SeqAllocator seq, RecordBuilder builder, Idempotency idempotency, ControlState control,
       RateLimiter limiter, RecordProducer producer, MessageStatus status, LongSupplier wallMs) {
@@ -42,6 +43,20 @@ public final class PushAcceptor {
     this.producer = producer;
     this.status = status;
     this.wallMs = wallMs;
+    this.metrics = AcceptMetrics.NONE;
+  }
+
+  public PushAcceptor(SeqAllocator seq, RecordBuilder builder, Idempotency idempotency, ControlState control,
+      RateLimiter limiter, RecordProducer producer, MessageStatus status, LongSupplier wallMs, AcceptMetrics metrics) {
+    this.seq = seq;
+    this.builder = builder;
+    this.idempotency = idempotency;
+    this.control = control;
+    this.limiter = limiter;
+    this.producer = producer;
+    this.status = status;
+    this.wallMs = wallMs;
+    this.metrics = metrics;
   }
 
   public PushResponse accept(Caller caller, PushRequest request) {
@@ -69,6 +84,7 @@ public final class PushAcceptor {
     }
     long waitNanos = internalControl ? 0 : limiter.tryAcquire(r.getTenantId(), r.getKind(), policy);
     if (waitNanos > 0) {
+      metrics.rateLimited(r.getKind());
       return fail(res, Code.CODE_RATE_LIMITED, "rate_limited")
           .toBuilder().setRetryAfterMs((int) Math.max(1, Math.min(Integer.MAX_VALUE, (waitNanos + 999_999) / 1_000_000)))
           .build();
@@ -131,7 +147,9 @@ public final class PushAcceptor {
     }
     try {
       producer.send(rec);
+      metrics.produce("ok");
     } catch (ProduceFailedException e) {
+      metrics.produce("failed");
       if (owned != null) {
         try {
           idempotency.abandon(owned);
@@ -171,11 +189,16 @@ public final class PushAcceptor {
     String msgId = Ulids.next(wallMs.getAsLong());
     boolean sequenced = r.getClass_() != DeliveryClass.DELIVERY_CLASS_EPHEMERAL;
     if (r.getKind() == PushRequest.Kind.KIND_MESSAGE && r.getDeviceId().isEmpty() && sequenced) {
+      long t0 = System.nanoTime();
       Seq s = seq.forPrincipal(r.getPrincipalId());
+      metrics.seqLatency(System.nanoTime() - t0);
       return new Reserved(msgId, s.seq(), s.epoch(), 0);
     }
     if (r.getKind() == PushRequest.Kind.KIND_BROADCAST && sequenced) {
-      return new Reserved(msgId, 0, 0, seq.forTopic(r.getTopic()));
+      long t0 = System.nanoTime();
+      long topicSeq = seq.forTopic(r.getTopic());
+      metrics.seqLatency(System.nanoTime() - t0);
+      return new Reserved(msgId, 0, 0, topicSeq);
     }
     return new Reserved(msgId, 0, 0, 0);
   }

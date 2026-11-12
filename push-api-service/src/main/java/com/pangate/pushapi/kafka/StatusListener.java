@@ -30,6 +30,7 @@ public final class StatusListener implements AutoCloseable {
   private final String deliveredTopic;
   private final MessageStatus status;
   private final BiConsumer<String, String> onUpdate;
+  private final java.util.function.LongConsumer lagMs;
   private volatile boolean running = true;
   private Thread thread;
 
@@ -41,6 +42,18 @@ public final class StatusListener implements AutoCloseable {
     this.deliveredTopic = cell + ".push.delivered";
     this.status = status;
     this.onUpdate = onUpdate;
+    this.lagMs = ms -> { };
+  }
+
+  /** {@code lagMs} gets, for every outcome written, the time since the router produced it (pushapi.status.lag). */
+  public StatusListener(Consumer<String, byte[]> consumer, String cell, MessageStatus status,
+      BiConsumer<String, String> onUpdate, java.util.function.LongConsumer lagMs) {
+    this.consumer = consumer;
+    this.offlineTopic = cell + ".push.offline";
+    this.deliveredTopic = cell + ".push.delivered";
+    this.status = status;
+    this.onUpdate = onUpdate;
+    this.lagMs = lagMs;
   }
 
   public synchronized void start() {
@@ -79,12 +92,20 @@ public final class StatusListener implements AutoCloseable {
         continue;
       }
       try {
+        long atMs;
         if (r.topic().equals(offlineTopic)) {
-          status.offline(OfflineRecord.parseFrom(r.value()));
+          OfflineRecord o = OfflineRecord.parseFrom(r.value());
+          status.offline(o);
+          atMs = o.getAtMs();
         } else {
-          status.delivered(DeliveredRecord.parseFrom(r.value()));
+          DeliveredRecord d = DeliveredRecord.parseFrom(r.value());
+          status.delivered(d);
+          atMs = d.getAtMs();
         }
         onUpdate.accept(r.topic(), "ok");
+        if (atMs > 0) {
+          lagMs.accept(Math.max(0, System.currentTimeMillis() - atMs));
+        }
       } catch (com.google.protobuf.InvalidProtocolBufferException | NullPointerException e) {
         onUpdate.accept(r.topic(), "malformed");
       } catch (RuntimeException e) {

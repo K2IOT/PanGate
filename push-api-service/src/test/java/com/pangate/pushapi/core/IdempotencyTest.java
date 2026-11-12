@@ -170,4 +170,22 @@ class IdempotencyTest {
     idem.claim("t1", "k", "A", this::reserve);
     assertThat(idem.claim("t1", "k:last", "A", this::reserve)).isInstanceOf(Idempotency.Owned.class);
   }
+
+  /** Spec §6: a claim that waited for another request's pending value is pending_wait. */
+  @Test
+  void waitingForAPendingKeyIsPendingWait() {
+    List<String> results = new ArrayList<>();
+    Idempotency measured = new Idempotency(store, Duration.ofHours(1), Duration.ofSeconds(30), Duration.ofSeconds(2),
+        d -> {
+          sleeps.add(d);
+          mono.addAndGet(d.toMillis());
+          onSleep.run();
+        }, mono::get, new AcceptMetrics() {
+          @Override public void idempotency(String r) { results.add(r); }
+        });
+    Idempotency.Owned o = (Idempotency.Owned) measured.claim("t1", "k", "A", this::reserve);
+    onSleep = () -> idem.complete(o, ok("M1"));
+    measured.claim("t1", "k", "A", this::reserve);
+    assertThat(results).containsExactly("new", "pending_wait");
+  }
 }

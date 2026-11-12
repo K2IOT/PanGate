@@ -163,13 +163,13 @@ public final class ClientCommand implements Callable<Integer> {
     }
     JwtMinter minter = minter();
     AtomicInteger connected = new AtomicInteger();
-    AtomicInteger failed = new AtomicInteger();
+    Failures failed = new Failures();
     ConcurrentLinkedQueue<GatewayClient> clients = new ConcurrentLinkedQueue<>();
     Semaphore inFlight = new Semaphore(512);
     ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor();
     Thread reporter = Thread.ofPlatform().daemon().start(() -> {
       while (true) {
-        System.out.println("connected=" + connected.get() + " failed=" + failed.get());
+        System.out.println("connected=" + connected.get() + " failed=" + failed.total() + " " + failed.summary());
         try {
           Thread.sleep(10_000);
         } catch (InterruptedException e) {
@@ -197,14 +197,14 @@ public final class ClientCommand implements Callable<Integer> {
           clients.add(c);
           connected.incrementAndGet();
         } catch (RuntimeException e) {
-          failed.incrementAndGet();
+          failed.record(e);
         } finally {
           inFlight.release();
         }
       });
     }
     inFlight.acquire(512);
-    System.out.println("connected=" + connected.get() + " failed=" + failed.get());
+    System.out.println("connected=" + connected.get() + " failed=" + failed.total() + " " + failed.summary());
     Frame ping = Frame.newBuilder().setType(FrameType.FRAME_TYPE_PING).build();
     // Each client pings once per interval, spread evenly over it: real clients connect at different times, and one
     // burst of N pings would stall the gateway's loops every interval (and hold the shed ladder at L1).
@@ -231,5 +231,39 @@ public final class ClientCommand implements Callable<Integer> {
   /** When, from the start of a ping round, client {@code i} of {@code n} sends its PING. */
   static long pingOffsetNanos(int i, int n, Duration interval) {
     return interval.toNanos() / n * i;
+  }
+
+  /** Failed load sessions counted by reason (exception type and root message), for the load check's report. */
+  static final class Failures {
+
+    private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.LongAdder> byReason =
+        new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.LongAdder total = new java.util.concurrent.atomic.LongAdder();
+
+    int total() {
+      return total.intValue();
+    }
+
+    void record(Throwable t) {
+      Throwable root = t;
+      while (root.getCause() != null && root.getCause() != root) {
+        root = root.getCause();
+      }
+      String msg = String.valueOf(root.getMessage());
+      String key = t.getClass().getSimpleName() + ": " + (msg.length() > 80 ? msg.substring(0, 80) : msg);
+      byReason.computeIfAbsent(key, k -> new java.util.concurrent.atomic.LongAdder()).increment();
+      total.increment();
+    }
+
+    /** {@code reasons={type: message=count, ...}}, most frequent first, at most five; empty when none failed. */
+    String summary() {
+      if (byReason.isEmpty()) {
+        return "";
+      }
+      return byReason.entrySet().stream()
+          .sorted((a, b) -> Long.compare(b.getValue().sum(), a.getValue().sum()))
+          .limit(5).map(e -> e.getKey() + "=" + e.getValue().sum())
+          .collect(java.util.stream.Collectors.joining(", ", "reasons={", "}"));
+    }
   }
 }

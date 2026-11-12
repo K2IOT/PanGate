@@ -8,7 +8,10 @@ set -euo pipefail
 GATEWAY_JAR=${1:?gateway jar}
 DEVTOOLS_JAR=${2:?devtools exec jar}
 N=${3:-18000}
-RAMP=${RAMP:-2000}  # new sessions per second; lower it on a small or shared box (client and gateway share CPU)
+# New sessions per second. The gateway admits 500/s right after /ready, ramping to 5000/s over 2 min, plus a burst
+# of 10 000 (spec §7.1): 2000/s outruns that from about 7 s to 73 s and the overflow is refused by design, so a CI run
+# failed whenever the client (sharing CPU with the gateway) managed 2000/s. 1000/s stays under the ramp all along.
+RAMP=${RAMP:-1000}
 MAX_LAG=0.020
 export GATEWAY_DEV_DIR=${GATEWAY_DEV_DIR:-$(mktemp -d)}
 GLOG=$(mktemp)
@@ -37,7 +40,11 @@ for _ in $(seq 1 $((N / 1000 * 2 + 60))); do
   grep -q "^connected=$N " "$CLOG" && break
   sleep 1
 done
-grep -q "^connected=$N " "$CLOG" || { echo "only $(tail -1 "$CLOG")"; exit 1; }
+grep -q "^connected=$N " "$CLOG" || {
+  echo "only $(tail -1 "$CLOG")"
+  echo "gateway refused: $(curl -s http://127.0.0.1:8081/actuator/prometheus | grep -E '^gw_admission_rejected' | tr '\n' ' ')"
+  exit 1
+}
 sleep 15
 # The ramp (2000 TLS handshakes/s, client on the same box) can raise lag p99 past 50 ms and enter L1, which exits
 # only after 30 s of calm (spec §7.3). The exit criterion is the steady state: wait up to 180 s for level 0.
