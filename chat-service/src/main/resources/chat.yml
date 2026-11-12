@@ -24,7 +24,7 @@ management:
         enabled: true
       group:
         readiness:
-          include: readinessState
+          include: readinessState,chat
           additional-path: "server:/ready"
           show-details: always
         liveness:

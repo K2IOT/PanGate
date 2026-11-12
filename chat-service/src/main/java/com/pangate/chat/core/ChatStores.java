@@ -70,4 +70,13 @@ public final class ChatStores {
 
     void put(StoredMessage m);
   }
+
+  /** Member lists in front of {@link MemberStore} (Redis, TTL 60 s); a miss or an outage reads as empty. */
+  public interface MemberCache {
+    Optional<List<Member>> cachedMembers(String convId);
+
+    void putMembers(String convId, List<Member> members);
+
+    void evictMembers(String convId);
+  }
 }

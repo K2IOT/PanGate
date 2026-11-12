@@ -21,7 +21,8 @@ public final class SchemaMigrator {
 
   /** Number of migrations applied by this call. */
   public static int migrate(CqlSession s, String keyspace) {
-    s.execute("CREATE TABLE IF NOT EXISTS " + keyspace + ".schema_version (version int PRIMARY KEY, applied_at timestamp)");
+    s.execute(ScyllaSession.ddl("CREATE TABLE IF NOT EXISTS " + keyspace
+        + ".schema_version (version int PRIMARY KEY, applied_at timestamp)"));
     int applied = 0;
     for (int i = 0; i < MIGRATIONS.size(); i++) {
       int version = i + 1;
@@ -29,7 +30,7 @@ public final class SchemaMigrator {
         continue;
       }
       for (String stmt : statements(MIGRATIONS.get(i))) {
-        s.execute(stmt.replace("${keyspace}", keyspace));
+        s.execute(ScyllaSession.ddl(stmt.replace("${keyspace}", keyspace)));
       }
       s.execute(com.datastax.oss.driver.api.core.cql.SimpleStatement.newInstance(
           "INSERT INTO " + keyspace + ".schema_version (version, applied_at) VALUES (?, ?)", version, Instant.now()));

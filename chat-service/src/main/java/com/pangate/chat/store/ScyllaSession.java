@@ -13,7 +13,15 @@ import java.net.InetSocketAddress;
  */
 public final class ScyllaSession {
 
+  /** Schema changes wait for agreement across the cluster: far longer than the 1 s of an ordinary request. */
+  public static final java.time.Duration DDL_TIMEOUT = java.time.Duration.ofSeconds(30);
+
   private ScyllaSession() {}
+
+  /** A schema statement with {@link #DDL_TIMEOUT}. */
+  public static com.datastax.oss.driver.api.core.cql.SimpleStatement ddl(String cql) {
+    return com.datastax.oss.driver.api.core.cql.SimpleStatement.newInstance(cql).setTimeout(DDL_TIMEOUT);
+  }
 
   public static CqlSession connect(ChatProperties.Scylla cfg) {
     CqlSessionBuilder b = CqlSession.builder().withLocalDatacenter(cfg.localDc())
@@ -27,10 +35,10 @@ public final class ScyllaSession {
           Integer.parseInt(cp.substring(colon + 1))));
     }
     CqlSession s = b.build();
-    s.execute("CREATE KEYSPACE IF NOT EXISTS " + cfg.keyspace() + " WITH replication = {'class': "
+    s.execute(ddl("CREATE KEYSPACE IF NOT EXISTS " + cfg.keyspace() + " WITH replication = {'class': "
         + "'NetworkTopologyStrategy', '" + cfg.localDc() + "': " + cfg.replicationFactor() + "} "
         // LWT (conversations.last_seq fence, dm_index) is not supported on tablets in ScyllaDB 6.x
-        + "AND tablets = {'enabled': false}");
+        + "AND tablets = {'enabled': false}"));
     return s;
   }
 }

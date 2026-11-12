@@ -1,6 +1,7 @@
 package com.pangate.chat.store;
 
 import com.pangate.chat.config.ChatProperties;
+import com.pangate.chat.core.ChatStores;
 import com.pangate.chat.core.ChatStores.Member;
 import com.pangate.chat.core.ChatStores.Role;
 import com.pangate.chat.core.ChatStores.StoredMessage;
@@ -20,7 +21,7 @@ import org.slf4j.LoggerFactory;
  * ({@code dedup:{conv}:{sender}:{clientMsgId}}, TTL 24 h). A cache: every Redis failure reads as a miss and a write
  * is dropped, so a Redis outage only costs ScyllaDB reads.
  */
-public final class RedisChatCache implements AutoCloseable {
+public final class RedisChatCache implements ChatStores.MemberCache, AutoCloseable {
 
   private static final Logger log = LoggerFactory.getLogger(RedisChatCache.class);
   static final Duration DEDUP_TTL = Duration.ofHours(24);
@@ -77,6 +78,12 @@ public final class RedisChatCache implements AutoCloseable {
     }
   }
 
+  @Override
+  public Optional<List<Member>> cachedMembers(String convId) {
+    return members(convId);
+  }
+
+  @Override
   public void putMembers(String convId, List<Member> members) {
     StringBuilder b = new StringBuilder();
     members.forEach(m -> b.append(m.userId()).append('=').append(m.role().name()).append('\n'));
@@ -90,6 +97,7 @@ public final class RedisChatCache implements AutoCloseable {
     }
   }
 
+  @Override
   public void evictMembers(String convId) {
     try {
       RedisCommands<String, String> r = redis();
