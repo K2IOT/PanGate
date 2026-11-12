@@ -1,0 +1,9 @@
+server:
+  port: 8086
+chat:
+  management-port: 8087
+  kafka: { bootstrap: "localhost:9092" }
+  scylla: { contact-points: ["localhost:9042"] }
+  redis: { uri: "redis://localhost:6379" }
+  auth: { jwks-uri: "http://localhost:8090/.well-known/jwks.json", issuer: "http://localhost:8090" }
+  push-api: { target: "localhost:9443", plaintext: true }

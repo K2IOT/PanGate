@@ -24,7 +24,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Local/dev seed (spec §8), idempotent: tenant {@code pangate} + client {@code pangate-admin} (admin) and tenant
- * {@code t1} + client {@code t1-backend}. Secrets live in {@code <seed.dir>/clients.json} for devtools; an existing
+ * {@code t1} + client {@code t1-backend}, tenant {@code chat} + client {@code chat-backend} (app chat). Secrets live in {@code <seed.dir>/clients.json} for devtools; an existing
  * file wins, so a recreated database accepts the secrets the tools already have.
  */
 @Component
@@ -42,6 +42,9 @@ public class SeedRunner implements ApplicationRunner {
   private static final SeedClient[] CLIENTS = {
       new SeedClient("pangate", "admin", EnumSet.of(Scope.ADMIN)),
       new SeedClient("t1", "backend", EnumSet.of(Scope.TOKENS_MINT, Scope.SESSIONS_REVOKE, Scope.PUSH_SEND,
+          Scope.PUSH_BROADCAST)),
+      // app chat (chat spec §1, §8): one tenant for the whole app; its backend mints connect tokens for users
+      new SeedClient("chat", "backend", EnumSet.of(Scope.TOKENS_MINT, Scope.SESSIONS_REVOKE, Scope.PUSH_SEND,
           Scope.PUSH_BROADCAST))};
 
   private final ManageTenants tenants;

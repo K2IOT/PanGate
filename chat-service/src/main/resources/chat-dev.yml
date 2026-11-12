@@ -1,0 +1,6 @@
+chat:
+  kafka: { bootstrap: "kafka:29092" }
+  scylla: { contact-points: ["scylla:9042"] }
+  redis: { uri: "redis://redis:6379" }
+  auth: { jwks-uri: "http://auth:8090/.well-known/jwks.json", issuer: "http://auth:8090" }
+  push-api: { target: "dns:///push-api:9443", plaintext: true }

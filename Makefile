@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 VERSION := 0.1.0
 MVNW := $(CURDIR)/mvnw
-MODULES := platform-parent platform-contracts platform-spring-starter platform-contracts-testkit gateway-devtools gateway-service push-router-service push-api-service auth-service
+MODULES := platform-parent platform-contracts platform-spring-starter platform-contracts-testkit gateway-devtools gateway-service push-router-service push-api-service auth-service chat-service
 
 .PHONY: bootstrap verify
 
@@ -42,6 +42,11 @@ doctor:
 infra-up:
 	$(COMPOSE) up -d --wait --wait-timeout 90 kafka redis postgres
 	$(COMPOSE) up kafka-init
+
+## ScyllaDB for chat-service (`make infra-up` does not start it).
+.PHONY: scylla-up
+scylla-up:
+	$(COMPOSE) up -d --wait --wait-timeout 180 scylla
 
 infra-down:
 	$(COMPOSE) down -v

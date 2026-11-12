@@ -54,6 +54,10 @@ services:
         $$t --bootstrap-server $$b --create --if-not-exists --topic c1.push.requests --partitions 64 --config retention.ms=86400000
         $$t --bootstrap-server $$b --create --if-not-exists --topic c1.push.offline --partitions 16 --config retention.ms=604800000
         $$t --bootstrap-server $$b --create --if-not-exists --topic c1.push.delivered --partitions 16 --config retention.ms=86400000
+        # app chat (docs/superpowers/specs/2026-11-12-chat-core-design.md §8)
+        $$t --bootstrap-server $$b --create --if-not-exists --topic chat.commands --partitions 64
+        $$t --bootstrap-server $$b --create --if-not-exists --topic chat.events --partitions 64
+        $$t --bootstrap-server $$b --create --if-not-exists --topic chat.commands.dlq --partitions 8
         echo topics ready
 
   redis:
@@ -75,6 +79,18 @@ services:
     healthcheck:
       <<: *hc
       test: ["CMD", "pg_isready", "-U", "pangate", "-d", "pangate"]
+
+  # ScyllaDB for the app chat (chat spec §5): one node, kept small for a laptop. Not in `make infra-up`
+  # (the gateway's load checks do not need it); `make scylla-up` starts it.
+  scylla:
+    image: scylladb/scylla:6.2.3
+    command: ["--smp", "1", "--memory", "750M", "--overprovisioned", "1", "--developer-mode", "1"]
+    ports:
+      - "9042:9042"
+    healthcheck:
+      <<: *hc
+      retries: 40
+      test: ["CMD-SHELL", "cqlsh -e 'describe keyspaces' > /dev/null"]
 
   # Auth & Token service (docs/superpowers/specs/2026-11-05-auth-service-design.md): JWKS for the gateway, API and
   # connect tokens, revocations to gw.control. Seed secrets in /dev-secrets/auth/clients.json for devtools.
