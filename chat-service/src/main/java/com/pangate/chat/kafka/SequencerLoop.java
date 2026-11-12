@@ -43,7 +43,8 @@ import org.slf4j.LoggerFactory;
  * partition: commands grouped by
  * conversation in offset order → {@link Sequencer#process} → events → HTTP results → commit of that partition. A fence
  * or a store / Kafka failure rewinds the partition to the first record of the poll; the retry finds what was already
- * written through dedup, so no message gets a second seq.
+ * written through dedup, so no message gets a second seq. A command failing the same deterministic way
+ * {@link PoisonGuard#MAX_ATTEMPTS} times in a row is dead-lettered on the last try.
  */
 public final class SequencerLoop implements AutoCloseable {
 
@@ -60,6 +61,7 @@ public final class SequencerLoop implements AutoCloseable {
   private final Timer latency;
   private final Timer lag;
   private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
+  private final PoisonGuard poison = new PoisonGuard();
   private volatile boolean running = true;
   private Thread thread;
 
@@ -134,8 +136,9 @@ public final class SequencerLoop implements AutoCloseable {
     Map<TopicPartition, Future<?>> work = new HashMap<>();
     for (TopicPartition tp : batch.partitions()) {
       List<ConsumerRecord<String, byte[]>> recs = batch.records(tp);
+      boolean lastTry = poison.lastTry(tp, recs.getFirst().offset());
       work.put(tp, workers.submit(() -> {
-        partition(recs);
+        partition(recs, lastTry);
         return null;
       }));
     }
@@ -147,7 +150,9 @@ public final class SequencerLoop implements AutoCloseable {
       try {
         w.getValue().get();
         done.put(tp, new OffsetAndMetadata(recs.getLast().offset() + 1));
+        poison.clear(tp);
       } catch (ExecutionException e) {
+        poison.failed(tp, recs.getFirst().offset(), e.getCause());
         if (e.getCause() instanceof FencedException f) {
           meters.counter("chat.lwt.conflicts").increment();
           log.info("{}: {}; re-reading the partition", tp, f.getMessage());
@@ -166,8 +171,14 @@ public final class SequencerLoop implements AutoCloseable {
     }
   }
 
-  private void partition(List<ConsumerRecord<String, byte[]>> recs) {
-    Map<String, List<ChatCommand>> byConv = new LinkedHashMap<>();
+  private record Cmd(ChatCommand command, ConsumerRecord<String, byte[]> record) {}
+
+  /**
+   * {@code lastTry}: this poll start already failed {@code MAX_ATTEMPTS - 1} times in a row the same deterministic
+   * way; a conversation that fails again is sequenced command by command and the command that fails is dead-lettered.
+   */
+  private void partition(List<ConsumerRecord<String, byte[]>> recs, boolean lastTry) {
+    Map<String, List<Cmd>> byConv = new LinkedHashMap<>();
     long now = System.currentTimeMillis();
     for (ConsumerRecord<String, byte[]> r : recs) {
       lag.record(Math.max(0, now - r.timestamp()), TimeUnit.MILLISECONDS);
@@ -182,13 +193,37 @@ public final class SequencerLoop implements AutoCloseable {
         meters.counter("chat.sequencer.malformed").increment();
         continue;
       }
-      byConv.computeIfAbsent(c.getSend().getConversationId(), k -> new ArrayList<>()).add(c);
+      byConv.computeIfAbsent(c.getSend().getConversationId(), k -> new ArrayList<>()).add(new Cmd(c, r));
     }
     List<ChatEvent> out = new ArrayList<>();
     List<SequencedMessage> replies = new ArrayList<>();
     List<Long> received = new ArrayList<>();
-    for (Map.Entry<String, List<ChatCommand>> e : byConv.entrySet()) {
-      List<SequencedMessage> seq = sequencer.process(e.getKey(), e.getValue());
+    for (Map.Entry<String, List<Cmd>> e : byConv.entrySet()) {
+      List<Cmd> cmds = e.getValue();
+      List<SequencedMessage> seq;
+      try {
+        seq = sequencer.process(e.getKey(), cmds.stream().map(Cmd::command).toList());
+      } catch (RuntimeException ex) {
+        if (!lastTry || PoisonGuard.isTransient(ex)) {
+          throw ex;
+        }
+        cmds = new ArrayList<>();
+        seq = new ArrayList<>();
+        for (Cmd c : e.getValue()) {
+          try {
+            seq.addAll(sequencer.process(e.getKey(), List.of(c.command())));
+            cmds.add(c);
+          } catch (RuntimeException one) {
+            if (PoisonGuard.isTransient(one)) {
+              throw one;
+            }
+            log.error("command at {}@{} failed {} times: {}; dead-lettered", c.record().topic(),
+                c.record().offset(), PoisonGuard.MAX_ATTEMPTS, one.toString());
+            dlq.deadLetter(c.record().key(), c.record().value(), "poison: " + one);
+            meters.counter("chat.sequencer.poison").increment();
+          }
+        }
+      }
       ConversationKind kind = sequencer.kind(e.getKey());
       for (int i = 0; i < seq.size(); i++) {
         SequencedMessage m = seq.get(i);
@@ -199,7 +234,7 @@ public final class SequencerLoop implements AutoCloseable {
         if (!m.replyTo().isEmpty()) {
           replies.add(m);
         }
-        received.add(e.getValue().get(i).getReceivedAtMs());
+        received.add(cmds.get(i).command().getReceivedAtMs());
       }
     }
     events.sendAll(out);

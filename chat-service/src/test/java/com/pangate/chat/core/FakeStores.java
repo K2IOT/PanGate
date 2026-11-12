@@ -32,6 +32,8 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
   public int failWrites;
   public int failTouches;
   public boolean evictFails;
+  /** A message with this clientMsgId never writes: a deterministic (non-transient) failure. */
+  public volatile String poisonClientMsgId;
   public int touches;
 
   void check() {
@@ -105,6 +107,9 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
 
   @Override public void write(StoredMessage m) {
     check();
+    if (m.clientMsgId().equals(poisonClientMsgId)) {
+      throw new IllegalArgumentException("cannot store " + m.clientMsgId());
+    }
     synchronized (this) {
       if (failWrites > 0) {
         failWrites--;

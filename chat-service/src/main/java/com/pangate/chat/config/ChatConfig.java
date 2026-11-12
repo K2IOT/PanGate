@@ -56,6 +56,17 @@ public class ChatConfig {
   private static final Logger log = LoggerFactory.getLogger(ChatConfig.class);
   static final String CONTROL_TOPIC = "gw.control";
 
+  /** Closes each part in order; one that fails is logged and the rest are still closed. */
+  static void closeInOrder(AutoCloseable... parts) {
+    for (AutoCloseable part : parts) {
+      try {
+        part.close();
+      } catch (Exception e) {
+        log.warn("closing {} failed: {}", part, e.toString());
+      }
+    }
+  }
+
   static long monoMs() {
     return System.nanoTime() / 1_000_000;
   }
@@ -271,17 +282,8 @@ public class ChatConfig {
       @Override
       public void stop() {
         running = false;
-        upstream.close();
-        sequencerLoop.close();
-        fanOut.close();
-        pusher.close();
-        revocationListener.close();
-        producer.close();
-        events.close();
-        results.close();
-        timers.shutdownNow();
-        redis.close();
-        cql.close();
+        closeInOrder(upstream, sequencerLoop, fanOut, pusher, revocationListener, producer, events, results,
+            timers::shutdownNow, redis, cql);
       }
 
       @Override

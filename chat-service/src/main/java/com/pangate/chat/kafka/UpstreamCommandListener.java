@@ -41,7 +41,8 @@ import org.slf4j.LoggerFactory;
  * {@code chat.channel.close}; a record of a {@code chat:} principal (the record key) that does not parse goes
  * to {@code chat.commands.dlq}; a refused command is told to the sender through {@link Notifier}. Offsets are committed after
  * each poll was handled; partitions run in parallel; when the store or Kafka fails, the partition rewinds to the
- * failed record and is retried.
+ * failed record and is retried; a record failing the same deterministic way {@link PoisonGuard#MAX_ATTEMPTS} times in
+ * a row is dead-lettered.
  */
 public final class UpstreamCommandListener implements AutoCloseable {
 
@@ -59,10 +60,11 @@ public final class UpstreamCommandListener implements AutoCloseable {
   private final Consumer<String> onOutcome;
   private final ChannelSubscriptions channels;
   private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
+  private final PoisonGuard poison = new PoisonGuard();
   private volatile boolean running = true;
   private Thread thread;
 
-  /** {@code onOutcome}: accepted, rejected, ignored, malformed or error (metric {@code chat.ingest.records}). */
+  /** {@code onOutcome}: accepted, rejected, ignored, malformed, poison or error (metric {@code chat.ingest.records}). */
   public UpstreamCommandListener(org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer, String topic,
       Ingest ingest, Notifier notifier, CommandProducer dlq, Consumer<String> onOutcome,
       ChannelSubscriptions channels) {
@@ -155,7 +157,16 @@ public final class UpstreamCommandListener implements AutoCloseable {
     for (ConsumerRecord<String, byte[]> r : recs) {
       try {
         onOutcome.accept(handle(r));
+        poison.clear(tp);
       } catch (RuntimeException e) {
+        if (poison.failed(tp, r.offset(), e)) {
+          log.error("command at {}@{} failed {} times: {}; dead-lettered", tp, r.offset(), PoisonGuard.MAX_ATTEMPTS,
+              e.toString());
+          dlq.deadLetter(r.key(), r.value(), "poison: " + e);
+          poison.clear(tp);
+          onOutcome.accept("poison");
+          continue;
+        }
         onOutcome.accept("error");
         log.warn("command at {}@{} not handled: {}", tp, r.offset(), e.toString());
         return r.offset();
