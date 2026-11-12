@@ -1,0 +1,63 @@
+// App chat, sub-project CH1 (chat spec §3): client ↔ chat-service payloads carried in UPSTREAM / PUSH frames, and the
+// records on chat.commands / chat.events. Additive only.
+syntax = "proto3";
+
+package pangate.v1;
+
+option java_package = "com.pangate.contracts.v1";
+option java_multiple_files = true;
+
+enum ConversationKind {
+  CONVERSATION_KIND_UNSPECIFIED = 0;
+  CONVERSATION_KIND_DIRECT = 1;
+  CONVERSATION_KIND_GROUP = 2;
+  CONVERSATION_KIND_CHANNEL = 3;
+}
+
+// Client → server, payload of UPSTREAM(type=cmd, headers.op=chat.send).
+message ChatSend {
+  string conversation_id = 1;
+  string client_msg_id = 2;           // ULID made by the client; the dedup key
+  string text = 3;                    // UTF-8, 1..4096 bytes
+  string reply_to_msg_id = 4;         // optional
+  repeated string mention_user_ids = 5;
+}
+
+message ChannelOpen { string conversation_id = 1; }    // op=chat.channel.open
+message ChannelClose { string conversation_id = 1; }   // op=chat.channel.close
+
+// Server → client, payload of PUSH (headers.type=chat.message).
+message ChatMessage {
+  string conversation_id = 1;
+  string msg_id = 2;                  // ULID from the sequencer
+  uint64 conv_seq = 3;
+  string sender_id = 4;
+  string client_msg_id = 5;           // lets the sending device replace its pending copy
+  string text = 6;
+  string reply_to_msg_id = 7;
+  repeated string mention_user_ids = 8;
+  int64 sent_at_ms = 9;
+}
+
+// Server → the sender's devices (headers.type=chat.rejected).
+message ChatRejected {
+  string conversation_id = 1;
+  string client_msg_id = 2;
+  string reason = 3;                  // not_member | not_found | too_long | rate_limited | invalid
+}
+
+// chat.commands, key conversation_id.
+message ChatCommand {
+  string command_id = 1;              // ULID
+  string sender_id = 2;               // userId, without the chat: prefix
+  string sender_device_id = 3;
+  int64 received_at_ms = 4;
+  oneof op { ChatSend send = 10; }
+  string reply_to = 20;               // "http:<pod>" when an HTTP pod waits for the result; empty for WebSocket
+}
+
+// chat.events, key conversation_id.
+message ChatEvent {
+  ChatMessage message = 1;
+  ConversationKind kind = 2;
+}

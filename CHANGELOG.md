@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### chat-service (CH1, chat core)
+- New module `chat-service` (spec `docs/superpowers/specs/2026-11-12-chat-core-design.md`), the first sub-project of
+  the chat app on tenant `chat`:
+  - sends over the gateway WebSocket (`UPSTREAM cmd`, `op=chat.send`) and `POST /v1/conversations/{id}/messages`
+    (`Idempotency-Key`, `201` / `202`), with validation, per-user and per-conversation limits, and connect tokens
+    checked offline against auth-service's JWKS;
+  - sequencer on `chat.commands` (key = conversation): dedup, `convSeq` reserved by an LWT fence, ScyllaDB storage,
+    `chat.events`;
+  - fan-out through the Push API `SendStream`: a RELIABLE MESSAGE per member for 1-1 and groups (≤ 500), an
+    EPHEMERAL BROADCAST on `chat:chan:<id>` for channels; `chat.channel.open` / `close` subscribe server-side;
+  - conversations, history, `POST /v1/sync`, DMs, members and public channels over HTTP;
+  - ScyllaDB schema migration, Redis member / dedup / send-result cache;
+  - `ChatE2EIT` (Push API, router, two gateways and chat-service in one JVM); `ChatLoadIT` measurement.
+- Contracts: `chat.proto` (`ChatSend`, `ChatMessage`, `ChatCommand`, `ChatEvent`, …) and the chat testkit.
+- Devenv: ScyllaDB 6.2.3 and the `chat` service; `chat.*` topics; auth seeds client `chat-backend`;
+  `make smoke` adds `CHAT 1-1`, `CHAT group` and `CHAT channel` (`devtools smoke --chat`).
+- Push API: `allowed-spiffe` includes chat-service.
+- Measurement (dev machine, 4 vCPU):
+  - 1-1 p99 219 ms at 20 messages/s and 443 ms at 100 messages/s;
+  - group of 500 p99 276 ms;
+  - channel of 10 000 sessions p99 300 ms.
+- ADR 0028–0032.
+
 ### push-api-service: spec §6 metrics
 - `pushapi.produce{result}`, `pushapi.idempotency{result}`, `pushapi.ratelimited{kind}`, `pushapi.seq.latency` and
   `pushapi.status.lag` are emitted; the core reports them through `AcceptMetrics` (no Micrometer in the core).

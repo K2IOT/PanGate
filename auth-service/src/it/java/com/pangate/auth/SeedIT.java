@@ -31,12 +31,16 @@ class SeedIT {
   @Test
   void seedIsIdempotentAndWritesClientsFileOnce() throws Exception {
     Map<String, String> first = file();  // written at startup
-    assertThat(first).containsOnlyKeys("pangate-admin", "t1-backend");
+    assertThat(first).containsOnlyKeys("pangate-admin", "t1-backend", "chat-backend");
     assertThat(clients.authenticates("t1-backend", first.get("t1-backend").toCharArray())).isTrue();
     assertThat(clients.authenticates("pangate-admin", first.get("pangate-admin").toCharArray())).isTrue();
     String scopes = jdbc.sql("SELECT array_to_string(scopes, ' ') FROM auth.clients WHERE id = 't1-backend'")
         .query(String.class).single();
     assertThat(scopes).isEqualTo("tokens:mint sessions:revoke push:send push:broadcast");
+    // app chat (chat spec §1, §8): tenant chat, client chat-backend mints connect tokens for its users
+    assertThat(clients.authenticates("chat-backend", first.get("chat-backend").toCharArray())).isTrue();
+    assertThat(jdbc.sql("SELECT array_to_string(scopes, ' ') FROM auth.clients WHERE id = 'chat-backend'")
+        .query(String.class).single()).isEqualTo("tokens:mint sessions:revoke push:send push:broadcast");
 
     seed.seed();
     seed.seed();

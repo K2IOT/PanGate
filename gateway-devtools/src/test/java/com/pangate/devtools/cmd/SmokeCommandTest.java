@@ -57,6 +57,30 @@ class SmokeCommandTest {
     assertThat(err.toString()).contains("--push-api").contains("--auth-url");
   }
 
+  @Test
+  void chatNeedsAuthUrl() {
+    StringWriter err = new StringWriter();
+    int code = run(err, "smoke", "--url", "wss://localhost:1/v1/ws", "--issuer", "http://localhost:1", "--insecure",
+        "--router", "r:1", "--chat", "http://localhost:3");
+    assertThat(code).isEqualTo(2);
+    assertThat(err.toString()).contains("--chat").contains("--auth-url");
+  }
+
+  @Test
+  void chatOptionIsAcceptedWithAuth() {
+    StringWriter err = new StringWriter();
+    int code = run(err, "smoke", "--url", "wss://localhost:1/v1/ws", "--auth-url", "http://localhost:1",
+        "--client-file", "/nonexistent.json", "--insecure", "--push-api", "http://localhost:2", "--chat",
+        "http://localhost:3");
+    assertThat(code).isEqualTo(1);   // ran (and failed to reach auth), no usage error
+    assertThat(err.toString()).doesNotContain("--chat");
+  }
+
+  @Test
+  void chatUsersAreFreshPerRun() {
+    assertThat(ChatSmoke.user("a")).startsWith("smoke-a-").isNotEqualTo(ChatSmoke.user("a"));
+  }
+
   private static int run(StringWriter err, String... args) {
     CommandLine cmd = new CommandLine(new Main());
     cmd.setErr(new PrintWriter(err));

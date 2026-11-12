@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: chat-service
+  threads:
+    virtual:
+      enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 10s
+pangate:
+  service: chat
+server:
+  port: 8080
+  shutdown: graceful
+# Public API on :8080 (server.port); /ready, /live and actuator on a second connector :8081 (chat.management-port),
+# as in push-api-service.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,chat
+          additional-path: "server:/ready"
+          show-details: always
+        liveness:
+          include: livenessState
+          additional-path: "server:/live"
+chat:
+  cell: c1
+  management-port: 8081

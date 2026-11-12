@@ -31,3 +31,8 @@ Quyết định kiến trúc của gateway-service (spec §13). Mỗi ADR gồm:
 | [0025](0025-message-status-in-redis.md) | Trạng thái message trong Redis, TTL theo message; `delivered` cần `receipt` |
 | [0026](0026-push-rate-per-pod.md) | Rate limit push là token bucket mỗi pod, cấu hình qua `TenantLimits` |
 | [0027](0027-ordered-per-pod.md) | Thứ tự ORDERED chỉ được đảm bảo trong một pod Push API; client sắp lại theo seq |
+| [0028](0028-chat-one-tenant.md) | App chat là một tenant PanGate cố định; chat-service chỉ biết user |
+| [0029](0029-chat-send-over-websocket.md) | Gửi tin qua WebSocket (`UPSTREAM cmd`, `op=chat.*`) là đường chính, HTTP là đường phụ; không sửa gateway |
+| [0030](0030-chat-single-writer-per-conversation.md) | Một nơi ghi mỗi hội thoại: `chat.commands` theo `conversationId`, `convSeq` cấp bằng LWT làm hàng rào |
+| [0031](0031-chat-fan-out.md) | Fan-out: MESSAGE theo thành viên cho 1-1 và nhóm ≤ 500; BROADCAST theo topic cho kênh, subscribe do server quyết |
+| [0032](0032-chat-scylladb.md) | ScyllaDB cho tin và hội thoại; `messages` theo `(conv_id, bucket)` |
