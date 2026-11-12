@@ -27,6 +27,10 @@ public final class ScyllaSession {
     CqlSessionBuilder b = CqlSession.builder().withLocalDatacenter(cfg.localDc())
         .withConfigLoader(DriverConfigLoader.programmaticBuilder()
             .withDuration(DefaultDriverOption.REQUEST_TIMEOUT, cfg.timeout())
+            // with RF 3 a LOCAL_ONE read can miss a row a LOCAL_ONE write just made (a "missing" conversation
+            // re-created, a removed member read back): quorum for both, local serial for the LWTs
+            .withString(DefaultDriverOption.REQUEST_CONSISTENCY, "LOCAL_QUORUM")
+            .withString(DefaultDriverOption.REQUEST_SERIAL_CONSISTENCY, "LOCAL_SERIAL")
             .withDuration(DefaultDriverOption.CONNECTION_INIT_QUERY_TIMEOUT, cfg.timeout().multipliedBy(5))
             .build());
     for (String cp : cfg.contactPoints()) {

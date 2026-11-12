@@ -25,8 +25,8 @@ public final class MemberLookup {
     return ms;
   }
 
-  /** After a membership change: the next read goes to the store. */
-  public void evict(String convId) {
-    cache.evictMembers(convId);
+  /** After a membership change: the next read goes to the store. False when that is not certain. */
+  public boolean evict(String convId) {
+    return cache.evictMembers(convId);
   }
 }

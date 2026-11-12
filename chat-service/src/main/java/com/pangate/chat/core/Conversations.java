@@ -14,8 +14,9 @@ import java.util.Set;
 /**
  * Conversation management (chat spec §7): groups (at most {@code maxGroupMembers}) and channels with the creator as
  * owner, one DM per pair, members added or removed by an owner or admin (anyone may leave), public channels joined.
- * Permission checks read the store, not the cache; every membership change evicts the cached member list at once,
- * so a removed member gets nothing sent after the change.
+ * Permission checks read the store, not the cache; every membership change evicts the cached member list at once
+ * (and fails with 503 if it cannot), so a removed member gets nothing sent after the change; leaving a channel also
+ * ends its subscriptions.
  */
 public final class Conversations {
 
@@ -26,13 +27,21 @@ public final class Conversations {
   private final ChatStores.MemberStore members;
   private final MemberLookup lookup;
   private final ChatProperties.Limits limits;
+  private final java.util.function.BiConsumer<String, String> leftChannel;
 
   public Conversations(ChatStores.ConversationStore conversations, ChatStores.MemberStore members,
       MemberLookup lookup, ChatProperties.Limits limits) {
+    this(conversations, members, lookup, limits, (user, conv) -> { });
+  }
+
+  /** {@code leftChannel(userId, convId)} after someone leaves or is removed from a channel. */
+  public Conversations(ChatStores.ConversationStore conversations, ChatStores.MemberStore members,
+      MemberLookup lookup, ChatProperties.Limits limits, java.util.function.BiConsumer<String, String> leftChannel) {
     this.conversations = conversations;
     this.members = members;
     this.lookup = lookup;
     this.limits = limits;
+    this.leftChannel = leftChannel;
   }
 
   static void checkUserId(String id) {
@@ -125,12 +134,19 @@ public final class Conversations {
       throw ChatRefusal.invalid("a group has at most " + limits.maxGroupMembers() + " members");
     }
     members.add(convId, new Member(userId, Role.MEMBER));
-    lookup.evict(convId);
+    evict(convId);
+  }
+
+  /** The change is done; a cached list that could not be dropped would keep it from showing: report failure. */
+  private void evict(String convId) {
+    if (!lookup.evict(convId)) {
+      throw new StoreUnavailableException("member cache of " + convId + " not evicted; retry", null);
+    }
   }
 
   public void removeMember(String actor, String convId, String userId) {
     checkUserId(userId);
-    managed(actor, convId);
+    Conversation c = managed(actor, convId);
     if (!actor.equals(userId)) {
       Role r = roleOf(convId, actor);
       Role target = roleOf(convId, userId);
@@ -142,7 +158,10 @@ public final class Conversations {
       }
     }
     members.remove(convId, userId);
-    lookup.evict(convId);
+    evict(convId);
+    if (c.kind() == ConversationKind.CONVERSATION_KIND_CHANNEL) {
+      leftChannel.accept(userId, convId);   // its open subscriptions end now, not at the next reconnect
+    }
   }
 
   /** Follows a public channel. */
@@ -153,7 +172,7 @@ public final class Conversations {
     }
     if (members.member(convId, userId).isEmpty()) {
       members.add(convId, new Member(userId, Role.MEMBER));
-      lookup.evict(convId);
+      evict(convId);
     }
   }
 }

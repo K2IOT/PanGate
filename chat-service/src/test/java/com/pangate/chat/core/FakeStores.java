@@ -28,6 +28,11 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
   public final Map<String, List<Member>> cache = new ConcurrentHashMap<>();
   public int reserveCalls;
   public boolean fail;
+  /** Fail this many message writes / inbox touches (then succeed). */
+  public int failWrites;
+  public int failTouches;
+  public boolean evictFails;
+  public int touches;
 
   void check() {
     if (fail) {
@@ -86,6 +91,13 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
         .sorted(Comparator.comparingLong(UserConv::lastMsgAtMs).reversed()).limit(limit).toList();
   }
   @Override public void touchUserConv(String userId, String convId, long seq, long atMs) {
+    synchronized (this) {
+      if (failTouches > 0) {
+        failTouches--;
+        throw new StoreUnavailableException("touch down", null);
+      }
+      touches++;
+    }
     userConvs.computeIfAbsent(userId, k -> new ConcurrentHashMap<>()).merge(convId,
         new UserConv(convId, null, seq, 0, atMs),
         (o, n) -> n.lastSeq() > o.lastSeq() ? new UserConv(convId, o.kind(), n.lastSeq(), o.readSeq(), n.lastMsgAtMs()) : o);
@@ -93,6 +105,12 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
 
   @Override public void write(StoredMessage m) {
     check();
+    synchronized (this) {
+      if (failWrites > 0) {
+        failWrites--;
+        throw new StoreUnavailableException("write timed out", null);
+      }
+    }
     messages.computeIfAbsent(m.convId(), k -> new ConcurrentHashMap<>()).put(m.convSeq(), m);
   }
   @Override public List<StoredMessage> before(String convId, long beforeSeq, int limit) {
@@ -113,5 +131,11 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
 
   @Override public Optional<List<Member>> cachedMembers(String convId) { return Optional.ofNullable(cache.get(convId)); }
   @Override public void putMembers(String convId, List<Member> ms) { cache.put(convId, List.copyOf(ms)); }
-  @Override public void evictMembers(String convId) { cache.remove(convId); }
+  @Override public boolean evictMembers(String convId) {
+    if (evictFails) {
+      return false;
+    }
+    cache.remove(convId);
+    return true;
+  }
 }

@@ -53,7 +53,8 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   public ScyllaChatStore(CqlSession s, String ks) {
     this.s = s;
     insertConv = s.prepare("INSERT INTO " + ks + ".conversations (conv_id, kind, title, created_by, created_at, "
-        + "last_seq, last_msg_at, member_count, is_public) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        + "last_seq, last_msg_at, member_count, is_public) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        + "IF NOT EXISTS");
     selectConv = s.prepare("SELECT conv_id, kind, title, created_by, last_seq, is_public, member_count FROM " + ks
         + ".conversations WHERE conv_id = ?");
     reserve = s.prepare("UPDATE " + ks + ".conversations SET last_seq = ? WHERE conv_id = ? IF last_seq = ?");
@@ -106,6 +107,7 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   }
 
   @Override
+  /** {@code IF NOT EXISTS}: creating an existing conversation again never resets its {@code last_seq} fence. */
   public void create(Conversation c, List<Member> members) {
     long now = System.currentTimeMillis();
     exec(insertConv.bind(c.id(), c.kind().getNumber(), c.title(), c.createdBy(), now, 0L, now, members.size(),

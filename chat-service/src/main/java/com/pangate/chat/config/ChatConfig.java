@@ -125,8 +125,9 @@ public class ChatConfig {
   }
 
   @Bean
-  Conversations conversations(ScyllaChatStore store, RedisChatCache cache, ChatProperties p) {
-    return new Conversations(store, store, new MemberLookup(store, cache), p.limits());
+  Conversations conversations(ScyllaChatStore store, RedisChatCache cache, ChatProperties p,
+      ChannelSubscriptions channels) {
+    return new Conversations(store, store, new MemberLookup(store, cache), p.limits(), channels::close);
   }
 
   @Bean
@@ -174,7 +175,7 @@ public class ChatConfig {
   @Bean(destroyMethod = "")
   FanOutLoop fanOutLoop(ChatProperties p, ScyllaChatStore store, RedisChatCache cache, PushApiClient pusher,
       MeterRegistry meters) {
-    return new FanOutLoop(SequencerLoop.consumer(p.kafka().bootstrap(), FanOutLoop.GROUP), p.kafka().eventsTopic(),
+    return new FanOutLoop(FanOutLoop.consumer(p.kafka().bootstrap(), FanOutLoop.GROUP), p.kafka().eventsTopic(),
         new MemberLookup(store, cache), store, pusher, meters);
   }
 

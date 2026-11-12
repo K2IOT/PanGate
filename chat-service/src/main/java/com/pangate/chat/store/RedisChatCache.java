@@ -27,6 +27,10 @@ public final class RedisChatCache implements ChatStores.MemberCache, ChatStores.
   static final Duration DEDUP_TTL = Duration.ofHours(24);
   static final long RECONNECT_MS = 1_000;
 
+  /** Written by an eviction for {@link #EVICT_HOLD}: a list read before the change cannot be cached right after it. */
+  static final String EVICTED = "~evicted~";
+  static final Duration EVICT_HOLD = Duration.ofSeconds(2);
+
   private final RedisClient client;
   private final Duration memberTtl;
   private volatile StatefulRedisConnection<String, String> conn;
@@ -62,7 +66,7 @@ public final class RedisChatCache implements ChatStores.MemberCache, ChatStores.
     try {
       RedisCommands<String, String> r = redis();
       String v = r == null ? null : r.get("members:{" + convId + "}");
-      if (v == null) {
+      if (v == null || v.equals(EVICTED)) {
         return Optional.empty();
       }
       List<Member> out = new ArrayList<>();
@@ -90,22 +94,30 @@ public final class RedisChatCache implements ChatStores.MemberCache, ChatStores.
     try {
       RedisCommands<String, String> r = redis();
       if (r != null) {
-        r.psetex("members:{" + convId + "}", memberTtl.toMillis(), b.toString());
+        r.set("members:{" + convId + "}", b.toString(),
+            io.lettuce.core.SetArgs.Builder.nx().px(memberTtl.toMillis()));   // never over an eviction marker
       }
     } catch (RuntimeException e) {
       log.debug("member cache not written: {}", e.toString());
     }
   }
 
+  /**
+   * Replaces the list with a short-lived marker. False when Redis answered with an error (the old list may stay for
+   * its TTL). Not connected at all counts as evicted: nothing can be read from it either (chat spec §8, Redis down).
+   */
   @Override
-  public void evictMembers(String convId) {
+  public boolean evictMembers(String convId) {
+    RedisCommands<String, String> r = redis();
+    if (r == null) {
+      return true;
+    }
     try {
-      RedisCommands<String, String> r = redis();
-      if (r != null) {
-        r.del("members:{" + convId + "}");
-      }
+      r.psetex("members:{" + convId + "}", EVICT_HOLD.toMillis(), EVICTED);
+      return true;
     } catch (RuntimeException e) {
-      log.debug("member cache not evicted: {}", e.toString());
+      log.warn("member cache not evicted: {}", e.toString());
+      return false;
     }
   }
 

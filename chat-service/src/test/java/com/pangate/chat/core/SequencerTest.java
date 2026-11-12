@@ -131,4 +131,30 @@ class SequencerTest {
     ChatCommand http = cmd(c, Ids.next(), "x").toBuilder().setReplyTo("http:pod-1").build();
     assertThat(seq.process(c, List.of(http)).getFirst().replyTo()).isEqualTo("http:pod-1");
   }
+
+  /** Final review C1: a message write that fails after the seq was reserved must not make a second message. */
+  @Test
+  void messageWriteFailureIsRetriedAsTheSameMessage() {
+    String c = conv(0);
+    ChatCommand cmd = cmd(c, Ids.next(), "once");
+    stores.failWrites = 1;
+    assertThatThrownBy(() -> seq.process(c, List.of(cmd))).isInstanceOf(StoreUnavailableException.class);
+    redis.clear();
+    SequencedMessage m = seq.process(c, List.of(cmd)).getFirst();
+    assertThat(m.message().convSeq()).isEqualTo(1);
+    assertThat(stores.lastSeq.get(c)).as("no second seq").isEqualTo(1L);
+    assertThat(stores.messages.get(c)).containsOnlyKeys(1L);
+    assertThat(stores.messages.get(c).get(1L).text()).isEqualTo("once");
+  }
+
+  /** A retry carrying other text re-emits what is stored, not what it carries. */
+  @Test
+  void duplicateEventCarriesTheStoredMessage() {
+    String c = conv(0);
+    String k = Ids.next();
+    seq.process(c, List.of(cmd(c, k, "original")));
+    SequencedMessage again = seq.process(c, List.of(cmd(c, k, "edited"))).getFirst();
+    assertThat(again.duplicate()).isTrue();
+    assertThat(again.message().text()).isEqualTo("original");
+  }
 }

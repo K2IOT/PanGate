@@ -14,7 +14,9 @@ import org.junit.jupiter.api.Test;
 class ConversationsTest {
 
   final FakeStores stores = new FakeStores();
-  final Conversations convs = new Conversations(stores, stores, new MemberLookup(stores, stores), FakeStores.LIMITS);
+  final List<String> unsubscribed = new ArrayList<>();
+  final Conversations convs = new Conversations(stores, stores, new MemberLookup(stores, stores), FakeStores.LIMITS,
+      (user, conv) -> unsubscribed.add(user + "@" + conv));
 
   static List<String> users(int n) {
     List<String> out = new ArrayList<>();
@@ -120,5 +122,24 @@ class ConversationsTest {
     assertThat(convs.visible("own", group.id()).id()).isEqualTo(group.id());
     assertThat(code(() -> convs.visible("anyone", group.id()))).isEqualTo(ChatRefusal.FORBIDDEN);
     assertThat(code(() -> convs.visible("anyone", Ids.next()))).isEqualTo(ChatRefusal.NOT_FOUND);
+  }
+
+  /** Final review I5: if the cached member list cannot be dropped, the removal is not reported done. */
+  @Test
+  void removalFailsWhenTheCacheCannotBeEvicted() {
+    Conversation c = convs.create("own", ConversationKind.CONVERSATION_KIND_GROUP, "g", List.of("m1"), false);
+    stores.evictFails = true;
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> convs.removeMember("own", c.id(), "m1"))
+        .isInstanceOf(StoreUnavailableException.class);
+  }
+
+  /** Final review I6: leaving a channel ends the open subscriptions too. */
+  @Test
+  void removalFromAChannelUnsubscribes() {
+    Conversation ch = convs.create("own", ConversationKind.CONVERSATION_KIND_CHANNEL, "c", List.of("m1"), false);
+    Conversation g = convs.create("own", ConversationKind.CONVERSATION_KIND_GROUP, "g", List.of("m1"), false);
+    convs.removeMember("own", ch.id(), "m1");
+    convs.removeMember("own", g.id(), "m1");
+    assertThat(unsubscribed).containsExactly("m1@" + ch.id());
   }
 }

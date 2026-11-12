@@ -77,6 +77,7 @@ public final class ChatStores {
 
     void putMembers(String convId, List<Member> members);
 
-    void evictMembers(String convId);
+    /** False when the cached list may still be there (Redis did not confirm). */
+    boolean evictMembers(String convId);
   }
 }

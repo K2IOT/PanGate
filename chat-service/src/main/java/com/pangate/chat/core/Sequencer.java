@@ -50,7 +50,7 @@ public final class Sequencer {
       firstOfKey.put(key, i);
       Optional<StoredMessage> prior = lookup(convId, c);
       if (prior.isPresent()) {
-        found[i] = full(prior.get(), c);
+        found[i] = stored(prior.get(), c);
       } else {
         fresh++;
       }
@@ -83,8 +83,10 @@ public final class Sequencer {
       ChatSend s = c.getSend();
       StoredMessage m = new StoredMessage(convId, ++next, Ids.next(now), c.getSenderId(), s.getClientMsgId(),
           s.getText(), s.getReplyToMsgId(), List.copyOf(s.getMentionUserIdsList()), now);
-      messages.write(m);
+      // dedup first: if the message write fails (or times out after landing), the retry finds this seq and
+      // completes the same message instead of reserving a second one
       durable.put(m);
+      messages.write(m);
       cache.put(m);
       produced[i] = m;
       out.add(SequencedMessage.of(m, false, c.getReplyTo()));
@@ -97,7 +99,20 @@ public final class Sequencer {
     return hit.isPresent() ? hit : durable.find(convId, c.getSenderId(), c.getSend().getClientMsgId());
   }
 
-  /** Dedup rows keep ids and seq only; the repeated command carries the same content, so the event is rebuilt. */
+  /**
+   * The message an earlier send produced: its stored row, or, when an earlier attempt reserved the seq and wrote the
+   * dedup row but not the message, the message rebuilt from this command and written now (same seq and id).
+   */
+  private StoredMessage stored(StoredMessage d, ChatCommand c) {
+    List<StoredMessage> row = messages.after(d.convId(), d.convSeq() - 1, 1);
+    if (!row.isEmpty() && row.getFirst().convSeq() == d.convSeq() && row.getFirst().msgId().equals(d.msgId())) {
+      return row.getFirst();
+    }
+    StoredMessage m = full(d, c);
+    messages.write(m);
+    return m;
+  }
+
   private static StoredMessage full(StoredMessage d, ChatCommand c) {
     ChatSend s = c.getSend();
     return new StoredMessage(d.convId(), d.convSeq(), d.msgId(), d.senderId(), d.clientMsgId(), s.getText(),

@@ -151,4 +151,36 @@ class ChatStoreIT {
       assertThat(dead.dedup("x", "u", "c")).isEmpty();
     }
   }
+
+  /** Final review C2: creating an existing conversation again never resets its last_seq fence. */
+  @Test
+  void createDoesNotOverwriteAnExistingConversation() {
+    String id = Ids.next();
+    Conversation c = new Conversation(id, ConversationKind.CONVERSATION_KIND_DIRECT, "", "a", 0, false, 2);
+    store.create(c, List.of(new Member("a", Role.MEMBER), new Member("b", Role.MEMBER)));
+    assertThat(store.reserveSeq(id, 0, 5)).isTrue();
+    store.create(c, List.of(new Member("a", Role.MEMBER), new Member("b", Role.MEMBER)));
+    assertThat(store.lastSeq(id)).isEqualTo(5);
+  }
+
+  /** Final review C2: reads and writes are LOCAL_QUORUM, LWTs LOCAL_SERIAL. */
+  @Test
+  void consistencyIsQuorum() {
+    var profile = session.getContext().getConfig().getDefaultProfile();
+    assertThat(profile.getString(com.datastax.oss.driver.api.core.config.DefaultDriverOption.REQUEST_CONSISTENCY))
+        .isEqualTo("LOCAL_QUORUM");
+    assertThat(profile.getString(
+        com.datastax.oss.driver.api.core.config.DefaultDriverOption.REQUEST_SERIAL_CONSISTENCY))
+        .isEqualTo("LOCAL_SERIAL");
+  }
+
+  /** Final review I5: a member list read before an eviction cannot be cached right after it. */
+  @Test
+  void evictionBlocksAStaleFill() {
+    String conv = Ids.next();
+    List<Member> before = List.of(new Member("a", Role.MEMBER), new Member("removed", Role.MEMBER));
+    assertThat(cache.evictMembers(conv)).isTrue();
+    cache.putMembers(conv, before);   // a reader that loaded the list before the removal
+    assertThat(cache.cachedMembers(conv)).isEmpty();
+  }
 }

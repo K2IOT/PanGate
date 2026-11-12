@@ -59,7 +59,7 @@ message twice, never as two messages.
 |---|---|---|
 | `cell` / `management-port` | `c1` / `8081` | |
 | `kafka.bootstrap`, `kafka.{commands,events,dlq,upstream}-topic`, `kafka.produce-timeout` | `kafka:9092`, `chat.commands`, `chat.events`, `chat.commands.dlq`, `c1.gw.upstream.cmd`, `5s` | |
-| `scylla.{contact-points,local-dc,keyspace,timeout,replication-factor}` | `scylla:9042`, `datacenter1`, `chat`, `1s`, `1` | schema statements get 30 s |
+| `scylla.{contact-points,local-dc,keyspace,timeout,replication-factor}` | `scylla:9042`, `datacenter1`, `chat`, `1s`, `1` | `LOCAL_QUORUM` / `LOCAL_SERIAL`; schema statements get 30 s |
 | `redis.{uri,timeout,member-cache-ttl}` | `redis://redis:6379`, `200ms`, `60s` | |
 | `auth.{jwks-uri,issuer,audience}` | `…`, `https://auth.pangate`, `pangate-gw` | |
 | `push-api.{target,plaintext,timeout}` | `dns:///push-api:9443`, `false`, `2s` | mTLS client certificates are not wired in CH1 |
@@ -80,7 +80,10 @@ message twice, never as two messages.
 | Kafka down | WebSocket: the gateway answers `ERROR 4500`, the client resends the same `clientMsgId`. HTTP: `503` + `Retry-After`. Sequencer and fan-out do not commit |
 | ScyllaDB down (1 s timeout) | the sequencer rewinds and retries; reads answer `503`; `/ready` turns 503 after 10 s without an answer |
 | Redis down | dedup reads ScyllaDB, members read ScyllaDB, HTTP sends answer `202` at once |
+| Redis errors on a membership change | the change is stored, the request answers `503` (retry is safe): a cached list must not outlive a removal |
 | Push API down | fan-out retries the failed requests (100 ms → 5 s), rewinds after 30 s; nothing is committed before it was sent |
+| ScyllaDB fails after the pushes | fan-out retries only the inbox writes, not the pushes |
+| Long fan-out backlog | polls of ≤ 100 events, a 120 s step budget, progress committed; `max.poll.interval.ms` 10 min |
 | Rebalance, two sequencers on one partition | the old one's LWT fails; it drops its batch; no `convSeq` is used twice |
 | Malformed record | counted and written to `chat.commands.dlq` |
 

@@ -54,12 +54,40 @@ public final class FanOutLoop implements AutoCloseable {
   private final Pusher pusher;
   private final MeterRegistry meters;
   private final Timer lag;
+  private final Duration stepBudget;
   private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
   private volatile boolean running = true;
   private Thread thread;
 
+  static final Duration STEP_BUDGET = Duration.ofSeconds(120);
+
+  public static Map<String, Object> consumerConfig(String bootstrap, String group) {
+    Map<String, Object> cfg = new HashMap<>();
+    cfg.put(org.apache.kafka.clients.consumer.ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap);
+    cfg.put(org.apache.kafka.clients.consumer.ConsumerConfig.GROUP_ID_CONFIG, group);
+    cfg.put(org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+    cfg.put(org.apache.kafka.clients.consumer.ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+    // a poll's events must be done long before the group evicts the consumer: small polls, a step budget, room
+    cfg.put(org.apache.kafka.clients.consumer.ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 100);
+    cfg.put(org.apache.kafka.clients.consumer.ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, 600_000);
+    return cfg;
+  }
+
+  public static org.apache.kafka.clients.consumer.KafkaConsumer<String, byte[]> consumer(String bootstrap,
+      String group) {
+    return new org.apache.kafka.clients.consumer.KafkaConsumer<>(consumerConfig(bootstrap, group),
+        new org.apache.kafka.common.serialization.StringDeserializer(),
+        new org.apache.kafka.common.serialization.ByteArrayDeserializer());
+  }
+
   public FanOutLoop(Consumer<String, byte[]> consumer, String topic, MemberLookup members,
       ChatStores.MemberStore inbox, Pusher pusher, MeterRegistry meters) {
+    this(consumer, topic, members, inbox, pusher, meters, STEP_BUDGET);
+  }
+
+  /** {@code stepBudget}: no new event of a poll starts after this; the rest is polled again. */
+  public FanOutLoop(Consumer<String, byte[]> consumer, String topic, MemberLookup members,
+      ChatStores.MemberStore inbox, Pusher pusher, MeterRegistry meters, Duration stepBudget) {
     this.consumer = consumer;
     this.topic = topic;
     this.members = members;
@@ -67,6 +95,7 @@ public final class FanOutLoop implements AutoCloseable {
     this.pusher = pusher;
     this.meters = meters;
     this.lag = meters.timer("chat.fanout.lag");
+    this.stepBudget = stepBudget;
   }
 
   public synchronized void start() {
@@ -102,10 +131,12 @@ public final class FanOutLoop implements AutoCloseable {
    */
   private void step() throws InterruptedException {
     ConsumerRecords<String, byte[]> batch = consumer.poll(Duration.ofMillis(200));
+    long deadline = System.nanoTime() + stepBudget.toNanos();
+    java.util.concurrent.atomic.AtomicBoolean failed = new java.util.concurrent.atomic.AtomicBoolean();
     Map<TopicPartition, Future<Long>> work = new HashMap<>();
     for (TopicPartition tp : batch.partitions()) {
       List<ConsumerRecord<String, byte[]>> recs = batch.records(tp);
-      work.put(tp, workers.submit(() -> deliverAll(tp, recs)));
+      work.put(tp, workers.submit(() -> deliverAll(tp, recs, deadline, failed)));
     }
     Map<TopicPartition, OffsetAndMetadata> done = new HashMap<>();
     for (Map.Entry<TopicPartition, Future<Long>> w : work.entrySet()) {
@@ -116,6 +147,7 @@ public final class FanOutLoop implements AutoCloseable {
         stop = w.getValue().get();
       } catch (ExecutionException e) {
         stop = recs.getFirst().offset();
+        failed.set(true);
       }
       if (stop < 0) {
         done.put(tp, new OffsetAndMetadata(recs.getLast().offset() + 1));
@@ -129,11 +161,24 @@ public final class FanOutLoop implements AutoCloseable {
     if (!done.isEmpty()) {
       consumer.commitSync(done);
     }
+    if (failed.get()) {
+      Thread.sleep(200);   // a failure rewound a partition: do not spin on it
+    }
   }
 
-  /** -1 when every event went out, else the offset of the first one to retry. */
-  private long deliverAll(TopicPartition tp, List<ConsumerRecord<String, byte[]>> recs) throws InterruptedException {
+  /**
+   * -1 when every event went out, else the offset to go on from: the first event that failed ({@code failed} set), or
+   * the first not started because the step budget ran out (at least one event per partition always runs).
+   */
+  private long deliverAll(TopicPartition tp, List<ConsumerRecord<String, byte[]>> recs, long deadline,
+      java.util.concurrent.atomic.AtomicBoolean failed) throws InterruptedException {
+    boolean first = true;
     for (ConsumerRecord<String, byte[]> r : recs) {
+      if (!first && System.nanoTime() > deadline) {
+        meters.counter("chat.fanout.budget").increment();
+        return r.offset();
+      }
+      first = false;
       boolean sent;
       try {
         sent = deliver(r);
@@ -142,6 +187,7 @@ public final class FanOutLoop implements AutoCloseable {
         sent = false;
       }
       if (!sent) {
+        failed.set(true);
         return r.offset();
       }
     }
@@ -196,12 +242,33 @@ public final class FanOutLoop implements AutoCloseable {
       Thread.sleep(Math.min(MAX_BACKOFF_MS, Math.max(backoff, retryAfter)));
       backoff = Math.min(MAX_BACKOFF_MS, backoff * 2);
     }
-    if (!channel) {
-      for (Member member : to) {
-        inbox.touchUserConv(member.userId(), m.getConversationId(), m.getConvSeq(), m.getSentAtMs());
-      }
+    if (!channel && !touchAll(to, m, giveUpAt)) {
+      return false;
     }
     lag.record(Math.max(0, System.currentTimeMillis() - m.getSentAtMs()), TimeUnit.MILLISECONDS);
+    return true;
+  }
+
+  /**
+   * Raises every member's inbox row. The pushes are out already: a failing store is retried here with backoff, so a
+   * ScyllaDB hiccup does not send the message to every member again; only after {@link #GIVE_UP} the event rewinds.
+   */
+  private boolean touchAll(List<Member> to, ChatMessage m, long giveUpAt) throws InterruptedException {
+    long backoff = 100;
+    int next = 0;
+    while (next < to.size()) {
+      try {
+        inbox.touchUserConv(to.get(next).userId(), m.getConversationId(), m.getConvSeq(), m.getSentAtMs());
+        next++;
+      } catch (RuntimeException e) {
+        meters.counter("chat.fanout.inbox.retries").increment();
+        if (!running || System.nanoTime() > giveUpAt) {
+          return false;
+        }
+        Thread.sleep(backoff);
+        backoff = Math.min(MAX_BACKOFF_MS, backoff * 2);
+      }
+    }
     return true;
   }
 
