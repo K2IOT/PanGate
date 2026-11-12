@@ -69,6 +69,26 @@ class ChatE2EIT {
     }
   }
 
+  /** The next chat.message PUSH within {@code wait}, or null. */
+  static ChatMessage poll(GatewayClient c, Duration wait) throws Exception {
+    long deadline = System.nanoTime() + wait.toNanos();
+    while (System.nanoTime() < deadline) {
+      Frame f;
+      try {
+        f = c.awaitPush(Duration.ofNanos(Math.max(1, deadline - System.nanoTime())));
+      } catch (IllegalStateException timeout) {
+        return null;
+      }
+      if (f.getClass_() == com.pangate.contracts.v1.DeliveryClass.DELIVERY_CLASS_RELIABLE) {
+        c.ack(f.getMsgId());
+      }
+      if ("chat.message".equals(f.getHeadersMap().get("type"))) {
+        return ChatMessage.parseFrom(f.getPayload());
+      }
+    }
+    return null;
+  }
+
   static List<Long> seqs(GatewayClient c, int n) throws Exception {
     List<Long> out = new ArrayList<>();
     for (int i = 0; i < n; i++) {
@@ -226,5 +246,64 @@ class ChatE2EIT {
     assertThat(r.getReason()).isEqualTo("not_member");
     assertThat(r.getClientMsgId()).isEqualTo(send.getClientMsgId());
     assertThat(r.getConversationId()).isEqualTo(g);
+  }
+  /**
+   * A member removed from a private channel stops getting its messages without reconnecting: the removal revokes the
+   * open subscriptions server side (Push API → router → gateway), while the members who stay keep receiving.
+   */
+  @Test
+  void removedMemberOfPrivateChannelStopsReceiving() throws Exception {
+    String owner = user("own");
+    String gone = user("gone");
+    String stays = user("stays");
+    HttpResponse<String> created = h.call("POST", "/v1/conversations", owner, Map.of("kind", "channel", "title",
+        "private", "public", false, "memberIds", List.of(gone, stays)), Map.of());
+    assertThat(created.statusCode()).as(created.body()).isEqualTo(201);
+    String ch = h.json(created).get("id").asText();
+    GatewayClient g = h.connect(0, gone, "d1");
+    GatewayClient s = h.connect(1, stays, "d1");
+    for (GatewayClient c : List.of(g, s)) {
+      assertThat(command(c, "chat.channel.open", ChannelOpen.newBuilder().setConversationId(ch).build()
+          .toByteArray()).getType()).isEqualTo(FrameType.FRAME_TYPE_UPSTREAM_ACK);
+    }
+    // both subscriptions in place: post until each member got a message
+    boolean gotG = false;
+    boolean gotS = false;
+    long deadline = System.nanoTime() + T.toNanos();
+    while (!(gotG && gotS) && System.nanoTime() < deadline) {
+      httpSend(owner, ch, "warm-up", Ids.next());
+      gotG |= poll(g, Duration.ofSeconds(2)) != null;
+      gotS |= poll(s, Duration.ofSeconds(2)) != null;
+    }
+    assertThat(gotG && gotS).as("both members subscribed").isTrue();
+
+    assertThat(h.call("DELETE", "/v1/conversations/" + ch + "/members/" + gone, owner, null, Map.of())
+        .statusCode()).isEqualTo(204);
+    // the revoke travels like the subscribe did: post until a message reaches the member who stays and not the other
+    boolean cut = false;
+    deadline = System.nanoTime() + T.toNanos();
+    for (int i = 0; !cut && System.nanoTime() < deadline; i++) {
+      String text = "after removal " + i;
+      httpSend(owner, ch, text, Ids.next());
+      ChatMessage m;
+      do {
+        m = poll(s, T);
+        assertThat(m).as("the member who stays still receives").isNotNull();
+      } while (!m.getText().equals(text));
+      boolean leaked = false;
+      for (ChatMessage x = poll(g, Duration.ofSeconds(2)); x != null; x = poll(g, Duration.ofSeconds(2))) {
+        leaked |= x.getText().equals(text);
+      }
+      cut = !leaked;
+    }
+    assertThat(cut).as("the removed member stops receiving the private channel").isTrue();
+
+    // and cannot subscribe again
+    command(g, "chat.channel.open", ChannelOpen.newBuilder().setConversationId(ch).build().toByteArray());
+    Frame f;
+    do {
+      f = g.awaitPush(T);
+    } while (!"chat.rejected".equals(f.getHeadersMap().get("type")));
+    assertThat(ChatRejected.parseFrom(f.getPayload()).getReason()).isEqualTo("not_member");
   }
 }

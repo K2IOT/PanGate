@@ -71,12 +71,28 @@ public final class ChatStack implements AutoCloseable {
     }
   }
 
+  private static final int PORTS_FROM = 20_000;
+  /** Linux hands out outbound (ephemeral) ports from 32768: none of ours may be taken by a client in between. */
+  private static final int PORTS_TO = 32_768;
+  private static final java.util.concurrent.atomic.AtomicInteger NEXT_PORT = new java.util.concurrent.atomic
+      .AtomicInteger(PORTS_FROM + java.util.concurrent.ThreadLocalRandom.current().nextInt(8_000));
+
+  /**
+   * A port that is free now, below the ephemeral range and never handed out twice in this JVM. A port from
+   * {@code new ServerSocket(0)} is an ephemeral one: between this call and the server's bind, a Kafka, ScyllaDB or Redis
+   * client connection could take it as its source port ("Address already in use").
+   */
   public static int freePort() {
-    try (ServerSocket s = new ServerSocket(0)) {
-      return s.getLocalPort();
-    } catch (java.io.IOException e) {
-      throw new IllegalStateException(e);
+    for (int i = 0; i < PORTS_TO - PORTS_FROM; i++) {
+      int p = NEXT_PORT.getAndUpdate(n -> n + 1 >= PORTS_TO ? PORTS_FROM : n + 1);
+      try (ServerSocket s = new ServerSocket()) {
+        s.bind(new java.net.InetSocketAddress(p));
+        return p;
+      } catch (java.io.IOException taken) {
+        // next one
+      }
     }
+    throw new IllegalStateException("no free port in " + PORTS_FROM + ".." + PORTS_TO);
   }
 
   public String redisUri() {
