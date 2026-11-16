@@ -118,6 +118,41 @@ public class AuthConfig {
   }
 
   @Bean
+  com.pangate.account.infrastructure.auth.ApiTokenVerifier apiTokenVerifier(AccountProperties p,
+      Revocations revocations) {
+    return new com.pangate.account.infrastructure.auth.ApiTokenVerifier(new HttpJwksSource(p.auth().jwksUri()),
+        p.auth().issuer(), revocations, System::currentTimeMillis, AuthConfig::monoMs);
+  }
+
+  @Bean
+  FilterRegistrationBean<com.pangate.account.api.AdminAuthFilter> adminAuthRegistration(
+      com.pangate.account.infrastructure.auth.ApiTokenVerifier verifier, AttemptCounter counter,
+      AccountProperties p) {
+    FilterRegistrationBean<com.pangate.account.api.AdminAuthFilter> r = new FilterRegistrationBean<>(
+        new com.pangate.account.api.AdminAuthFilter(verifier, p.auth().adminTenant(), counter,
+            p.limits().adminPerSecond()));
+    r.setOrder(10);
+    r.addUrlPatterns("/admin/v1/*");
+    return r;
+  }
+
+  @Bean
+  com.pangate.account.application.DeleteAccount deleteAccount(AccountStore accounts, SessionStore sessions,
+      Outbox outbox, com.pangate.account.application.LoginUseCase login, Transactions tx) {
+    return new com.pangate.account.application.DeleteAccount(accounts, sessions, outbox, login, tx, Clock.SYSTEM);
+  }
+
+  @Bean
+  com.pangate.account.application.AdminAccounts adminAccounts(AccountStore accounts, SessionStore sessions,
+      Outbox outbox, com.pangate.account.application.port.AdminLog log,
+      com.pangate.account.application.port.PasswordHasher hasher,
+      com.pangate.account.infrastructure.crypto.HashGate gate,
+      com.pangate.account.application.DeleteAccount deleter, Transactions tx, Metrics metrics) {
+    return new com.pangate.account.application.AdminAccounts(accounts, sessions, outbox, log, hasher, gate, deleter,
+        tx, Clock.SYSTEM, metrics);
+  }
+
+  @Bean
   ExchangeToken exchangeToken(SessionStore sessions, AccountStore accounts, AuthApi auth, AttemptCounter counter,
       AccountProperties p, Metrics metrics) {
     return new ExchangeToken(sessions, accounts, auth, counter, p.limits(), Clock.SYSTEM, p.sessionIdleTtl(),

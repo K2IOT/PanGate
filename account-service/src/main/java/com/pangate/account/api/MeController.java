@@ -26,11 +26,21 @@ public class MeController {
   private final Profiles profiles;
   private final ChangePassword password;
   private final ChangeIdentifier identifier;
+  private final com.pangate.account.application.DeleteAccount deleter;
 
-  public MeController(Profiles profiles, ChangePassword password, ChangeIdentifier identifier) {
+  public MeController(Profiles profiles, ChangePassword password, ChangeIdentifier identifier,
+      com.pangate.account.application.DeleteAccount deleter) {
     this.profiles = profiles;
     this.password = password;
     this.identifier = identifier;
+    this.deleter = deleter;
+  }
+
+  /** account spec §5.3: needs the password; cannot be undone. */
+  @org.springframework.web.bind.annotation.DeleteMapping(path = "/v1/me", consumes = "application/json")
+  public ResponseEntity<Void> delete(@RequestBody Map<String, Object> body, HttpServletRequest req) {
+    deleter.deleteSelf(ConnectAuthFilter.caller(req), chars(required(body, "password")));
+    return ResponseEntity.noContent().build();
   }
 
   @GetMapping("/v1/me")

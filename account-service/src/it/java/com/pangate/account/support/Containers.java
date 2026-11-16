@@ -39,6 +39,23 @@ public final class Containers {
     return redis;
   }
 
+  private static final java.util.Set<String> databases = new java.util.HashSet<>();
+
+  /** JDBC URL of database {@code name} in the shared container, created (empty) the first time it is asked for. */
+  public static synchronized String database(String name) {
+    var pg = postgres();
+    if (databases.add(name)) {
+      try (var c = java.sql.DriverManager.getConnection(pg.getJdbcUrl(), pg.getUsername(), pg.getPassword());
+          var st = c.createStatement()) {
+        st.execute("DROP DATABASE IF EXISTS " + name + " WITH (FORCE)");
+        st.execute("CREATE DATABASE " + name);
+      } catch (java.sql.SQLException e) {
+        throw new IllegalStateException(e);
+      }
+    }
+    return "jdbc:postgresql://" + pg.getHost() + ":" + pg.getMappedPort(5432) + "/" + name;
+  }
+
   public static String redisUri() {
     return "redis://" + redis().getHost() + ":" + redis().getMappedPort(6379);
   }

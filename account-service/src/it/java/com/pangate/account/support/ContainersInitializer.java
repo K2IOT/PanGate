@@ -16,7 +16,9 @@ public final class ContainersInitializer implements ApplicationContextInitialize
   public void initialize(ConfigurableApplicationContext ctx) {
     var pg = Containers.postgres();
     Map<String, String> values = new LinkedHashMap<>();
-    values.put("spring.datasource.url", pg.getJdbcUrl());
+    // it.database: a database of its own, for a test whose outbox other cached contexts' relays must not drain
+    String own = ctx.getEnvironment().getProperty("it.database");
+    values.put("spring.datasource.url", own == null ? pg.getJdbcUrl() : Containers.database(own));
     values.put("spring.datasource.username", pg.getUsername());
     values.put("spring.datasource.password", pg.getPassword());
     values.put("account.kafka.bootstrap", Containers.kafka().getBootstrapServers());

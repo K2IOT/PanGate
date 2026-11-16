@@ -23,6 +23,8 @@ public final class Revocations {
   static final String JTI = "revoke:j:";
   static final String DEVICE = "revoke:d:";
   static final String PRINCIPAL = "revoke:p:";
+  /** A disabled auth client (auth spec §4.6): its API tokens are refused by the admin API. */
+  static final String CLIENT = "revoke:c:";
 
   private final Map<String, Revocation> byKey = new ConcurrentHashMap<>();
   private final LongSupplier wallMs;
@@ -33,7 +35,8 @@ public final class Revocations {
 
   /** Applies one record; throws {@link IllegalArgumentException} for a malformed value of a key it keeps. */
   public void apply(String key, byte[] value) {
-    if (key == null || !(key.startsWith(JTI) || key.startsWith(DEVICE) || key.startsWith(PRINCIPAL))) {
+    if (key == null || !(key.startsWith(JTI) || key.startsWith(DEVICE) || key.startsWith(PRINCIPAL)
+        || key.startsWith(CLIENT))) {
       return;
     }
     if (value == null) {
@@ -66,6 +69,11 @@ public final class Revocations {
     }
     Revocation d = byKey.get(DEVICE + principal + "/" + deviceId);
     return d != null && d.live(now) && iatMs < d.issuedAtMs();
+  }
+
+  public boolean clientRevoked(String clientId) {
+    Revocation r = byKey.get(CLIENT + clientId);
+    return r != null && r.live(wallMs.getAsLong());
   }
 
   public int size() {
