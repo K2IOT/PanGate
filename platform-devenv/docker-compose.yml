@@ -58,6 +58,8 @@ services:
         $$t --bootstrap-server $$b --create --if-not-exists --topic chat.commands --partitions 64
         $$t --bootstrap-server $$b --create --if-not-exists --topic chat.events --partitions 64
         $$t --bootstrap-server $$b --create --if-not-exists --topic chat.commands.dlq --partitions 8
+        # app chat accounts (docs/superpowers/specs/2026-11-16-account-service-design.md §6)
+        $$t --bootstrap-server $$b --create --if-not-exists --topic account.users --partitions 12 --config cleanup.policy=compact
         echo topics ready
 
   redis:
@@ -166,6 +168,34 @@ services:
     healthcheck:
       <<: *hc
       test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.chat.tools.HealthCheck",
+             "http://127.0.0.1:8081/ready"]
+
+  # Accounts of the app chat (docs/superpowers/specs/2026-11-16-account-service-design.md): register, log in, device
+  # sessions; mints connect tokens through auth with the chat-backend client from /dev-secrets/auth/clients.json.
+  account:
+    profiles: ["app"]
+    image: pangate/account-service:dev
+    user: "0"
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      JAVA_TOOL_OPTIONS: "-Xmx256m"
+    volumes:
+      - dev-secrets:/dev-secrets
+    ports:
+      - "8088:8080"
+      - "8089:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      auth:
+        condition: service_healthy
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.account.tools.HealthCheck",
              "http://127.0.0.1:8081/ready"]
 
   # Push API stand-in, kept as a dev tool (profile tools): KICK → PushRecord CONTROL on Kafka.

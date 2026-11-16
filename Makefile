@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 VERSION := 0.1.0
 MVNW := $(CURDIR)/mvnw
-MODULES := platform-parent platform-contracts platform-spring-starter platform-contracts-testkit gateway-devtools gateway-service push-router-service push-api-service auth-service chat-service
+MODULES := platform-parent platform-contracts platform-spring-starter platform-contracts-testkit gateway-devtools gateway-service push-router-service push-api-service auth-service chat-service account-service
 
 .PHONY: bootstrap verify
 
@@ -63,6 +63,7 @@ images:
 	$(MVNW) -q -f push-api-service/pom.xml compile jib:dockerBuild
 	$(MVNW) -q -f auth-service/pom.xml compile jib:dockerBuild
 	$(MVNW) -q -f chat-service/pom.xml compile jib:dockerBuild
+	$(MVNW) -q -f account-service/pom.xml compile jib:dockerBuild
 
 up:
 	$(COMPOSE) --profile app up -d --wait --wait-timeout 90

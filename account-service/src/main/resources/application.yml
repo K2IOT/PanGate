@@ -1,0 +1,53 @@
+# Production defaults (account spec §1, §7). Profiles local and dev override selected values.
+spring:
+  application:
+    name: account-service
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://postgres:5432/pangate
+    username: pangate
+    password: ${ACCOUNT_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 16
+      connection-timeout: 2000   # ms
+  flyway:
+    schemas: account
+    default-schema: account
+  jdbc:
+    template:
+      query-timeout: 5s
+
+pangate:
+  service: account
+
+account:
+  admin-port: 8081
+
+# Public API on :8080; actuator, /ready, /live and /admin/v1 on :8081 (account.admin-port). PortRoutingFilter keeps
+# each path on its port. The client address comes from X-Forwarded-For, trusted only from internal proxies
+# (server.tomcat.remoteip.internal-proxies); the per-IP limits of spec §7 depend on it.
+server:
+  port: 8080
+  forward-headers-strategy: native
+  shutdown: graceful
+  max-http-request-header-size: 16KB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db
+          additional-path: "server:/ready"
+          show-details: always
+        liveness:
+          include: livenessState
+          additional-path: "server:/live"
