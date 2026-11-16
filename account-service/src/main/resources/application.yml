@@ -49,7 +49,7 @@ management:
         enabled: true
       group:
         readiness:
-          include: readinessState,db
+          include: readinessState,db,connectAuth
           additional-path: "server:/ready"
           show-details: always
         liveness:
