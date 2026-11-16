@@ -10,6 +10,6 @@ import org.springframework.test.context.ContextConfiguration;
 /** Full application on random ports against the shared Postgres, Kafka and Redis containers. */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {"account.admin-port=0"})
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {"account.admin-port=0", "account.limits.registrations-per-ip-per-hour=100000"})
 @ContextConfiguration(initializers = ContainersInitializer.class)
 public @interface AccountIT {}
