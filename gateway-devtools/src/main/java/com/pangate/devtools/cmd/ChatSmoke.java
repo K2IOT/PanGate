@@ -103,6 +103,24 @@ final class ChatSmoke {
     return res.body().isEmpty() ? Map.of() : JSONObjectUtils.parse(res.body());
   }
 
+  /**
+   * Like {@link #call}, but a {@code 404 user_not_found} is retried for up to {@link #T}: a just-registered account
+   * reaches chat-service through account.users a few hundred ms later (account spec §8).
+   */
+  Map<String, Object> callNewUsers(String method, String path, String user, String body) throws Exception {
+    long deadline = System.nanoTime() + T.toNanos();
+    while (true) {
+      try {
+        return call(method, path, user, body, null);
+      } catch (IllegalStateException e) {
+        if (!e.getMessage().contains("user_not_found") || System.nanoTime() > deadline) {
+          throw e;
+        }
+        Thread.sleep(200);
+      }
+    }
+  }
+
   static void command(GatewayClient c, String op, byte[] payload) {
     String id = UUID.randomUUID().toString();
     c.send(Frame.newBuilder().setType(FrameType.FRAME_TYPE_UPSTREAM).setMsgId(id).putHeaders("type", "cmd")
@@ -138,9 +156,10 @@ final class ChatSmoke {
       step.accept("CHAT 1-1");
       String a = newUser("a");
       String b = newUser("b");
+      String c = newUser("c");
       GatewayClient ca = connect(a);
       GatewayClient cb = connect(b);
-      String dm = call("POST", "/v1/dm/" + b, a, null, null).get("id").toString();
+      String dm = callNewUsers("POST", "/v1/dm/" + b, a, null).get("id").toString();
       long t0 = System.nanoTime();
       command(ca, "chat.send", ChatSend.newBuilder().setConversationId(dm).setClientMsgId(ulid()).setText("hi")
           .build().toByteArray());
@@ -151,10 +170,9 @@ final class ChatSmoke {
       System.out.printf("CHAT 1-1: send -> PUSH in %.1f ms%n", (System.nanoTime() - t0) / 1e6);
 
       step.accept("CHAT group");
-      String c = newUser("c");
       GatewayClient cc = connect(c);
-      String g = call("POST", "/v1/conversations", a, "{\"kind\":\"group\",\"title\":\"smoke\",\"memberIds\":[\""
-          + b + "\",\"" + c + "\"]}", null).get("id").toString();
+      String g = callNewUsers("POST", "/v1/conversations", a, "{\"kind\":\"group\",\"title\":\"smoke\",\"memberIds\":[\""
+          + b + "\",\"" + c + "\"]}").get("id").toString();
       t0 = System.nanoTime();
       Map<String, Object> sent = call("POST", "/v1/conversations/" + g + "/messages", b, "{\"text\":\"group\"}",
           ulid());
