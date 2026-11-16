@@ -121,6 +121,13 @@
       <artifactId>testcontainers</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <!-- RelaysIT and later ITs run the real auth-service in the test JVM (AuthStack) -->
+      <groupId>com.pangate</groupId>
+      <artifactId>auth-service</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
@@ -172,14 +179,13 @@
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
+        <!-- plugin level: inside the execution the classifier is ignored and the plain jar is replaced -->
+        <configuration><classifier>exec</classifier></configuration>
         <executions>
           <execution>
             <goals>
               <goal>repackage</goal>
             </goals>
-            <configuration>
-              <classifier>exec</classifier>
-            </configuration>
           </execution>
         </executions>
       </plugin>
