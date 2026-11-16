@@ -75,7 +75,6 @@ class SessionsIT {
 
   /** Review Focus 4 (needs Task 8's password change): the device that changes the password stays connected. */
   @Test
-  @org.junit.jupiter.api.Disabled("enabled in Task 8 with POST /v1/me/password")
   void passwordChangeKeepsTheCurrentDeviceConnected() throws Exception {
     String name = unique("pw");
     Device d1 = Accounts.register(port, name);

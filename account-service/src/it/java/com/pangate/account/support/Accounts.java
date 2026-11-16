@@ -22,10 +22,10 @@ public final class Accounts {
     return new Device(b.get("userId").asText(), b.get("deviceId").asText(), b.get("refreshToken").asText());
   }
 
-  /** A fresh account; returns its first device. Username and password: {@code username}, "secret-pw-1". */
+  /** A fresh account (email {@code <username>.<random>@x.vn}); its first device. Password "secret-pw-1". */
   public static Device register(int port, String username) {
     Http.Res r = call(port, "POST", "/v1/accounts", null,
-        Http.registration(username, username.toLowerCase() + "@x.vn", null));
+        Http.registration(username, username.toLowerCase() + "." + Http.unique("e") + "@x.vn", null));
     assertThat(r.status()).as(r.raw().body()).isEqualTo(201);
     return device(r.body());
   }
