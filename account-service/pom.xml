@@ -26,6 +26,16 @@
       <artifactId>platform-spring-starter</artifactId>
     </dependency>
     <dependency>
+      <!-- topic names and the chat principal prefix (ChatTopics, AccountTopics); no test libraries at runtime -->
+      <groupId>com.pangate</groupId>
+      <artifactId>platform-contracts-testkit</artifactId>
+      <version>${project.version}</version>
+      <exclusions>
+        <exclusion><groupId>org.testcontainers</groupId><artifactId>*</artifactId></exclusion>
+        <exclusion><groupId>org.junit.jupiter</groupId><artifactId>*</artifactId></exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-web</artifactId>
     </dependency>

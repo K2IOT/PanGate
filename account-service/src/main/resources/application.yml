@@ -12,6 +12,8 @@ spring:
     hikari:
       maximum-pool-size: 16
       connection-timeout: 2000   # ms
+      # citext and its operators live in schema account: without it on the path, username = ? compares as text
+      connection-init-sql: SET search_path TO account, public
   flyway:
     schemas: account
     default-schema: account
