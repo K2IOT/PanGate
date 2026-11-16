@@ -6,6 +6,9 @@ public final class ChatRefusal extends RuntimeException {
   public static final String INVALID = "invalid_request";
   public static final String FORBIDDEN = "forbidden";
   public static final String NOT_FOUND = "not_found";
+  /** account spec §8: no such account, or a deleted one. */
+  public static final String USER_NOT_FOUND = "user_not_found";
+  public static final String USER_DELETED = "user_deleted";
 
   private final String code;
 

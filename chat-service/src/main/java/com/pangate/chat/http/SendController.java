@@ -99,6 +99,7 @@ public class SendController {
   static ChatHttpException toHttp(Rejection r) {
     return switch (r.reason()) {
       case Rejection.NOT_FOUND -> new ChatHttpException(404, "not_found", r.detail());
+      case Rejection.USER_DELETED -> new ChatHttpException(404, "user_deleted", r.detail());
       case Rejection.NOT_MEMBER -> new ChatHttpException(403, "forbidden", r.detail());
       case Rejection.RATE_LIMITED -> new ChatHttpException(429, "rate_limited", r.detail());
       default -> new ChatHttpException(400, "invalid_request", r.detail());

@@ -52,6 +52,22 @@ public final class ChatStores {
 
     /** Raises the user's last_seq / last_msg_at for the conversation; a lower seq never wins. */
     void touchUserConv(String userId, String convId, long seq, long atMs);
+
+    /** Members, earliest joined first (owner succession, account spec §8). */
+    default List<Member> membersByJoin(String convId) {
+      return members(convId);
+    }
+  }
+
+  /** {@code status}: {@code active} or {@code deleted} (account spec §8). */
+  public record UserRecord(String userId, String status, long updatedAtMs) {}
+
+  /** Users known from account-service's {@code account.users} (account spec §8). */
+  public interface UserStore {
+    Optional<UserRecord> user(String userId);
+
+    /** Writes unless the stored state is newer; true when written. */
+    boolean upsertIfNewer(String userId, String status, long updatedAtMs);
   }
 
   public interface MessageStore {

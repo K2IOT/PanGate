@@ -104,4 +104,17 @@ class IngestTest {
     stores.members.get(c).clear();   // cache still says u1 is a member
     assertThat(ingest.accept(new SendInput("u1", "d", send(c), ""))).isEmpty();
   }
+  /** account spec §8: a DM whose other side deleted the account takes no new messages. */
+  @Test
+  void dmWithDeletedUserIsRejected() {
+    Ingest checked = new Ingest(stores, stores, stores, published::add, SendValidatorTest.LIMITS, nanos::get,
+        () -> 1_000L, reason -> { }, new UserDirectory(stores));
+    String dm = conv(ConversationKind.CONVERSATION_KIND_DIRECT, new Member("u1", Role.MEMBER),
+        new Member("u2", Role.MEMBER));
+    stores.upsertIfNewer("u2", "active", 1);
+    assertThat(checked.accept(new SendInput("u1", "d1", send(dm), ""))).isEmpty();
+    stores.upsertIfNewer("u2", "deleted", 2);
+    assertThat(checked.accept(new SendInput("u1", "d1", send(dm), ""))).get().extracting(Rejection::reason)
+        .isEqualTo("user_deleted");
+  }
 }

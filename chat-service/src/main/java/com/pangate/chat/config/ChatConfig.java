@@ -10,6 +10,10 @@ import com.pangate.chat.core.ChatStores;
 import com.pangate.chat.core.ChatStores.StoredMessage;
 import com.pangate.chat.core.Conversations;
 import com.pangate.chat.core.Ingest;
+import com.pangate.chat.core.UserDirectory;
+import com.pangate.chat.core.AccountRemoval;
+import com.pangate.chat.kafka.AccountsListener;
+import com.pangate.contracts.testkit.AccountTopics;
 import com.pangate.chat.core.SyncService;
 import com.pangate.chat.core.MemberLookup;
 import com.pangate.chat.core.Notifier;
@@ -96,9 +100,9 @@ public class ChatConfig {
 
   @Bean
   Ingest ingest(ScyllaChatStore store, RedisChatCache cache, CommandProducer producer, ChatProperties p,
-      MeterRegistry meters) {
+      MeterRegistry meters, UserDirectory users) {
     return new Ingest(store, store, cache, producer, p.limits(), System::nanoTime, System::currentTimeMillis,
-        reason -> meters.counter("chat.send.rejected", "reason", reason).increment());
+        reason -> meters.counter("chat.send.rejected", "reason", reason).increment(), users);
   }
 
   /** {@code http:<pod>}: HOSTNAME (the pod name) plus a random suffix, so two processes on one host never share it. */
@@ -138,8 +142,25 @@ public class ChatConfig {
 
   @Bean
   Conversations conversations(ScyllaChatStore store, RedisChatCache cache, ChatProperties p,
-      ChannelSubscriptions channels) {
-    return new Conversations(store, store, new MemberLookup(store, cache), p.limits(), channels::revoke);
+      ChannelSubscriptions channels, UserDirectory users) {
+    return new Conversations(store, store, new MemberLookup(store, cache), p.limits(), channels::revoke, users);
+  }
+
+  /** account spec §8: users known from account.users. */
+  @Bean
+  UserDirectory userDirectory(ScyllaChatStore store) {
+    return new UserDirectory(store);
+  }
+
+  @Bean
+  AccountRemoval accountRemoval(ScyllaChatStore store, Conversations conversations) {
+    return new AccountRemoval(store, conversations);
+  }
+
+  @Bean(destroyMethod = "")
+  AccountsListener accountsListener(ChatProperties p, ScyllaChatStore store, AccountRemoval removal) {
+    return new AccountsListener(AccountsListener.consumer(p.kafka().bootstrap(), AccountsListener.GROUP),
+        AccountTopics.USERS, store, removal::removed);
   }
 
   @Bean
@@ -250,7 +271,8 @@ public class ChatConfig {
   SmartLifecycle chatBackground(CqlSession cql, ChatHealth health, ConnectTokenVerifier verifier,
       RevocationListener revocationListener, UpstreamCommandListener upstream, CommandProducer producer,
       RedisChatCache redis, MeterRegistry meters, Revocations revocations, SequencerLoop sequencerLoop,
-      EventProducer events, RedisSendResults results, FanOutLoop fanOut, PushApiClient pusher) {
+      EventProducer events, RedisSendResults results, FanOutLoop fanOut, PushApiClient pusher,
+      AccountsListener accounts) {
     return new SmartLifecycle() {
       private volatile boolean running;
       private ScheduledExecutorService timers;
@@ -276,6 +298,7 @@ public class ChatConfig {
         revocationListener.start();
         sequencerLoop.start();
         fanOut.start();
+        accounts.start();
         upstream.start();
         running = true;
       }
@@ -283,7 +306,7 @@ public class ChatConfig {
       @Override
       public void stop() {
         running = false;
-        closeInOrder(upstream, sequencerLoop, fanOut, pusher, revocationListener, producer, events, results,
+        closeInOrder(upstream, accounts, sequencerLoop, fanOut, pusher, revocationListener, producer, events, results,
             timers::shutdownNow, redis, cql);
       }
 

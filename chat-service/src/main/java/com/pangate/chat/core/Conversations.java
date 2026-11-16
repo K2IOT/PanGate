@@ -28,6 +28,7 @@ public final class Conversations {
   private final MemberLookup lookup;
   private final ChatProperties.Limits limits;
   private final java.util.function.BiConsumer<String, String> leftChannel;
+  private final UserDirectory users;
 
   public Conversations(ChatStores.ConversationStore conversations, ChatStores.MemberStore members,
       MemberLookup lookup, ChatProperties.Limits limits) {
@@ -37,6 +38,14 @@ public final class Conversations {
   /** {@code leftChannel(userId, convId)} after someone leaves or is removed from a channel. */
   public Conversations(ChatStores.ConversationStore conversations, ChatStores.MemberStore members,
       MemberLookup lookup, ChatProperties.Limits limits, java.util.function.BiConsumer<String, String> leftChannel) {
+    this(conversations, members, lookup, limits, leftChannel, UserDirectory.ANY);
+  }
+
+  /** {@code users}: who may be put into a conversation (account spec §8: known and not deleted). */
+  public Conversations(ChatStores.ConversationStore conversations, ChatStores.MemberStore members,
+      MemberLookup lookup, ChatProperties.Limits limits, java.util.function.BiConsumer<String, String> leftChannel,
+      UserDirectory users) {
+    this.users = users;
     this.conversations = conversations;
     this.members = members;
     this.lookup = lookup;
@@ -69,6 +78,7 @@ public final class Conversations {
     if (kind == ConversationKind.CONVERSATION_KIND_GROUP && others.size() + 1 > limits.maxGroupMembers()) {
       throw ChatRefusal.invalid("a group has at most " + limits.maxGroupMembers() + " members");
     }
+    others.forEach(users::requireActive);
     List<Member> ms = new ArrayList<>();
     ms.add(new Member(userId, Role.OWNER));
     others.forEach(m -> ms.add(new Member(m, Role.MEMBER)));
@@ -84,6 +94,7 @@ public final class Conversations {
     if (otherId.equals(userId)) {
       throw ChatRefusal.invalid("a DM needs another user");
     }
+    users.requireActive(otherId);
     String id = conversations.dm(userId, otherId).orElseGet(() -> conversations.createDm(userId, otherId,
         Ids.next()));
     Optional<Conversation> c = conversations.get(id);
@@ -129,6 +140,7 @@ public final class Conversations {
     if (members.member(convId, userId).isPresent()) {
       return;
     }
+    users.requireActive(userId);
     if (c.kind() == ConversationKind.CONVERSATION_KIND_GROUP
         && members.members(convId).size() + 1 > limits.maxGroupMembers()) {
       throw ChatRefusal.invalid("a group has at most " + limits.maxGroupMembers() + " members");
@@ -170,6 +182,24 @@ public final class Conversations {
     if (c.kind() == ConversationKind.CONVERSATION_KIND_CHANNEL) {
       leftChannel.accept(userId, convId);   // its open subscriptions end now, not at the next reconnect
     }
+  }
+
+  /**
+   * account spec §8: a deleted account leaves a group or channel as if it left itself; when it owned it, the earliest
+   * admin, else the earliest member, becomes owner first. Not a member (any more): nothing happens.
+   */
+  public void leaveDeletedAccount(String userId, String convId) {
+    Optional<Member> me = members.member(convId, userId);
+    if (me.isEmpty()) {
+      return;
+    }
+    if (me.get().role() == Role.OWNER) {
+      List<Member> rest = members.membersByJoin(convId).stream().filter(m -> !m.userId().equals(userId)).toList();
+      rest.stream().filter(m -> m.role() == Role.ADMIN).findFirst()
+          .or(() -> rest.stream().filter(m -> m.role() == Role.MEMBER).findFirst())
+          .ifPresent(next -> changeMembers(convId, () -> members.add(convId, new Member(next.userId(), Role.OWNER))));
+    }
+    removeMember(userId, convId, userId);
   }
 
   /** Follows a public channel. */

@@ -24,7 +24,7 @@ import java.util.Optional;
  * {@code bucket = conv_seq / 10 000}; seqs of a conversation are contiguous, so one page of {@code limit} messages
  * touches at most the buckets between its two ends.
  */
-public final class ScyllaChatStore implements ChatStores.ConversationStore, ChatStores.MemberStore,
+public final class ScyllaChatStore implements ChatStores.ConversationStore, ChatStores.MemberStore, ChatStores.UserStore,
     ChatStores.MessageStore, ChatStores.DedupStore {
 
   public static final long BUCKET = 10_000;
@@ -50,6 +50,10 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   private final PreparedStatement insertDedup;
   private final PreparedStatement selectDedup;
 
+  private final PreparedStatement selectMembersByJoin;
+  private final PreparedStatement selectUser;
+  private final PreparedStatement upsertUser;
+
   public ScyllaChatStore(CqlSession s, String ks) {
     this.s = s;
     insertConv = s.prepare("INSERT INTO " + ks + ".conversations (conv_id, kind, title, created_by, created_at, "
@@ -62,6 +66,9 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     insertMember = s.prepare("INSERT INTO " + ks + ".members (conv_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)");
     deleteMember = s.prepare("DELETE FROM " + ks + ".members WHERE conv_id = ? AND user_id = ?");
     selectMembers = s.prepare("SELECT user_id, role FROM " + ks + ".members WHERE conv_id = ?");
+    selectMembersByJoin = s.prepare("SELECT user_id, role, joined_at FROM " + ks + ".members WHERE conv_id = ?");
+    selectUser = s.prepare("SELECT user_id, status, updated_at FROM " + ks + ".users WHERE user_id = ?");
+    upsertUser = s.prepare("INSERT INTO " + ks + ".users (user_id, status, updated_at) VALUES (?, ?, ?)");
     selectMember = s.prepare("SELECT user_id, role FROM " + ks + ".members WHERE conv_id = ? AND user_id = ?");
     joinUserConv = s.prepare("UPDATE " + ks + ".user_convs SET kind = ?, left = false WHERE user_id = ? AND conv_id = ?");
     leaveUserConv = s.prepare("UPDATE " + ks + ".user_convs SET left = true WHERE user_id = ? AND conv_id = ?");
@@ -156,6 +163,38 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
       out.add(new Member(r.getString(0), Role.valueOf(r.getString(1))));
     }
     return out;
+  }
+
+  /** Earliest joined first (account spec §8 owner succession); ties by user id. */
+  @Override
+  public List<Member> membersByJoin(String convId) {
+    record Joined(Member m, long at) {}
+    List<Joined> all = new ArrayList<>();
+    for (Row r : exec(selectMembersByJoin.bind(convId))) {
+      all.add(new Joined(new Member(r.getString(0), Role.valueOf(r.getString(1))), r.getLong(2)));
+    }
+    all.sort(Comparator.comparingLong(Joined::at).thenComparing(j -> j.m().userId()));
+    return all.stream().map(Joined::m).toList();
+  }
+
+  // --- users (account spec §8) --------------------------------------------------------------------------------------
+
+  @Override
+  public Optional<ChatStores.UserRecord> user(String userId) {
+    Row r = exec(selectUser.bind(userId)).one();
+    return r == null ? Optional.empty()
+        : Optional.of(new ChatStores.UserRecord(r.getString(0), r.getString(1), r.getLong(2)));
+  }
+
+  /** One writer per user (the account.users partition of its key), so read-then-write needs no LWT. */
+  @Override
+  public boolean upsertIfNewer(String userId, String status, long updatedAtMs) {
+    Optional<ChatStores.UserRecord> prior = user(userId);
+    if (prior.isPresent() && prior.get().updatedAtMs() > updatedAtMs) {
+      return false;
+    }
+    exec(upsertUser.bind(userId, status, updatedAtMs));
+    return true;
   }
 
   @Override

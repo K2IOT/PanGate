@@ -34,12 +34,12 @@ class SchemaMigratorIT {
 
   @Test
   void migrationIsIdempotent() {
-    assertThat(SchemaMigrator.migrate(session, "chat_it")).isEqualTo(1);
+    assertThat(SchemaMigrator.migrate(session, "chat_it")).isEqualTo(2);   // V1 schema, V2 users (account spec §8)
     assertThat(SchemaMigrator.migrate(session, "chat_it")).isZero();
     Set<String> tables = session.execute(
         "SELECT table_name FROM system_schema.tables WHERE keyspace_name = 'chat_it'").all().stream()
         .map(r -> r.getString("table_name")).collect(Collectors.toSet());
-    assertThat(tables).contains("messages", "conversations", "members", "user_convs", "dm_index", "send_dedup",
+    assertThat(tables).contains("messages", "conversations", "members", "user_convs", "dm_index", "send_dedup", "users",
         "schema_version");
     int ttl = session.execute("SELECT default_time_to_live FROM system_schema.tables "
         + "WHERE keyspace_name = 'chat_it' AND table_name = 'send_dedup'").one().getInt(0);

@@ -30,7 +30,8 @@ public class ProblemHandler {
   ResponseEntity<ProblemDetail> refusal(com.pangate.chat.core.ChatRefusal e) {
     int status = switch (e.code()) {
       case com.pangate.chat.core.ChatRefusal.FORBIDDEN -> 403;
-      case com.pangate.chat.core.ChatRefusal.NOT_FOUND -> 404;
+      case com.pangate.chat.core.ChatRefusal.NOT_FOUND, com.pangate.chat.core.ChatRefusal.USER_NOT_FOUND,
+          com.pangate.chat.core.ChatRefusal.USER_DELETED -> 404;
       default -> 400;
     };
     return ResponseEntity.status(status).body(Problems.of(status, e.code(), e.getMessage()));

@@ -162,4 +162,20 @@ class ConversationsTest {
     convs.removeMember("own", g.id(), "m1");
     assertThat(unsubscribed).containsExactly("m1@" + ch.id());
   }
+  /** account spec §8: only users account-service knows, and not deleted ones, join conversations. */
+  @Test
+  void unknownOrDeletedUserCannotBeAdded() {
+    Conversations checked = new Conversations(stores, stores, new MemberLookup(stores, stores), FakeStores.LIMITS,
+        (user, conv) -> { }, new UserDirectory(stores));
+    stores.upsertIfNewer("own", "active", 1);
+    stores.upsertIfNewer("live", "active", 1);
+    stores.upsertIfNewer("gone", "deleted", 1);
+    assertThat(code(() -> checked.openDm("own", "nobody"))).isEqualTo("user_not_found");
+    assertThat(code(() -> checked.openDm("own", "gone"))).isEqualTo("user_deleted");
+    assertThat(code(() -> checked.create("own", ConversationKind.CONVERSATION_KIND_GROUP, "g", List.of("live",
+        "nobody"), false))).isEqualTo("user_not_found");
+    Conversation g = checked.create("own", ConversationKind.CONVERSATION_KIND_GROUP, "g", List.of("live"), false);
+    assertThat(code(() -> checked.addMember("own", g.id(), "gone"))).isEqualTo("user_deleted");
+    assertThat(code(() -> checked.openDm("own", "live"))).isEmpty();
+  }
 }

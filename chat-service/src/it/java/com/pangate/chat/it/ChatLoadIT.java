@@ -125,6 +125,7 @@ class ChatLoadIT {
     for (int i = 0; i < 500; i++) {
       users.add("g" + run + "-" + i);
     }
+    com.pangate.chat.support.KnownUsers.add(h.bootstrap(), h.chat, users.toArray(String[]::new));
     connectAll(users).forEach(ChatLoadIT::listen);
     String g = h.json(h.call("POST", "/v1/conversations", users.getFirst(), Map.of("kind", "group", "title", "load",
         "memberIds", users.subList(1, users.size())), Map.of())).get("id").asText();
@@ -153,6 +154,7 @@ class ChatLoadIT {
     for (int i = 0; i < chats; i++) {
       String a = "da" + run + "-" + i;
       String b = "db" + run + "-" + i;
+      com.pangate.chat.support.KnownUsers.add(h.bootstrap(), h.chat, a, b);
       GatewayClient ca = h.connect(i % h.gateways(), a, "d1");
       GatewayClient cb = h.connect((i + 1) % h.gateways(), b, "d1");
       listen(cb);
