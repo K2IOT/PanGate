@@ -65,8 +65,14 @@ public final class SmokeCommand implements Callable<Integer> {
   @Option(names = "--push-api", description = "Push API base URL: push through POST /v1/push (needs --auth-url)")
   URI pushApi;
 
-  @Option(names = "--chat", description = "chat-service base URL: CHAT 1-1, group and channel steps (needs --auth-url)")
+  @Option(names = "--chat", description = "chat-service base URL: CHAT 1-1, group and channel steps (needs --account)")
   URI chat;
+
+  @Option(names = "--account", description = "account-service base URL: ACCOUNT steps; chat users are real accounts")
+  URI account;
+
+  @Option(names = "--account-admin", description = "account-service admin URL (lock/unlock), e.g. http://account:8081")
+  URI accountAdmin;
 
   @picocli.CommandLine.Spec
   picocli.CommandLine.Model.CommandSpec spec;
@@ -123,6 +129,14 @@ public final class SmokeCommand implements Callable<Integer> {
     if (chat != null && source.auth == null) {
       throw new picocli.CommandLine.ParameterException(spec.commandLine(),
           "--chat needs connect tokens of tenant chat: use --auth-url and --client-file");
+    }
+    if (chat != null && account == null) {
+      throw new picocli.CommandLine.ParameterException(spec.commandLine(),
+          "--chat needs real users: use --account (and --account-admin)");
+    }
+    if (account != null && (source.auth == null || accountAdmin == null)) {
+      throw new picocli.CommandLine.ParameterException(spec.commandLine(),
+          "--account needs --account-admin, --auth-url and --client-file (chat-admin locks and unlocks)");
     }
     if (pushApi == null && !viaKafka() && router == null) {
       throw new picocli.CommandLine.ParameterException(spec.commandLine(),
@@ -219,11 +233,20 @@ public final class SmokeCommand implements Callable<Integer> {
         }
       }
 
+      AccountApi accounts = account == null ? null : new AccountApi(account, accountAdmin,
+          new com.pangate.devtools.auth.AuthClient(source.auth.authUrl, source.auth.clientFile, "chat-admin"));
+      if (accounts != null) {
+        String[] accountStep = {""};
+        try {
+          new AccountSmoke(accounts, url, tls).run(s -> accountStep[0] = s);
+        } finally {
+          step = accountStep[0];
+        }
+      }
       if (chat != null) {
         String[] chatStep = {""};
         try {
-          new ChatSmoke(chat, url, tls, new com.pangate.devtools.auth.AuthClient(source.auth.authUrl,
-              source.auth.clientFile, ChatSmoke.CLIENT)).run(s -> chatStep[0] = s);
+          new ChatSmoke(chat, url, tls, accounts).run(s -> chatStep[0] = s);
         } finally {
           step = chatStep[0];
         }
@@ -251,7 +274,8 @@ public final class SmokeCommand implements Callable<Integer> {
           System.out.printf("revoke -> close 4003 in %.1f ms%n", (System.nanoTime() - t0) / 1e6);
         }
         System.out.println("SMOKE OK (connected, pong, upstream-ack, push-ack, " + (viaRouter() ? "offline, " : "")
-            + (chat != null ? "chat 1-1, chat group, chat channel, " : "") + "resume, revoke)");
+            + (accounts != null ? "accounts, " : "") + (chat != null ? "chat 1-1, chat group, chat channel, " : "")
+            + "resume, revoke)");
         return 0;
       }
       System.out.println("SMOKE OK (connected, pong, upstream-ack, push-ack, " + (viaRouter() ? "offline, " : "")

@@ -1,7 +1,7 @@
 # account-service (Tài khoản, CH2) — Design Spec
 
 - **Ngày:** 2026-11-16
-- **Trạng thái:** Thiết kế, chờ duyệt.
+- **Trạng thái:** Đã hiện thực (CH2, plan `docs/superpowers/plans/2026-11-16-account-service-ch2.md`).
 - **Các spec liên quan:**
   - "spec chat": `docs/superpowers/specs/2026-11-12-chat-core-design.md`: tenant `chat`, principal `chat:<userId>`, HTTP API của chat-service kiểm connect token, Revocations từ `gw.control`.
   - "spec auth": `docs/superpowers/specs/2026-11-05-auth-service-design.md`: token API (`/oauth2/token`, `aud=pangate-api`), `POST /v1/tokens` (connect token, `aud=pangate-gw`, tối đa 10 phút), `POST /v1/revocations` (principal / device / jti, có hiệu lực với token cấp **trước** lệnh thu hồi, TTL 24 h), outbox → Kafka.

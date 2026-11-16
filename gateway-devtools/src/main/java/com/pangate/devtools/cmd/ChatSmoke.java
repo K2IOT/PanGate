@@ -7,7 +7,6 @@ import com.pangate.contracts.v1.ChatSend;
 import com.pangate.contracts.v1.DeliveryClass;
 import com.pangate.contracts.v1.Frame;
 import com.pangate.contracts.v1.FrameType;
-import com.pangate.devtools.auth.AuthClient;
 import com.pangate.devtools.client.ClientTls;
 import com.pangate.devtools.client.GatewayClient;
 import com.pangate.devtools.client.Hellos;
@@ -25,30 +24,39 @@ import java.util.function.Consumer;
 /**
  * The chat steps of {@code smoke --chat} (chat spec §9): CHAT 1-1 (WebSocket send → the other user's PUSH), CHAT
  * group (HTTP send → both other members), CHAT channel ({@code chat.channel.open} → the owner's post arrives). Users
- * are fresh per run; tokens come from auth-service for the {@code chat-backend} client.
+ * are fresh accounts registered in account-service per run (chat-service only lets known users into conversations,
+ * account spec §8); their connect tokens come from refresh token exchanges.
  */
 final class ChatSmoke {
 
   static final Duration T = Duration.ofSeconds(10);
-  static final String CLIENT = "chat-backend";
   static final String ULID = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
   private final URI chat;
   private final URI ws;
   private final ClientTls tls;
-  private final AuthClient auth;
+  private final AccountApi accounts;
+  private final Map<String, AccountApi.Account> byUserId = new java.util.concurrent.ConcurrentHashMap<>();
   private final HttpClient http = HttpClient.newHttpClient();
   private final List<GatewayClient> open = new ArrayList<>();
 
-  ChatSmoke(URI chat, URI ws, ClientTls tls, AuthClient auth) {
+  ChatSmoke(URI chat, URI ws, ClientTls tls, AccountApi accounts) {
     this.chat = chat;
     this.ws = ws;
     this.tls = tls;
-    this.auth = auth;
+    this.accounts = accounts;
   }
 
+  /** A fresh, valid username (account spec §4.1). */
   static String user(String name) {
-    return "smoke-" + name + "-" + UUID.randomUUID().toString().substring(0, 8);
+    return "smoke_" + name + "_" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+  }
+
+  /** Registers a fresh account; returns its userId. */
+  String newUser(String name) {
+    AccountApi.Account a = accounts.register(user(name));
+    byUserId.put(a.userId(), a);
+    return a.userId();
   }
 
   static String ulid() {
@@ -67,14 +75,14 @@ final class ChatSmoke {
     return b.toString();
   }
 
-  String token(String user) {
-    return auth.connectToken("chat:" + user, "smoke", List.of());
+  String token(String userId) {
+    return accounts.connectToken(byUserId.get(userId).refreshToken());
   }
 
   GatewayClient connect(String user) {
     GatewayClient c = GatewayClient.connect(ws, tls, T);
     open.add(c);
-    c.hello(Hellos.jwt(token(user), "smoke"), T);
+    c.hello(Hellos.jwt(token(user), byUserId.get(user).deviceId()), T);
     return c;
   }
 
@@ -128,8 +136,8 @@ final class ChatSmoke {
   void run(Consumer<String> step) throws Exception {
     try {
       step.accept("CHAT 1-1");
-      String a = user("a");
-      String b = user("b");
+      String a = newUser("a");
+      String b = newUser("b");
       GatewayClient ca = connect(a);
       GatewayClient cb = connect(b);
       String dm = call("POST", "/v1/dm/" + b, a, null, null).get("id").toString();
@@ -143,7 +151,7 @@ final class ChatSmoke {
       System.out.printf("CHAT 1-1: send -> PUSH in %.1f ms%n", (System.nanoTime() - t0) / 1e6);
 
       step.accept("CHAT group");
-      String c = user("c");
+      String c = newUser("c");
       GatewayClient cc = connect(c);
       String g = call("POST", "/v1/conversations", a, "{\"kind\":\"group\",\"title\":\"smoke\",\"memberIds\":[\""
           + b + "\",\"" + c + "\"]}", null).get("id").toString();

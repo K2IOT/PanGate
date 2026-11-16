@@ -36,3 +36,7 @@ Quyết định kiến trúc của gateway-service (spec §13). Mỗi ADR gồm:
 | [0030](0030-chat-single-writer-per-conversation.md) | Một nơi ghi mỗi hội thoại: `chat.commands` theo `conversationId`, `convSeq` cấp bằng LWT làm hàng rào |
 | [0031](0031-chat-fan-out.md) | Fan-out: MESSAGE theo thành viên cho 1-1 và nhóm ≤ 500; BROADCAST theo topic cho kênh, subscribe do server quyết |
 | [0032](0032-chat-scylladb.md) | ScyllaDB cho tin và hội thoại; `messages` theo `(conv_id, bucket)` |
+| [0033](0033-account-service-postgresql.md) | Tài khoản app chat là service riêng trên PostgreSQL |
+| [0034](0034-refresh-token-per-device.md) | Refresh token mỗi thiết bị đổi lấy connect token 10 phút; connect token là bearer cho gateway và HTTP API |
+| [0035](0035-chat-users-from-account-users.md) | chat-service biết user qua topic compacted `account.users` |
+| [0036](0036-revoke-devices-not-principals.md) | Thu hồi theo thiết bị; chỉ xoá tài khoản mới thu hồi principal |
