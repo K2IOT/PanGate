@@ -193,8 +193,9 @@ public final class Conversations {
     if (me.isEmpty()) {
       return;
     }
-    if (me.get().role() == Role.OWNER) {
-      List<Member> rest = members.membersByJoin(convId).stream().filter(m -> !m.userId().equals(userId)).toList();
+    List<Member> rest = members.membersByJoin(convId).stream().filter(m -> !m.userId().equals(userId)).toList();
+    // a retry after the promotion already happened (a later step failed) finds the new owner: never a second one
+    if (me.get().role() == Role.OWNER && rest.stream().noneMatch(m -> m.role() == Role.OWNER)) {
       rest.stream().filter(m -> m.role() == Role.ADMIN).findFirst()
           .or(() -> rest.stream().filter(m -> m.role() == Role.MEMBER).findFirst())
           .ifPresent(next -> changeMembers(convId, () -> members.add(convId, new Member(next.userId(), Role.OWNER))));

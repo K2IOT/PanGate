@@ -106,18 +106,36 @@ public final class JdbcAccountStore implements AccountStore {
         .param(userIds.toArray(String[]::new)).query(JdbcAccountStore::map).list());
   }
 
+  /**
+   * Row-locks the account for the rest of the transaction unless it is deleted; a deletion that committed first makes
+   * this {@code not_found}, so no write brings personal data, a status or an identifier back to an erased account.
+   */
+  /** One row written, else the account is deleted (or unknown). */
+  private static void live(int rows) {
+    if (rows == 0) {
+      throw new com.pangate.account.domain.DomainException("not_found", "no such account");
+    }
+  }
+
+  private void lockLive(String userId) {
+    if (jdbc.sql("UPDATE account.accounts SET updated_at = now() WHERE user_id = ? AND status <> 'deleted'")
+        .param(userId).update() == 0) {
+      throw new com.pangate.account.domain.DomainException("not_found", "no such account");
+    }
+  }
+
   @Override
   public void updateProfile(String userId, String displayName, String bio) {
-    Db.run(() -> jdbc.sql("UPDATE account.accounts SET display_name = ?, bio = ?, updated_at = now() "
-        + "WHERE user_id = ?").params(displayName, bio, userId).update());
+    Db.run(() -> live(jdbc.sql("UPDATE account.accounts SET display_name = ?, bio = ?, updated_at = now() "
+        + "WHERE user_id = ? AND status <> 'deleted'").params(displayName, bio, userId).update()));
   }
 
   @Override
   public void updateUsername(String userId, Username username) {
     Db.run(() -> {
       try {
-        jdbc.sql("UPDATE account.accounts SET username = ?, updated_at = now() WHERE user_id = ?")
-            .params(username.display(), userId).update();
+        live(jdbc.sql("UPDATE account.accounts SET username = ?, updated_at = now() WHERE user_id = ? "
+            + "AND status <> 'deleted'").params(username.display(), userId).update());
       } catch (DuplicateKeyException e) {
         throw new TakenException("username_taken");
       }
@@ -127,6 +145,7 @@ public final class JdbcAccountStore implements AccountStore {
   @Override
   public void setIdentifier(String userId, LoginKind kind, String value) {
     Db.run(() -> {
+      lockLive(userId);
       jdbc.sql("DELETE FROM account.identifiers WHERE user_id = ? AND kind = ?").params(userId, kind(kind)).update();
       if (value != null) {
         insertIdentifier(userId, kind, value);
@@ -136,15 +155,15 @@ public final class JdbcAccountStore implements AccountStore {
 
   @Override
   public void setPassword(String userId, String hash, boolean mustChange) {
-    Db.run(() -> jdbc.sql("UPDATE account.accounts SET password_hash = ?, must_change_password = ?, "
-        + "password_changed_at = now(), updated_at = now() WHERE user_id = ?").params(hash, mustChange, userId)
-        .update());
+    Db.run(() -> live(jdbc.sql("UPDATE account.accounts SET password_hash = ?, must_change_password = ?, "
+        + "password_changed_at = now(), updated_at = now() WHERE user_id = ? AND status <> 'deleted'")
+        .params(hash, mustChange, userId).update()));
   }
 
   @Override
   public void setStatus(String userId, AccountStatus status) {
-    Db.run(() -> jdbc.sql("UPDATE account.accounts SET status = ?, updated_at = now() WHERE user_id = ?")
-        .params(status.name().toLowerCase(Locale.ROOT), userId).update());
+    Db.run(() -> live(jdbc.sql("UPDATE account.accounts SET status = ?, updated_at = now() WHERE user_id = ? "
+        + "AND status <> 'deleted'").params(status.name().toLowerCase(Locale.ROOT), userId).update()));
   }
 
   @Override

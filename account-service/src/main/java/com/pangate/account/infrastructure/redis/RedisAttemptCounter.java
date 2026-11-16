@@ -24,6 +24,10 @@ public final class RedisAttemptCounter implements AttemptCounter, AutoCloseable 
 
   private final RedisClient client;
   private final InMemoryAttemptCounter fallback;
+  private final java.util.concurrent.locks.ReentrantLock connectLock = new java.util.concurrent.locks.ReentrantLock();
+  /** INCR and the window's expiry in one step; also restores an expiry a failed earlier call left missing. */
+  static final String INCREMENT = "local n = redis.call('INCR', KEYS[1]) "
+      + "if n == 1 or redis.call('PTTL', KEYS[1]) == -1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end return n";
   private volatile StatefulRedisConnection<String, String> conn;
   private volatile long nextConnectAt;
 
@@ -42,7 +46,10 @@ public final class RedisAttemptCounter implements AttemptCounter, AutoCloseable 
     if (c != null && c.isOpen()) {
       return c.sync();
     }
-    synchronized (this) {
+    if (!connectLock.tryLock()) {
+      return null;   // another thread is connecting: answer from the fallback rather than wait
+    }
+    try {
       if ((conn == null || !conn.isOpen()) && System.currentTimeMillis() >= nextConnectAt) {
         try {
           conn = client.connect();
@@ -52,6 +59,8 @@ public final class RedisAttemptCounter implements AttemptCounter, AutoCloseable 
         }
       }
       return conn == null || !conn.isOpen() ? null : conn.sync();
+    } finally {
+      connectLock.unlock();
     }
   }
 
@@ -60,11 +69,8 @@ public final class RedisAttemptCounter implements AttemptCounter, AutoCloseable 
     try {
       RedisCommands<String, String> r = redis();
       if (r != null) {
-        String k = "acct:n:" + key;
-        long n = r.incr(k);
-        if (n == 1) {
-          r.pexpire(k, window.toMillis());
-        }
+        Long n = r.eval(INCREMENT, io.lettuce.core.ScriptOutputType.INTEGER, new String[] {"acct:n:" + key},
+            Long.toString(window.toMillis()));
         return n;
       }
     } catch (RuntimeException e) {

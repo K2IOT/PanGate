@@ -60,7 +60,7 @@ public final class Register {
 
   public NewSession register(String username, char[] password, String email, String phone, String displayName,
       DeviceInfo device, String ip) {
-    if (counter.increment("reg:" + ip, Duration.ofHours(1)) > limits.registrationsPerIpPerHour()) {
+    if (counter.count("reg:" + ip) >= limits.registrationsPerIpPerHour()) {
       metrics.count("account.ratelimited", "what", "register");
       throw new RateLimitedException("rate_limited", 3600);
     }
@@ -83,6 +83,7 @@ public final class Register {
             .setUpdatedAtMs(now.toEpochMilli()).build());
         return Sessions.open(sessions, userId, device, now);
       });
+      counter.increment("reg:" + ip, Duration.ofHours(1));   // only accounts actually created count (spec §7)
       metrics.count("account.registrations", "result", "ok");
       return s;
     } catch (TakenException ex) {

@@ -1,6 +1,7 @@
 package com.pangate.chat.kafka;
 
 import com.google.protobuf.InvalidProtocolBufferException;
+import com.pangate.chat.core.ChatRefusal;
 import com.pangate.chat.core.ChatStores;
 import com.pangate.contracts.v1.AccountState;
 import java.time.Duration;
@@ -23,8 +24,9 @@ import org.slf4j.LoggerFactory;
 /**
  * {@code account.users} in group {@code chat-accounts} (account spec §8): the compacted current state of every
  * account, read from the start, so chat-service can always rebuild its {@code users} table. A state older than the
- * stored one is skipped. The first time a user turns {@code deleted}, {@code onDeleted} runs (leave groups and
- * channels) before the state is stored, so a failure there retries it. A failing record rewinds its partition.
+ * stored one is skipped, and {@code deleted} is final. The first time a user turns {@code deleted}, {@code onDeleted}
+ * runs (leave groups and channels) before the state is stored, so a transient failure there retries it; a refusal
+ * ({@link ChatRefusal}) is deterministic and is logged, not retried. A failing record rewinds its partition.
  */
 public final class AccountsListener implements AutoCloseable {
 
@@ -109,11 +111,19 @@ public final class AccountsListener implements AutoCloseable {
     }
     String status = s.getStatus() == AccountState.Status.STATUS_DELETED ? "deleted" : "active";
     Optional<ChatStores.UserRecord> prior = users.user(s.getUserId());
-    if (prior.isPresent() && prior.get().updatedAtMs() > s.getUpdatedAtMs()) {
+    // deleted is final: a later-stamped state (an admin write racing the deletion, a skewed clock) never revives it
+    if (prior.isPresent() && (prior.get().status().equals("deleted")
+        || prior.get().updatedAtMs() > s.getUpdatedAtMs())) {
       return;
     }
-    if (status.equals("deleted") && prior.map(p -> !p.status().equals("deleted")).orElse(true)) {
-      onDeleted.accept(s.getUserId());
+    if (status.equals("deleted")) {
+      try {
+        onDeleted.accept(s.getUserId());
+      } catch (ChatRefusal e) {
+        // deterministic: retrying would hold this partition (and every later account on it) forever
+        log.error("removal of deleted account {} refused: {}; recorded as deleted anyway", s.getUserId(),
+            e.getMessage());
+      }
     }
     users.upsertIfNewer(s.getUserId(), status, s.getUpdatedAtMs());
   }

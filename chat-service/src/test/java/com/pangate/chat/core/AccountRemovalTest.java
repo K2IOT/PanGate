@@ -59,4 +59,18 @@ class AccountRemovalTest {
     assertThat(stores.member(g, "m1")).get().extracting(Member::role).isEqualTo(Role.OWNER);
     assertThat(stores.member(g, "m2")).get().extracting(Member::role).isEqualTo(Role.MEMBER);
   }
+  /**
+   * Final review I4: a retry after the promotion already happened (a later step failed) must not promote a second
+   * owner.
+   */
+  @Test
+  void aRetryAfterThePromotionDoesNotPromoteAgain() {
+    String g = conv(ConversationKind.CONVERSATION_KIND_GROUP, new Member("gone", Role.OWNER),
+        new Member("a1", Role.OWNER), new Member("a2", Role.ADMIN), new Member("m1", Role.MEMBER));
+    removal.removed("gone");
+    assertThat(stores.member(g, "gone")).isEmpty();
+    assertThat(stores.members(g).stream().filter(m -> m.role() == Role.OWNER)).extracting(Member::userId)
+        .containsExactly("a1");
+    assertThat(stores.member(g, "a2")).get().extracting(Member::role).isEqualTo(Role.ADMIN);
+  }
 }

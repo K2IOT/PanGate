@@ -16,6 +16,15 @@ public final class InMemoryAttemptCounter implements AttemptCounter {
   private final Clock clock;
   private final Map<String, Window> counts = new ConcurrentHashMap<>();
   private final Map<String, Instant> blocks = new ConcurrentHashMap<>();
+  /** Expired entries are dropped every this many writes, so a long Redis outage cannot fill the heap. */
+  static final int PURGE_EVERY = 1024;
+  private final java.util.concurrent.atomic.AtomicLong writes = new java.util.concurrent.atomic.AtomicLong();
+
+  private void maybePurge() {
+    if (writes.incrementAndGet() % PURGE_EVERY == 0) {
+      purge();
+    }
+  }
 
   public InMemoryAttemptCounter(Clock clock) {
     this.clock = clock;
@@ -23,6 +32,7 @@ public final class InMemoryAttemptCounter implements AttemptCounter {
 
   @Override
   public long increment(String key, Duration window) {
+    maybePurge();
     Instant now = clock.now();
     return counts.compute(key, (k, w) -> w == null || !now.isBefore(w.end()) ? new Window(1, now.plus(window))
         : new Window(w.count() + 1, w.end())).count();
@@ -41,6 +51,7 @@ public final class InMemoryAttemptCounter implements AttemptCounter {
 
   @Override
   public void block(String key, Duration duration) {
+    maybePurge();
     blocks.put(key, clock.now().plus(duration));
   }
 
@@ -54,7 +65,12 @@ public final class InMemoryAttemptCounter implements AttemptCounter {
     return Optional.of(Duration.between(now, until));
   }
 
-  /** Drops expired entries (called by the session job so the maps do not grow without bound). */
+  /** Entries held (counts + blocks), for tests. */
+  int size() {
+    return counts.size() + blocks.size();
+  }
+
+  /** Drops expired entries. */
   public void purge() {
     Instant now = clock.now();
     counts.values().removeIf(w -> !now.isBefore(w.end()));

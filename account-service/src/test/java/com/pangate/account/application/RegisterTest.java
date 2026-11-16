@@ -61,4 +61,15 @@ class RegisterTest {
     assertThatThrownBy(() -> DeviceInfo.of("x", "toaster")).isInstanceOf(DomainException.class);
     assertThatThrownBy(() -> DeviceInfo.of(" ", "ios")).isInstanceOf(DomainException.class);
   }
+  /** Final review I8 (ruling 31 reversed): only registrations that succeed count toward 5 per IP per hour. */
+  @Test
+  void failedRegistrationsDoNotCountTowardTheLimit() {
+    register.register("taken1x", "secret-pw".toCharArray(), "t@x.vn", null, null, phone, "10.0.0.7");
+    for (int i = 0; i < 6; i++) {
+      assertThatThrownBy(() -> register.register("taken1x", "secret-pw".toCharArray(), "o@x.vn", null, null, phone,
+          "10.0.0.7")).isInstanceOf(DomainException.class);
+    }
+    assertThat(register.register("fresh1x", "secret-pw".toCharArray(), "f@x.vn", null, null, phone, "10.0.0.7")
+        .userId()).isNotNull();
+  }
 }

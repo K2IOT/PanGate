@@ -151,4 +151,27 @@ class StoreIT {
     assertThat(revs).singleElement().satisfies(r -> assertThat(new String(r.payload()))
         .isEqualTo("{\"kind\":\"device\",\"principal\":\"chat:" + u + "\",\"device\":\"D1\"}"));
   }
+  /** Final review I3: a write that races with a deletion must not bring personal data or a status back. */
+  @Test
+  void writesToADeletedAccountAreRefused() {
+    Account a = account(name(), name() + "@x.vn", null);
+    tx.inTx(() -> accounts.insert(a));
+    tx.inTx(() -> accounts.erase(a.userId()));
+    for (Runnable w : List.<Runnable>of(
+        () -> accounts.updateProfile(a.userId(), "Back", "again"),
+        () -> accounts.updateUsername(a.userId(), com.pangate.account.domain.Username.of(name(), java.util.Set.of())),
+        () -> accounts.setIdentifier(a.userId(), com.pangate.account.domain.LoginKind.EMAIL, name() + "@x.vn"),
+        () -> accounts.setPassword(a.userId(), "h", false),
+        () -> accounts.setStatus(a.userId(), AccountStatus.LOCKED))) {
+      assertThatThrownBy(() -> tx.inTx(w)).isInstanceOfSatisfying(com.pangate.account.domain.DomainException.class,
+          e -> assertThat(e.code()).isEqualTo("not_found"));
+    }
+    assertThat(accounts.byId(a.userId())).get().satisfies(x -> {
+      assertThat(x.status()).isEqualTo(AccountStatus.DELETED);
+      assertThat(x.displayName()).isNull();
+      assertThat(x.username()).isNull();
+      assertThat(x.email()).isNull();
+      assertThat(x.passwordHash()).isNull();
+    });
+  }
 }

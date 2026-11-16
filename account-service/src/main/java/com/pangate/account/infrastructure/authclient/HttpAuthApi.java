@@ -56,11 +56,15 @@ public final class HttpAuthApi implements AuthApi {
     }
   }
 
+  /**
+   * 401 / 403 say account-service's own credentials do not work (secret rotated, client disabled, scope missing):
+   * nothing is wrong with the request, so it is retried, never dropped. Only other 4xx reject the request itself.
+   */
   private void check(HttpResponse<String> r) {
     int s = r.statusCode();
-    if (s == 401) {
-      apiTokenUntil = Instant.EPOCH;   // the API token is no longer accepted: get a new one next time
-      throw new AuthUnavailableException("auth-service answered 401");
+    if (s == 401 || s == 403) {
+      apiTokenUntil = Instant.EPOCH;   // get a new API token next time
+      throw new AuthUnavailableException("auth-service refused account-service's API token: " + s);
     }
     if (s == 429 || s >= 500) {
       throw new AuthUnavailableException("auth-service answered " + s);
@@ -70,7 +74,22 @@ public final class HttpAuthApi implements AuthApi {
     }
   }
 
-  private synchronized String apiToken() {
+  /** A lock, not synchronized: a virtual thread waiting for the fetch must not pin its carrier (JDK 21). */
+  private final java.util.concurrent.locks.ReentrantLock tokenLock = new java.util.concurrent.locks.ReentrantLock();
+
+  private String apiToken() {
+    if (apiToken != null && Instant.now().isBefore(apiTokenUntil)) {
+      return apiToken;
+    }
+    tokenLock.lock();
+    try {
+      return fetchApiToken();
+    } finally {
+      tokenLock.unlock();
+    }
+  }
+
+  private String fetchApiToken() {
     if (apiToken != null && Instant.now().isBefore(apiTokenUntil)) {
       return apiToken;
     }
@@ -78,11 +97,8 @@ public final class HttpAuthApi implements AuthApi {
         .header("Authorization", basic).header("Content-Type", "application/x-www-form-urlencoded")
         .POST(HttpRequest.BodyPublishers.ofString("grant_type=client_credentials&scope="
             + form("tokens:mint sessions:revoke"))).build());
-    if (r.statusCode() >= 500 || r.statusCode() == 429) {
-      throw new AuthUnavailableException("auth-service answered " + r.statusCode());
-    }
-    if (r.statusCode() != 200) {
-      throw new AuthRejectedException(r.statusCode());
+    if (r.statusCode() != 200) {   // our own client credentials: never a reason to drop a revocation
+      throw new AuthUnavailableException("no API token from auth-service: " + r.statusCode());
     }
     JsonNode n = read(r.body());
     apiToken = n.get("access_token").asText();
