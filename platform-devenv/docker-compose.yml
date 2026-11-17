@@ -201,6 +201,20 @@ services:
       test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.account.tools.HealthCheck",
              "http://127.0.0.1:8081/ready"]
 
+  # APNs and FCM stand-ins for notify-service (offline notifications spec §7); GET /received?token=<t>.
+  fake-apns:
+    profiles: ["app"]
+    image: pangate/gateway-devtools:dev
+    command: ["fake-apns", "--port", "9550"]
+    ports:
+      - "9550:9550"
+  fake-fcm:
+    profiles: ["app"]
+    image: pangate/gateway-devtools:dev
+    command: ["fake-fcm", "--port", "9551"]
+    ports:
+      - "9551:9551"
+
   # Push tokens and APNs / FCM for every tenant (offline notifications spec §5); in dev it sends to fake-apns /
   # fake-fcm (gateway-devtools).
   notify:

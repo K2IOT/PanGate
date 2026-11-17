@@ -17,7 +17,8 @@ import picocli.CommandLine.Command;
     subcommands = {IssuerCommand.class, TokenCommand.class, ClientCommand.class, SmokeCommand.class,
         com.pangate.devtools.cmd.AccountCommand.class,
         HealthCommand.class, FakeRouterCommand.class, FakePushApiCommand.class,
-        PushCommand.class, AwaitOfflineCommand.class})
+        PushCommand.class, AwaitOfflineCommand.class, com.pangate.devtools.cmd.FakeApnsCommand.class,
+        com.pangate.devtools.cmd.FakeFcmCommand.class, com.pangate.devtools.cmd.NotifyCommand.class})
 public final class Main {
 
   public static void main(String[] args) {
