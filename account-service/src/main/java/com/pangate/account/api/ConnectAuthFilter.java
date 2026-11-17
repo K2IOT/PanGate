@@ -53,23 +53,24 @@ public class ConnectAuthFilter extends OncePerRequestFilter {
 
   /** Forgets the cached answer for a device logged out through this pod. */
   public void forget(String deviceId) {
-    liveUntil.remove(deviceId);
+    liveUntil.keySet().removeIf(k -> k.endsWith("|" + deviceId));
   }
 
-  private boolean live(String deviceId) {
+  private boolean live(String userId, String deviceId) {
     long now = monoMs.getAsLong();
-    Long until = liveUntil.get(deviceId);
+    String key = userId + "|" + deviceId;
+    Long until = liveUntil.get(key);
     if (until != null && until > now) {
       return true;
     }
-    if (!sessions.isLive(deviceId)) {
-      liveUntil.remove(deviceId);
+    if (!sessions.isLive(userId, deviceId)) {
+      liveUntil.remove(key);
       return false;
     }
     if (liveUntil.size() > 100_000) {
       liveUntil.clear();
     }
-    liveUntil.put(deviceId, now + LIVE_CACHE_MS);
+    liveUntil.put(key, now + LIVE_CACHE_MS);
     return true;
   }
 
@@ -90,7 +91,7 @@ public class ConnectAuthFilter extends OncePerRequestFilter {
       Problems.write(res, 401, "invalid_token", e.getMessage());
       return;
     }
-    if (!live(c.deviceId())) {
+    if (!live(c.userId(), c.deviceId())) {
       res.setHeader("WWW-Authenticate", "Bearer error=\"invalid_token\"");
       Problems.write(res, 401, "invalid_token", "this device was logged out");
       return;

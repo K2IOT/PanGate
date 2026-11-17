@@ -73,9 +73,9 @@ public final class JdbcSessionStore implements SessionStore {
   }
 
   @Override
-  public boolean isLive(String deviceId) {
-    return Db.call(() -> jdbc.sql("SELECT count(*) FROM account.sessions WHERE device_id = ? AND revoked_at IS NULL")
-        .param(deviceId).query(Long.class).single() == 1);
+  public boolean isLive(String userId, String deviceId) {
+    return Db.call(() -> jdbc.sql("SELECT count(*) FROM account.sessions WHERE device_id = ? AND user_id = ? "
+        + "AND revoked_at IS NULL").params(deviceId, userId).query(Long.class).single() == 1);
   }
 
   @Override

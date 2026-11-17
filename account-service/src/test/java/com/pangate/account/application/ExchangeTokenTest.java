@@ -104,4 +104,11 @@ class ExchangeTokenTest {
     }
     assertThat(code()).isEqualTo("rate_limited");
   }
+  /** Final review minor: an admin lock revokes every session first; exchanging still says account_locked. */
+  @Test
+  void lockedByAdminIs403NotInvalidSession() {
+    f.sessionStore.revokeAll(s.userId(), null);
+    f.accountStore.setStatus(s.userId(), AccountStatus.LOCKED);
+    assertThat(code()).isEqualTo("account_locked");
+  }
 }

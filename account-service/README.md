@@ -30,7 +30,7 @@ Bearer API token of auth-service with scope `accounts:admin` and tenant `chat` (
 
 ## Limits (spec §7)
 
-Wrong logins: 10 per login + IP in 15 min → that pair blocked 15 min; 50 per IP → IP blocked; 100 per login from every IP → each further try waits 2 s. Registration 5 per IP per hour; token exchange 60 per session per hour; lookups 600 per user per minute; admin 20/s per client. Counters live in Redis and fall back to per-pod memory. Password hashing (Argon2id m=19 MiB, t=2) runs at most 2 × cores at a time per pod; more → `503`.
+Wrong logins: 10 per login + IP in 15 min → that pair blocked 15 min; 50 per IP → each further try from it waits 2 s (shared carrier-grade NAT addresses are not blocked); 1000 per IP → IP blocked 15 min; 100 per login from every IP → each further try waits 2 s. Registration 5 per IP per hour; token exchange 60 per session per hour; lookups 600 per user per minute; admin 20/s per client. Counters live in Redis and fall back to per-pod memory. Password hashing (Argon2id m=19 MiB, t=2) runs at most 2 × cores at a time per pod; more → `503`.
 
 ## Configuration (`account.*`)
 

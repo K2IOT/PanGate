@@ -40,12 +40,14 @@ public final class DeleteAccount {
   }
 
   public void delete(String userId) {
-    tx.inTx(() -> {
-      ManageSessions.revokeAll(sessions, outbox, userId, null);
-      outbox.revokePrincipal(userId);
-      accounts.erase(userId);
-      outbox.event(userId, AccountState.newBuilder().setUserId(userId).setStatus(AccountState.Status.STATUS_DELETED)
-          .setUpdatedAtMs(clock.now().toEpochMilli()).build());
-    });
+    tx.inTx(() -> deleteWithin(userId));
+  }
+
+  /** The deletion's steps, inside a transaction the caller holds (the admin API adds its log row to it). */
+  void deleteWithin(String userId) {
+    ManageSessions.revokeAll(sessions, outbox, userId, null);
+    outbox.revokePrincipal(userId);
+    accounts.erase(userId);
+    outbox.event(userId, AccountState.Status.STATUS_DELETED);
   }
 }

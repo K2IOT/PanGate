@@ -132,7 +132,9 @@ class StoreIT {
     assertThat(tx.inTx(() -> sessions.revokeAll(a.userId(), devices.get(1))))
         .containsExactlyInAnyOrder(devices.get(0), devices.get(2));
     assertThat(sessions.live(a.userId())).extracting(Session::deviceId).containsExactly(devices.get(1));
-    assertThat(sessions.isLive(devices.get(0))).isFalse();
+    assertThat(sessions.isLive(a.userId(), devices.get(0))).isFalse();
+    assertThat(sessions.isLive(a.userId(), devices.get(1))).isTrue();
+    assertThat(sessions.isLive("someone-else", devices.get(1))).as("the session must be the token's user's").isFalse();
     assertThat(sessions.byRefreshHash(devices.get(1).getBytes())).get().extracting(Session::revokedAt).isNull();
   }
 
@@ -140,9 +142,9 @@ class StoreIT {
   void outboxKeepsOrderPerKind() {
     String u = id();
     tx.inTx(() -> {
-      outbox.event(u, AccountState.newBuilder().setUserId(u).setStatus(AccountState.Status.STATUS_ACTIVE).build());
+      outbox.event(u, AccountState.Status.STATUS_ACTIVE);
       outbox.revokeDevice(u, "D1");
-      outbox.event(u, AccountState.newBuilder().setUserId(u).setStatus(AccountState.Status.STATUS_DELETED).build());
+      outbox.event(u, AccountState.Status.STATUS_DELETED);
     });
     List<Outbox.OutboxRow> events = outbox.pending("event", 500).stream().filter(r -> r.key().equals(u)).toList();
     assertThat(events).hasSize(2);
@@ -173,5 +175,34 @@ class StoreIT {
       assertThat(x.email()).isNull();
       assertThat(x.passwordHash()).isNull();
     });
+  }
+  /** Final review minor: event times come from one clock, the database's, not from each pod. */
+  @Test
+  void eventTimesComeFromTheDatabaseClock() throws Exception {
+    String u = id();
+    long db = jdbc().sql("SELECT (extract(epoch from clock_timestamp()) * 1000)::bigint").query(Long.class).single();
+    tx.inTx(() -> outbox.event(u, AccountState.Status.STATUS_ACTIVE));
+    byte[] p = outbox.pending("event", 10_000).stream().filter(r -> r.key().equals(u)).findFirst().get().payload();
+    AccountState st = AccountState.parseFrom(p);
+    assertThat(st.getUserId()).isEqualTo(u);
+    assertThat(st.getUpdatedAtMs()).isBetween(db - 1_000, db + 5_000);
+  }
+
+  /** Final review minor: a deleted account's device names ("iPhone của Lan") are erased with it. */
+  @Test
+  void eraseAlsoErasesDeviceNames() {
+    Account a = account(name(), name() + "@x.vn", null);
+    tx.inTx(() -> accounts.insert(a));
+    String d = id();
+    sessions.insert(new Session(d, a.userId(), "iPhone của Lan", "ios", Instant.now(), Instant.now(), null),
+        d.getBytes());
+    tx.inTx(() -> accounts.erase(a.userId()));
+    assertThat(sessions.byDeviceId(d)).get().extracting(Session::deviceName).isEqualTo("(deleted)");
+  }
+
+  @Autowired org.springframework.jdbc.core.simple.JdbcClient jdbcClient;
+
+  org.springframework.jdbc.core.simple.JdbcClient jdbc() {
+    return jdbcClient;
   }
 }

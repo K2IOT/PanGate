@@ -38,6 +38,9 @@ public final class Fakes {
   public final Map<String, byte[]> refreshHashes = new ConcurrentHashMap<>();
   public final List<Outbox.OutboxRow> outboxRows = new ArrayList<>();
   public final List<String> adminActions = new ArrayList<>();
+  /** For each admin_actions row: whether it was written inside a transaction. */
+  public final List<Boolean> adminActionsInTx = new ArrayList<>();
+  private volatile boolean inTx;
   public final AtomicInteger burns = new AtomicInteger();
   public final AtomicInteger touches = new AtomicInteger();
   private final AtomicLong outboxIds = new AtomicLong();
@@ -66,12 +69,21 @@ public final class Fakes {
   public final Transactions tx = new Transactions() {
     @Override
     public synchronized <T> T inTx(Supplier<T> work) {
-      return work.get();
+      boolean outer = inTx;
+      inTx = true;
+      try {
+        return work.get();
+      } finally {
+        inTx = outer;
+      }
     }
 
     @Override
     public synchronized void inTx(Runnable work) {
-      work.run();
+      inTx(() -> {
+        work.run();
+        return null;
+      });
     }
   };
 
@@ -219,9 +231,9 @@ public final class Fakes {
     }
 
     @Override
-    public boolean isLive(String d) {
+    public boolean isLive(String userId, String d) {
       Session s = sessions.get(d);
-      return s != null && s.revokedAt() == null;
+      return s != null && s.revokedAt() == null && s.userId().equals(userId);
     }
 
     @Override
@@ -252,8 +264,9 @@ public final class Fakes {
     }
 
     @Override
-    public void event(String userId, AccountState s) {
-      add(EVENT, userId, s.toByteArray());
+    public void event(String userId, AccountState.Status s) {
+      add(EVENT, userId, AccountState.newBuilder().setUserId(userId).setStatus(s).setUpdatedAtMs(now.toEpochMilli())
+          .build().toByteArray());
     }
 
     @Override
@@ -296,6 +309,7 @@ public final class Fakes {
     @Override
     public synchronized void record(String actor, String action, String userId, String reason) {
       adminActions.add(actor + " " + action + " " + userId + " " + reason);
+      adminActionsInTx.add(inTx);
     }
 
     @Override

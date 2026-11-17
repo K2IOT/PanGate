@@ -28,8 +28,11 @@ public final class JdbcOutbox implements Outbox {
   }
 
   @Override
-  public void event(String userId, AccountState state) {
-    add(EVENT, userId, state.toByteArray());
+  public void event(String userId, AccountState.Status status) {
+    long at = Db.call(() -> jdbc.sql("SELECT (extract(epoch from clock_timestamp()) * 1000)::bigint")
+        .query(Long.class).single());
+    add(EVENT, userId, AccountState.newBuilder().setUserId(userId).setStatus(status).setUpdatedAtMs(at).build()
+        .toByteArray());
   }
 
   @Override

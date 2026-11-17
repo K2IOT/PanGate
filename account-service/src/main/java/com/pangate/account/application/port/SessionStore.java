@@ -25,7 +25,8 @@ public interface SessionStore {
 
   void touch(String deviceId, Instant at);
 
-  boolean isLive(String deviceId);
+  /** The device's session is live and belongs to {@code userId}. */
+  boolean isLive(String userId, String deviceId);
 
   /** Revokes sessions last used before {@code before}; returns how many. */
   int expireIdle(Instant before);

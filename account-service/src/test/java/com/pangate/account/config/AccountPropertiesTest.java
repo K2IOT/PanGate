@@ -27,6 +27,7 @@ class AccountPropertiesTest {
     AccountProperties.Limits l = p.limits();
     assertThat(l.loginIpFailures()).isEqualTo(10);
     assertThat(l.ipFailures()).isEqualTo(50);
+    assertThat(l.ipBlockFailures()).isEqualTo(1000);
     assertThat(l.loginAllFailures()).isEqualTo(100);
     assertThat(l.failureWindow()).isEqualTo(Duration.ofMinutes(15));
     assertThat(l.block()).isEqualTo(Duration.ofMinutes(15));

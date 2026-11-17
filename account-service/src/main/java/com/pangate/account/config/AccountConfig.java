@@ -32,8 +32,18 @@ public class AccountConfig {
   }
 
   @Bean
-  HashGate hashGate(AccountProperties p) {
-    return new HashGate(HashGate.permits(p.maxConcurrentHashes()));
+  HashGate hashGate(AccountProperties p, MeterRegistry registry) {
+    return new HashGate(HashGate.permits(p.maxConcurrentHashes()), new HashGate.Observer() {
+      @Override
+      public void took(java.time.Duration d) {
+        registry.timer("account.password.hash.latency").record(d);
+      }
+
+      @Override
+      public void rejected() {
+        registry.counter("account.password.hash.rejected").increment();
+      }
+    });
   }
 
   /** Shared through Redis; per pod (its in-memory fallback) while Redis cannot be used. */

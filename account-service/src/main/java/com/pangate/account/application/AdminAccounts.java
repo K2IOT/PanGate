@@ -72,17 +72,24 @@ public final class AdminAccounts {
   }
 
   private void event(String userId, AccountState.Status s) {
-    outbox.event(userId, AccountState.newBuilder().setUserId(userId).setStatus(s)
-        .setUpdatedAtMs(clock.now().toEpochMilli()).build());
+    outbox.event(userId, s);
   }
 
   public AdminView get(String userId) {
     return view(accounts.byId(userId).orElseThrow(() -> new DomainException("not_found", "no such account")));
   }
 
+  /** The kind asked is the kind searched; a phone may come with spaces, or without its + (a URL turns + into a space). */
   public AdminView find(LoginKind kind, String value) {
-    return view(accounts.byLogin(Login.parse(kind == LoginKind.PHONE && !value.startsWith("+") ? "+" + value : value))
-        .filter(a -> a.status() != AccountStatus.DELETED || kind == LoginKind.USERNAME)
+    String v = value == null ? "" : value.trim();
+    String key = switch (kind) {
+      case PHONE -> {
+        String digits = v.replaceAll("\\s+", "");
+        yield digits.startsWith("+") ? digits : "+" + digits;
+      }
+      case EMAIL, USERNAME -> v.toLowerCase(java.util.Locale.ROOT);
+    };
+    return view(accounts.byLogin(new Login(kind, key))
         .orElseThrow(() -> new DomainException("not_found", "no such account")));
   }
 
@@ -131,8 +138,10 @@ public final class AdminAccounts {
   public void delete(String actor, String userId, String reason) {
     String r = reason(reason);
     Account a = live(userId);
-    deleter.delete(a.userId());
-    log.record(actor, "delete", a.userId(), r);
+    tx.inTx(() -> {
+      deleter.deleteWithin(a.userId());
+      log.record(actor, "delete", a.userId(), r);
+    });
     metrics.count("account.admin.actions", "action", "delete");
   }
 }

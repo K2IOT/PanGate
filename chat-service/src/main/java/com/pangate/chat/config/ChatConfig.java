@@ -158,9 +158,10 @@ public class ChatConfig {
   }
 
   @Bean(destroyMethod = "")
-  AccountsListener accountsListener(ChatProperties p, ScyllaChatStore store, AccountRemoval removal) {
+  AccountsListener accountsListener(ChatProperties p, ScyllaChatStore store, AccountRemoval removal,
+      UserDirectory users) {
     return new AccountsListener(AccountsListener.consumer(p.kafka().bootstrap(), AccountsListener.GROUP),
-        AccountTopics.USERS, store, removal::removed);
+        AccountTopics.USERS, store, removal::removed, users::forget);
   }
 
   @Bean

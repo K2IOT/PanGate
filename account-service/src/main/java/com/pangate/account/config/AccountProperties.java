@@ -46,7 +46,10 @@ public record AccountProperties(
 
   public record Limits(
       @DefaultValue("10") int loginIpFailures,
+      /** Failures from one IP after which each try from it waits {@code loginAllDelay} (spec §7, loosened). */
       @DefaultValue("50") int ipFailures,
+      /** Failures from one IP that block it for {@code block}: only a flood (spec §7, loosened). */
+      @DefaultValue("1000") int ipBlockFailures,
       @DefaultValue("100") int loginAllFailures,
       @DefaultValue("15m") Duration failureWindow,
       @DefaultValue("15m") Duration block,

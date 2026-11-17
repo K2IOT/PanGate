@@ -70,4 +70,24 @@ class AdminAccountsTest {
     assertThatThrownBy(() -> admin.lock("ops", s.userId(), "x")).isInstanceOfSatisfying(DomainException.class,
         e -> assertThat(e.code()).isEqualTo("not_found"));
   }
+  /** Final review minor: the kind asked is the kind searched; a phone may come with spaces or without its +. */
+  @Test
+  void findUsesTheKindAsked() {
+    f.accountStore.setIdentifier(s.userId(), com.pangate.account.domain.LoginKind.PHONE, "+84901234567");
+    assertThatThrownBy(() -> admin.find(com.pangate.account.domain.LoginKind.EMAIL, "lannguyen"))
+        .isInstanceOf(DomainException.class);
+    assertThatThrownBy(() -> admin.find(com.pangate.account.domain.LoginKind.USERNAME, "l@x.vn"))
+        .isInstanceOf(DomainException.class);
+    assertThat(admin.find(com.pangate.account.domain.LoginKind.PHONE, " 84901234567").account().userId())
+        .isEqualTo(s.userId());
+    assertThat(admin.find(com.pangate.account.domain.LoginKind.EMAIL, " L@x.vn").account().userId())
+        .isEqualTo(s.userId());
+  }
+
+  /** Final review minor: the admin_actions row of a deletion is written in the deletion's transaction. */
+  @Test
+  void deleteIsLoggedInsideItsTransaction() {
+    admin.delete("ops", s.userId(), "asked");
+    assertThat(f.adminActionsInTx).containsExactly(true);
+  }
 }

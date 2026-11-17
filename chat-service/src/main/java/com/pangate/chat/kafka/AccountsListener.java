@@ -37,11 +37,19 @@ public final class AccountsListener implements AutoCloseable {
   private final String topic;
   private final ChatStores.UserStore users;
   private final Consumer<String> onDeleted;
+  private final Consumer<String> onApplied;
   private volatile boolean running = true;
   private Thread thread;
 
   public AccountsListener(org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer, String topic,
       ChatStores.UserStore users, Consumer<String> onDeleted) {
+    this(consumer, topic, users, onDeleted, u -> { });
+  }
+
+  /** {@code onApplied(userId)} after a state is stored (drops this pod's cached state of that user). */
+  public AccountsListener(org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer, String topic,
+      ChatStores.UserStore users, Consumer<String> onDeleted, Consumer<String> onApplied) {
+    this.onApplied = onApplied;
     this.consumer = consumer;
     this.topic = topic;
     this.users = users;
@@ -125,7 +133,8 @@ public final class AccountsListener implements AutoCloseable {
             e.getMessage());
       }
     }
-    users.upsertIfNewer(s.getUserId(), status, s.getUpdatedAtMs());
+    users.put(s.getUserId(), status, s.getUpdatedAtMs());   // already compared with prior above
+    onApplied.accept(s.getUserId());
   }
 
   @Override

@@ -61,12 +61,27 @@ class LoginUseCaseTest {
     assertThat(code("lannguyen", "secret-pw", "10.0.0.1")).isEqualTo("ok");
   }
 
+  /**
+   * Spec §7 (loosened 2026-11-17): many users share one address behind carrier-grade NAT, so 50 failures from an IP
+   * only slow that IP down (2 s per try); a correct password still logs in.
+   */
   @Test
-  void fiftyFailuresBlockTheIp() {
+  void fiftyFailuresFromOneIpSlowItDownWithoutBlocking() {
     for (int i = 0; i < 50; i++) {
       assertThat(code("nobody" + i, "wrong-pw!", "10.0.0.3")).isEqualTo("invalid_credentials");
     }
-    assertThat(code("lannguyen", "secret-pw", "10.0.0.3")).isEqualTo("too_many_attempts");
+    assertThat(slept).isEmpty();
+    assertThat(code("lannguyen", "secret-pw", "10.0.0.3")).isEqualTo("ok");
+    assertThat(slept).containsExactly(Duration.ofSeconds(2));
+  }
+
+  /** Only a flood (1000 failures in 15 min) blocks an IP. */
+  @Test
+  void aThousandFailuresBlockTheIp() {
+    for (int i = 0; i < 1000; i++) {
+      assertThat(code("nobody" + i, "wrong-pw!", "10.0.0.4")).isEqualTo("invalid_credentials");
+    }
+    assertThat(code("lannguyen", "secret-pw", "10.0.0.4")).isEqualTo("too_many_attempts");
   }
 
   @Test

@@ -170,6 +170,7 @@ public final class JdbcAccountStore implements AccountStore {
   public void erase(String userId) {
     Db.run(() -> {
       jdbc.sql("DELETE FROM account.identifiers WHERE user_id = ?").param(userId).update();
+      jdbc.sql("UPDATE account.sessions SET device_name = '(deleted)' WHERE user_id = ?").param(userId).update();
       jdbc.sql("UPDATE account.accounts SET username = NULL, display_name = NULL, bio = NULL, password_hash = NULL, "
           + "must_change_password = false, status = 'deleted', deleted_at = now(), updated_at = now() "
           + "WHERE user_id = ?").param(userId).update();

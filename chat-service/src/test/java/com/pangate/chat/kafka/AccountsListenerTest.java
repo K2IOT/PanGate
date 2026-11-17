@@ -40,4 +40,12 @@ class AccountsListenerTest {
     l.handle(rec("u", AccountState.Status.STATUS_DELETED, 2));
     assertThat(stores.user("u")).get().extracting(r -> r.status()).isEqualTo("deleted");
   }
+  /** Final review minor: one read of the users table per record, not two. */
+  @Test
+  void oneReadPerRecord() {
+    AccountsListener l = new AccountsListener(null, "account.users", stores, removed::add);
+    l.handle(rec("u", AccountState.Status.STATUS_ACTIVE, 1));
+    l.handle(rec("u", AccountState.Status.STATUS_LOCKED, 2));
+    assertThat(stores.userReads.get()).isEqualTo(2);
+  }
 }

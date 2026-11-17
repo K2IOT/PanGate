@@ -28,7 +28,7 @@ class RelaysKafkaDownIT {
   void kafkaDownDoesNotDelayRevocations() {
     String u = Ids.next();
     tx.inTx(() -> {
-      outbox.event(u, AccountState.newBuilder().setUserId(u).setStatus(AccountState.Status.STATUS_ACTIVE).build());
+      outbox.event(u, AccountState.Status.STATUS_ACTIVE);
       outbox.revokeDevice(u, "D1");
     });
     long t0 = System.nanoTime();

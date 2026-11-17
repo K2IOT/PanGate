@@ -31,8 +31,8 @@ class RelaysIT {
   void eventsReachTheCompactedTopicInOrder() throws Exception {
     String u = Ids.next();
     tx.inTx(() -> {
-      outbox.event(u, state(u, AccountState.Status.STATUS_ACTIVE, 1));
-      outbox.event(u, state(u, AccountState.Status.STATUS_DELETED, 2));
+      outbox.event(u, AccountState.Status.STATUS_ACTIVE);
+      outbox.event(u, AccountState.Status.STATUS_DELETED);
     });
     List<ConsumerRecord<String, byte[]>> recs = ControlTopic.await("account.users",
         rs -> rs.stream().filter(r -> u.equals(r.key())).count() >= 2, Duration.ofSeconds(20)).stream()

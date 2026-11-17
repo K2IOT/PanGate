@@ -155,8 +155,15 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
         .sorted(Comparator.comparingLong((Member m) -> joined.getOrDefault(convId + "|" + m.userId(), 0L))).toList();
   }
 
+  public final java.util.concurrent.atomic.AtomicInteger userReads = new java.util.concurrent.atomic.AtomicInteger();
+
   @Override public Optional<UserRecord> user(String userId) {
+    userReads.incrementAndGet();
     return Optional.ofNullable(users.get(userId));
+  }
+
+  @Override public void put(String userId, String status, long updatedAtMs) {
+    users.put(userId, new UserRecord(userId, status, updatedAtMs));
   }
 
   @Override public boolean upsertIfNewer(String userId, String status, long updatedAtMs) {

@@ -79,8 +79,7 @@ public final class Register {
       NewSession s = tx.inTx(() -> {
         accounts.insert(new Account(userId, u.display(), name, null, hash, false, AccountStatus.ACTIVE,
             e == null ? null : e.value(), p == null ? null : p.value(), now, null));
-        outbox.event(userId, AccountState.newBuilder().setUserId(userId).setStatus(AccountState.Status.STATUS_ACTIVE)
-            .setUpdatedAtMs(now.toEpochMilli()).build());
+        outbox.event(userId, AccountState.Status.STATUS_ACTIVE);
         return Sessions.open(sessions, userId, device, now);
       });
       counter.increment("reg:" + ip, Duration.ofHours(1));   // only accounts actually created count (spec §7)

@@ -72,6 +72,7 @@ public class JobsConfig {
   SchedulingConfigurer accountJobs(AdvisoryLock lock, EventRelay events, RevocationRelay revocations,
       ExpireSessions expire, AccountProperties p, Outbox outbox, SessionStore sessions, MeterRegistry registry) {
     AtomicLong liveSessions = new AtomicLong();
+    java.util.Map<String, AtomicLong[]> pendingGauges = new java.util.HashMap<>();
     for (String kind : new String[] {Outbox.EVENT, Outbox.REVOCATION}) {
       AtomicLong pending = new AtomicLong();
       AtomicLong oldestMs = new AtomicLong();
@@ -101,5 +102,4 @@ public class JobsConfig {
     };
   }
 
-  private static final java.util.Map<String, AtomicLong[]> pendingGauges = new java.util.concurrent.ConcurrentHashMap<>();
 }

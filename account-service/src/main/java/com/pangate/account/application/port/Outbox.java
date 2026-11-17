@@ -15,7 +15,8 @@ public interface Outbox {
 
   record OutboxRow(long id, String kind, String key, byte[] payload) {}
 
-  void event(String userId, AccountState state);
+  /** {@code AccountState} of the user with {@code updated_at_ms} from the database clock: one clock for all pods. */
+  void event(String userId, AccountState.Status status);
 
   void revokeDevice(String userId, String deviceId);
 

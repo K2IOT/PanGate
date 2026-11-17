@@ -25,7 +25,8 @@ import java.util.Optional;
 
 /**
  * {@code POST /v1/sessions} (account spec §4.2, §7). A wrong login and a wrong password are one error and take the
- * same time. Failures count per login + IP (10 → blocked 15 min), per IP (50 → blocked) and per login from every IP
+ * same time. Failures count per login + IP (10 → blocked 15 min), per IP (50 → each further try waits 2 s; 1000, a
+ * flood, → blocked 15 min: many users share an address behind carrier-grade NAT) and per login from every IP
  * (100 → each further try waits 2 s, never a block: usernames are public). The password is checked before the account
  * status, so a guesser learns nothing about a lock.
  */
@@ -92,7 +93,9 @@ public final class LoginUseCase {
       metrics.count("account.ratelimited", "what", "login");
       throw new RateLimitedException("too_many_attempts", blocked.get().toSeconds());
     }
-    if (counter.count("loginall:" + l.key()) >= limits.loginAllFailures()) {
+    // slow down, never block, below a flood: many users share one address behind carrier-grade NAT
+    if (counter.count("loginall:" + l.key()) >= limits.loginAllFailures()
+        || counter.count(ipKey) >= limits.ipFailures()) {
       sleeper.sleep(limits.loginAllDelay());
     }
     char[] pw = PasswordPolicy.normalise(password == null ? new char[0] : password);
@@ -108,7 +111,7 @@ public final class LoginUseCase {
       if (counter.increment(pair, limits.failureWindow()) >= limits.loginIpFailures()) {
         counter.block(pair, limits.block());
       }
-      if (counter.increment(ipKey, limits.failureWindow()) >= limits.ipFailures()) {
+      if (counter.increment(ipKey, limits.failureWindow()) >= limits.ipBlockFailures()) {
         counter.block(ipKey, limits.block());
       }
       counter.increment("loginall:" + l.key(), limits.failureWindow());

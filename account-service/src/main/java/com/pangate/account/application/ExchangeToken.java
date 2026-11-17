@@ -57,16 +57,18 @@ public final class ExchangeToken {
       throw invalid();
     }
     Instant now = clock.now();
-    Session s = sessions.byRefreshHash(RefreshTokens.hash(refreshToken))
-        .filter(x -> x.revokedAt() == null && !x.lastUsedAt().isBefore(now.minus(idleTtl)))
-        .orElseThrow(this::invalid);
+    Session s = sessions.byRefreshHash(RefreshTokens.hash(refreshToken)).orElseThrow(this::invalid);
     Optional<Account> a = accounts.byId(s.userId()).filter(x -> x.status() != AccountStatus.DELETED);
     if (a.isEmpty()) {
       throw invalid();
     }
+    // the account's status first: a lock revoked every session, and the device should hear "locked", not "log in"
     if (a.get().status() == AccountStatus.LOCKED) {
       metrics.count("account.tokens", "result", "locked");
       throw new DomainException("account_locked", "this account is locked");
+    }
+    if (s.revokedAt() != null || s.lastUsedAt().isBefore(now.minus(idleTtl))) {
+      throw invalid();
     }
     if (counter.increment("tok:" + s.deviceId(), Duration.ofHours(1)) > limits.tokensPerSessionPerHour()) {
       metrics.count("account.ratelimited", "what", "token");

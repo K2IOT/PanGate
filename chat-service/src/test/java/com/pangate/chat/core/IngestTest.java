@@ -107,13 +107,15 @@ class IngestTest {
   /** account spec §8: a DM whose other side deleted the account takes no new messages. */
   @Test
   void dmWithDeletedUserIsRejected() {
+    java.util.concurrent.atomic.AtomicLong wall = new java.util.concurrent.atomic.AtomicLong(1_000);
     Ingest checked = new Ingest(stores, stores, stores, published::add, SendValidatorTest.LIMITS, nanos::get,
-        () -> 1_000L, reason -> { }, new UserDirectory(stores));
+        () -> 1_000L, reason -> { }, new UserDirectory(stores, wall::get));
     String dm = conv(ConversationKind.CONVERSATION_KIND_DIRECT, new Member("u1", Role.MEMBER),
         new Member("u2", Role.MEMBER));
     stores.upsertIfNewer("u2", "active", 1);
     assertThat(checked.accept(new SendInput("u1", "d1", send(dm), ""))).isEmpty();
     stores.upsertIfNewer("u2", "deleted", 2);
+    wall.addAndGet(10_001);   // another pod's cached "active" lasts at most 10 s
     assertThat(checked.accept(new SendInput("u1", "d1", send(dm), ""))).get().extracting(Rejection::reason)
         .isEqualTo("user_deleted");
   }

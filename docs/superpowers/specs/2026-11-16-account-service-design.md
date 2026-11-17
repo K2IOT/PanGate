@@ -261,7 +261,7 @@ Hồ sơ (tên, username) **không** đi qua topic: client đọc qua `/v1/users
 | Gì | Khoá | Mặc định |
 |---|---|---|
 | Đăng nhập sai | login + IP | 10 lần trong 15 phút → chặn cặp đó 15 phút (`429 too_many_attempts`, kể cả mật khẩu đúng) |
-| Đăng nhập sai | IP | 50 lần trong 15 phút → chặn IP 15 phút |
+| Đăng nhập sai | IP | 50 lần trong 15 phút → mỗi lần thử tiếp theo từ IP đó chờ thêm 2 s, không chặn (nhiều người dùng chung một IP qua NAT của nhà mạng); 1000 lần trong 15 phút (một đợt tấn công) → chặn IP 15 phút. Nới ngày 2026-11-17 |
 | Đăng nhập sai | login (mọi IP) | 100 lần trong 15 phút → mỗi lần thử tiếp theo của login đó chờ thêm 2 s trước khi trả lời. Không chặn hẳn: username là công khai, chặn theo login một mình sẽ cho người lạ khoá được tài khoản người khác |
 | Đăng ký | IP | 5 mỗi giờ |
 | Đổi token | phiên | 60 mỗi giờ |
@@ -282,7 +282,7 @@ IP lấy từ `X-Forwarded-For` do ingress đặt (cấu hình số proxy tin c�
 ## 8. Thay đổi ở chat-service
 
 1. **Bảng `users`** trong ScyllaDB (`user_id` → `status`: `active` | `deleted`, `updated_at`), nạp từ topic compacted `account.users` (consumer group `chat-accounts`). Trạng thái `LOCKED` coi như `active` (khoá chỉ chặn đăng nhập). Bản có `updated_at_ms` cũ hơn bản đang có bị bỏ qua.
-2. **Kiểm tra user tồn tại**: tạo DM, tạo nhóm/kênh với `memberIds`, thêm thành viên với user không có trong `users` hoặc đã xoá → `404 user_not_found`. Sự kiện tạo tài khoản tới chat-service sau vài trăm ms; client mới đăng ký gặp `404` trong khoảng đó thì thử lại.
+2. **Kiểm tra user tồn tại**: tạo DM, tạo nhóm/kênh với `memberIds`, thêm thành viên với user không có trong `users` → `404 user_not_found`; user đã xoá → `404 user_deleted`. Trạng thái user được cache 10 s trong mỗi pod (đã xoá thì cache mãi). Sự kiện tạo tài khoản tới chat-service sau vài trăm ms; client mới đăng ký gặp `404` trong khoảng đó thì thử lại.
 3. **Khi nhận trạng thái `DELETED`** (lần đầu): đặt `users.status = deleted`; với mọi hội thoại trong `user_convs` của user đó:
    - nhóm và kênh: rời hội thoại như khi tự rời (thu hồi subscription kênh như CH1). Nếu người đó là owner: chuyển owner cho admin vào sớm nhất, không có thì cho thành viên vào sớm nhất; hội thoại không còn ai thì giữ nguyên, không còn ai gửi được;
    - DM: giữ nguyên; gửi tin vào DM có người kia đã xoá → `ChatRejected` / `404 user_deleted`.
