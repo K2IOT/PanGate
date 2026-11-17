@@ -285,6 +285,14 @@ public class ChatConfig {
     return new com.pangate.chat.core.PrivacyCache(store, () -> System.nanoTime() / 1_000_000);
   }
 
+  /** CH3 spec §4, §7.2, §3.4 lookups. */
+  @Bean
+  com.pangate.chat.core.StateService stateService(ScyllaChatStore store, RedisChatCache cache,
+      com.pangate.chat.core.PrivacyCache privacy, ChatProperties p) {
+    return new com.pangate.chat.core.StateService(store, new MemberLookup(store, cache), store, store, store, privacy,
+        p.state().listedReceiptsMax(), () -> System.nanoTime() / 1_000_000, System::currentTimeMillis);
+  }
+
   /** CH3 spec §3.4: chat.receipts → marks → receipt pushes. */
   @Bean(destroyMethod = "")
   com.pangate.chat.kafka.ReceiptWorkerLoop receiptWorkerLoop(ChatProperties p, ScyllaChatStore store,

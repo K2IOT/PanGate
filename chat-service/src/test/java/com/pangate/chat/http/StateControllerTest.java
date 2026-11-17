@@ -46,7 +46,10 @@ class StateControllerTest {
     });
     StateIngest state = new StateIngest(new MarkValidator(new MemberLookup(stores, stores),
         new LastSeqCache(stores, () -> 0L), new TokenBucketLimiter(1, 1, () -> 0L), r -> { }), published::add);
-    mvc = MockMvcBuilders.standaloneSetup(new StateController(state)).setControllerAdvice(new ProblemHandler())
+    com.pangate.chat.core.PrivacyCache privacy = new com.pangate.chat.core.PrivacyCache(stores, () -> 0L);
+    mvc = MockMvcBuilders.standaloneSetup(new StateController(state, new com.pangate.chat.core.StateService(stores,
+        new MemberLookup(stores, stores), stores, stores, stores, privacy, 50, () -> 0L, System::currentTimeMillis),
+        stores, privacy)).setControllerAdvice(new ProblemHandler())
         .addFilters(auth).build();
   }
 

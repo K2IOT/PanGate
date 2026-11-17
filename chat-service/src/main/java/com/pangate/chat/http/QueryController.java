@@ -36,9 +36,11 @@ public class QueryController {
   private final SyncService sync;
   private final ChatStores.MemberStore members;
   private final ChatStores.MessageStore messages;
+  private final com.pangate.chat.core.StateService state;
 
   public QueryController(Conversations conversations, SyncService sync, ChatStores.MemberStore members,
-      ChatStores.MessageStore messages) {
+      ChatStores.MessageStore messages, com.pangate.chat.core.StateService state) {
+    this.state = state;
     this.conversations = conversations;
     this.sync = sync;
     this.members = members;
@@ -115,11 +117,10 @@ public class QueryController {
     }
     List<UserConv> page = members.userConvs(userId(req), cursor, n);
     List<Map<String, Object>> out = new ArrayList<>();
+    String viewer = userId(req);
     for (UserConv u : page) {
-      Map<String, Object> m = new LinkedHashMap<>();
-      m.put("id", u.convId());
-      m.put("kind", kindName(u.kind()));
-      m.put("lastSeq", u.lastSeq());
+      // CH3 spec §4: readSeq, deliveredSeq, unread, and the DM peer's marks
+      Map<String, Object> m = state.conversationView(viewer, com.pangate.chat.core.StateService.of(u));
       m.put("lastMsgAt", u.lastMsgAtMs());
       out.add(m);
     }
