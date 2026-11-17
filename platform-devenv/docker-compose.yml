@@ -238,6 +238,10 @@ services:
         condition: service_completed_successfully
       auth:
         condition: service_healthy
+      fake-apns:
+        condition: service_started
+      fake-fcm:
+        condition: service_started
     healthcheck:
       <<: *hc
       test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.notify.tools.HealthCheck",

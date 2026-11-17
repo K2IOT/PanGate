@@ -112,6 +112,13 @@
       <artifactId>testcontainers</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <!-- SendIT: the APNs and FCM stand-ins (offline notifications spec §7) -->
+      <groupId>com.pangate</groupId>
+      <artifactId>gateway-devtools</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
