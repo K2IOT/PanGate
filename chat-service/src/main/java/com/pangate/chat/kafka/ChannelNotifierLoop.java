@@ -146,8 +146,25 @@ public final class ChannelNotifierLoop implements AutoCloseable {
       });
       while (running) {
         try {
+          // final review: a record whose store reads fail is read again, never committed past
+          java.util.Set<TopicPartition> rewound = new java.util.HashSet<>();
+          RuntimeException failed = null;
           for (ConsumerRecord<String, byte[]> r : consumer.poll(Duration.ofMillis(live.isEmpty() ? 500 : 0))) {
-            take(r);
+            TopicPartition tp = new TopicPartition(r.topic(), r.partition());
+            if (rewound.contains(tp)) {
+              continue;
+            }
+            try {
+              take(r);
+            } catch (RuntimeException e) {
+              next.put(tp, r.offset());
+              consumer.seek(tp, r.offset());
+              rewound.add(tp);
+              failed = e;
+            }
+          }
+          if (failed != null) {
+            throw failed;
           }
           for (Job j : List.copyOf(live.values())) {
             step(j);

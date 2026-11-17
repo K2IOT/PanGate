@@ -311,7 +311,7 @@ final class ChatSmoke {
     }
     long t0 = System.nanoTime();
     call("POST", "/v1/conversations/" + dm + "/messages", a, "{\"clientMsgId\":\"" + ulid()
-        + "\",\"text\":\"are you there?\"}", null);
+        + "\",\"text\":\"are you there?\"}", ulid());
     long deadline = System.nanoTime() + T.toNanos();
     while (received(token) < 1) {
       if (System.nanoTime() > deadline) {
@@ -328,7 +328,7 @@ final class ChatSmoke {
     accounts.logout(connectB, deviceB);
     Thread.sleep(2_000);   // the revocation reaches gw.control, notify-service drops the token
     call("POST", "/v1/conversations/" + dm + "/messages", a, "{\"clientMsgId\":\"" + ulid()
-        + "\",\"text\":\"still there?\"}", null);
+        + "\",\"text\":\"still there?\"}", ulid());
     Thread.sleep(5_000);
     if (received(token) != 1) {
       throw new IllegalStateException("a logged-out device was notified");

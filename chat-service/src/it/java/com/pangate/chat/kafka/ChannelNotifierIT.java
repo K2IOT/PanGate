@@ -187,4 +187,18 @@ class ChannelNotifierIT {
       assertThat(Duration.ofNanos(System.nanoTime() - t0)).isGreaterThan(Duration.ofSeconds(2));
     }
   }
+
+  /** Final review: a store failure while a post is taken must not commit past it. */
+  @Test
+  void aStoreOutageWhileTakingAPostLosesNothing() throws Exception {
+    String t = topic();
+    try (ChannelNotifierLoop l = loop(t, "g-" + UUID.randomUUID(), 50_000)) {
+      stores.fail = true;
+      l.start();
+      produce(t, post(ch, 1, System.currentTimeMillis()), ConversationKind.CONVERSATION_KIND_CHANNEL);
+      Thread.sleep(3_000);
+      stores.fail = false;
+      await().atMost(Duration.ofSeconds(30)).until(() -> sent.size() >= FOLLOWERS - 5);
+    }
+  }
 }
