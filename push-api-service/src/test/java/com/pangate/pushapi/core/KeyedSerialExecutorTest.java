@@ -59,4 +59,25 @@ class KeyedSerialExecutorTest {
     assertThat(ex.submit("k", () -> 2).get(2, TimeUnit.SECONDS)).isEqualTo(2);
     assertThat(bad).isCompletedExceptionally();
   }
+
+  /** CI flake on main: whoever sees a result complete must not still see its key pending. */
+  @Test
+  void keyIsReleasedBeforeTheResultCompletes() throws Exception {
+    var pool = Executors.newVirtualThreadPerTaskExecutor();
+    KeyedSerialExecutor ex = new KeyedSerialExecutor(pool);
+    CountDownLatch go = new CountDownLatch(1);
+    CompletableFuture<Integer> f = ex.submit("k", () -> {
+      try {
+        go.await();
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+      return 1;
+    });
+    CompletableFuture<Integer> seen = f.thenApply(v -> ex.pendingKeys());   // runs as f completes
+    go.countDown();
+    assertThat(seen.get(2, TimeUnit.SECONDS)).isZero();
+    assertThat(f.get()).isEqualTo(1);
+    pool.shutdown();
+  }
 }

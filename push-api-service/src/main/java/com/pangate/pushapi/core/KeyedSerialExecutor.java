@@ -21,17 +21,30 @@ public final class KeyedSerialExecutor {
 
   public <T> CompletableFuture<T> submit(String key, Supplier<T> work) {
     CompletableFuture<T> result = new CompletableFuture<>();
+    Object[] out = new Object[1];
+    Throwable[] err = new Throwable[1];
     CompletableFuture<Void> mine = tails.compute(key, (k, prev) -> {
       CompletableFuture<Void> start = prev == null ? CompletableFuture.completedFuture(null) : prev;
       return start.thenRunAsync(() -> {
         try {
-          result.complete(work.get());
+          out[0] = work.get();
         } catch (Throwable t) {
-          result.completeExceptionally(t);
+          err[0] = t;
         }
       }, executor);
     });
-    mine.whenComplete((v, e) -> tails.remove(key, mine));
+    // The key is released before the result completes: whoever sees the result never sees its key still pending
+    // (a flaky pendingKeys() == 1 on CI). mine's completion publishes out/err to this callback.
+    mine.whenComplete((v, e) -> {
+      tails.remove(key, mine);
+      if (err[0] != null) {
+        result.completeExceptionally(err[0]);
+      } else {
+        @SuppressWarnings("unchecked")
+        T value = (T) out[0];
+        result.complete(value);
+      }
+    });
     return result;
   }
 
