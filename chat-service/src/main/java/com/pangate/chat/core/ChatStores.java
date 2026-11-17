@@ -133,14 +133,28 @@ public final class ChatStores {
   }
 
   /** {@code status}: {@code active} or {@code deleted} (account spec §8). */
-  public record UserRecord(String userId, String status, long updatedAtMs) {}
+  /** {@code displayName}: from account.users (CH4 spec §3.2); null when not known yet. */
+  public record UserRecord(String userId, String status, String displayName, long updatedAtMs) {
+    public UserRecord(String userId, String status, long updatedAtMs) {
+      this(userId, status, null, updatedAtMs);
+    }
+  }
 
   /** Users known from account-service's {@code account.users} (account spec §8). */
   public interface UserStore {
     Optional<UserRecord> user(String userId);
 
     /** Writes unconditionally (the caller already compared with what is stored). */
-    void put(String userId, String status, long updatedAtMs);
+    void put(String userId, String status, String displayName, long updatedAtMs);
+
+    default void put(String userId, String status, long updatedAtMs) {
+      put(userId, status, null, updatedAtMs);
+    }
+
+    /** The name for notifications (CH4 spec §3.2); empty when unknown. */
+    default Optional<String> displayName(String userId) {
+      return user(userId).map(UserRecord::displayName).filter(n -> !n.isEmpty());
+    }
   }
 
   public interface MessageStore {

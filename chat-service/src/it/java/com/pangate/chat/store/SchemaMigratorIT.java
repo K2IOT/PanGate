@@ -34,7 +34,7 @@ class SchemaMigratorIT {
 
   @Test
   void migrationIsIdempotent() {
-    assertThat(SchemaMigrator.migrate(session, "chat_it")).isEqualTo(4);   // V1 schema, V2 users (account spec §8), V3 state (CH3 §3.2), V4 presence links
+    assertThat(SchemaMigrator.migrate(session, "chat_it")).isEqualTo(5);   // V1 schema, V2 users (account spec §8), V3 state (CH3 §3.2), V4 presence links, V5 notifications (CH4)
     assertThat(SchemaMigrator.migrate(session, "chat_it")).isZero();
     Set<String> tables = session.execute(
         "SELECT table_name FROM system_schema.tables WHERE keyspace_name = 'chat_it'").all().stream()

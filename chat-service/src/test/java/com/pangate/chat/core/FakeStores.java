@@ -269,8 +269,8 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
     return Optional.ofNullable(users.get(userId));
   }
 
-  @Override public void put(String userId, String status, long updatedAtMs) {
-    users.put(userId, new UserRecord(userId, status, updatedAtMs));
+  @Override public void put(String userId, String status, String displayName, long updatedAtMs) {
+    users.put(userId, new UserRecord(userId, status, displayName, updatedAtMs));
   }
 
   /** Test seeding helper. */

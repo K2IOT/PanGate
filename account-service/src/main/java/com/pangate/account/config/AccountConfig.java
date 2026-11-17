@@ -71,8 +71,9 @@ public class AccountConfig {
 
   @Bean
   com.pangate.account.application.Profiles profiles(AccountStore accounts, AttemptCounter counter,
-      AccountProperties p) {
-    return new com.pangate.account.application.Profiles(accounts, reserved(p), counter, p.limits());
+      AccountProperties p, com.pangate.account.application.port.Outbox outbox,
+      com.pangate.account.application.port.Transactions tx) {
+    return new com.pangate.account.application.Profiles(accounts, reserved(p), counter, p.limits(), outbox, tx);
   }
 
   @Bean

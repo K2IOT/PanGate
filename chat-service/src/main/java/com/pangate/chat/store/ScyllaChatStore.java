@@ -84,8 +84,8 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     deleteMember = s.prepare("DELETE FROM " + ks + ".members WHERE conv_id = ? AND user_id = ?");
     selectMembers = s.prepare("SELECT user_id, role FROM " + ks + ".members WHERE conv_id = ?");
     selectMembersByJoin = s.prepare("SELECT user_id, role, joined_at FROM " + ks + ".members WHERE conv_id = ?");
-    selectUser = s.prepare("SELECT user_id, status, updated_at FROM " + ks + ".users WHERE user_id = ?");
-    upsertUser = s.prepare("INSERT INTO " + ks + ".users (user_id, status, updated_at) VALUES (?, ?, ?)");
+    selectUser = s.prepare("SELECT user_id, status, updated_at, display_name FROM " + ks + ".users WHERE user_id = ?");
+    upsertUser = s.prepare("INSERT INTO " + ks + ".users (user_id, status, updated_at, display_name) VALUES (?, ?, ?, ?)");
     selectMember = s.prepare("SELECT user_id, role FROM " + ks + ".members WHERE conv_id = ? AND user_id = ?");
     joinUserConv = s.prepare("UPDATE " + ks + ".user_convs SET kind = ?, left = false WHERE user_id = ? AND conv_id = ?");
     leaveUserConv = s.prepare("UPDATE " + ks + ".user_convs SET left = true WHERE user_id = ? AND conv_id = ?");
@@ -220,12 +220,12 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   public Optional<ChatStores.UserRecord> user(String userId) {
     Row r = exec(selectUser.bind(userId)).one();
     return r == null ? Optional.empty()
-        : Optional.of(new ChatStores.UserRecord(r.getString(0), r.getString(1), r.getLong(2)));
+        : Optional.of(new ChatStores.UserRecord(r.getString(0), r.getString(1), r.getString(3), r.getLong(2)));
   }
 
   @Override
-  public void put(String userId, String status, long updatedAtMs) {
-    exec(upsertUser.bind(userId, status, updatedAtMs));
+  public void put(String userId, String status, String displayName, long updatedAtMs) {
+    exec(upsertUser.bind(userId, status, updatedAtMs, displayName));
   }
 
   @Override

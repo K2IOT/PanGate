@@ -48,4 +48,27 @@ class AccountsListenerTest {
     l.handle(rec("u", AccountState.Status.STATUS_LOCKED, 2));
     assertThat(stores.userReads.get()).isEqualTo(2);
   }
+
+  static ConsumerRecord<String, byte[]> named(String user, String name, long at) {
+    return new ConsumerRecord<>("account.users", 0, 0, user, AccountState.newBuilder().setUserId(user)
+        .setStatus(AccountState.Status.STATUS_ACTIVE).setDisplayName(name).setUpdatedAtMs(at).build().toByteArray());
+  }
+
+  /** Offline notifications spec §3.2: the sender's name in notifications comes from account.users. */
+  @Test
+  void storesDisplayName() {
+    AccountsListener l = new AccountsListener(null, "account.users", stores, removed::add);
+    l.handle(named("u", "Lan", 1));
+    assertThat(stores.displayName("u")).hasValue("Lan");
+    l.handle(named("u", "Lan Anh", 2));
+    assertThat(stores.displayName("u")).hasValue("Lan Anh");
+  }
+
+  @Test
+  void olderStateDoesNotOverwriteName() {
+    AccountsListener l = new AccountsListener(null, "account.users", stores, removed::add);
+    l.handle(named("u", "New", 5));
+    l.handle(named("u", "Old", 4));
+    assertThat(stores.displayName("u")).hasValue("New");
+  }
 }
