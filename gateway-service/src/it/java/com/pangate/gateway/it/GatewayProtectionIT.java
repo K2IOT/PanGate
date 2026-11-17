@@ -284,7 +284,10 @@ class GatewayProtectionIT {
 
   @Test
   void outboundPressureRaisesShedLevelAndRelievesTheNode() throws Exception {
-    gw = Gw.start("--gateway.outbound-budget=256KB", "--gateway.limits.slow-consumer-timeout=5m");
+    // EPHEMERAL pushes to an unwritable channel are dropped (high-water mark 64 KB), so each paused client holds about
+    // 64 KB in Netty's buffer once its kernel buffer is full: 4 x 64 KB is 256 KB. With a 256 KB budget the ratio
+    // hovered just under 1.0 (0.965 on a CI run) and L5 was never reached; 128 KB puts the floor near 2.0.
+    gw = Gw.start("--gateway.outbound-budget=128KB", "--gateway.limits.slow-consumer-timeout=5m");
     router = FakeRouter.connect(gw.grpc());
     NodeState node = gw.ctx().getBean(NodeState.class);
     com.pangate.gateway.shed.OutboundBudget budget = gw.ctx().getBean(com.pangate.gateway.shed.OutboundBudget.class);
