@@ -118,4 +118,48 @@ class PresenceTrackerTest {
     assertThat(out).isEmpty();
     assertThat(state.conns).isEmpty();
   }
+
+  /** Final review I6: graces live in the shared state, so another pod (or a restarted one) finishes them. */
+  @Test
+  void graceSurvivesARestart() {
+    tracker.on(ev(EventType.EVENT_TYPE_CONNECTED, "a", "n1", "c1"));
+    tracker.on(ev(EventType.EVENT_TYPE_DISCONNECTED, "a", "n1", "c1"));
+    List<PresenceTracker.Transition> other = new CopyOnWriteArrayList<>();
+    PresenceTracker restarted = new PresenceTracker(state, durable, other::add, now::get, Duration.ofSeconds(5));
+    now.set(1_005_000);
+    restarted.tick();
+    assertThat(other).containsExactly(new PresenceTracker.Transition("a", false, 1_000_000));
+  }
+
+  /** Final review I6: a grace whose work failed is retried, not dropped. */
+  @Test
+  void failedGraceWorkIsRetried() {
+    tracker.on(ev(EventType.EVENT_TYPE_CONNECTED, "a", "n1", "c1"));
+    out.clear();
+    tracker.on(ev(EventType.EVENT_TYPE_DISCONNECTED, "a", "n1", "c1"));
+    state.failLastSeenWrites = 1;
+    at(1_005_000);
+    assertThat(out).isEmpty();
+    at(1_007_000);
+    assertThat(out).containsExactly(new PresenceTracker.Transition("a", false, 1_000_000));
+  }
+
+  /** Final review I6: a gone mark older than the grace (its offline was lost) does not swallow the next online. */
+  @Test
+  void staleGoneMarkOnConnectStillEmitsOnline() {
+    state.markGone("a", 1_000_000 - 600_000);
+    tracker.on(ev(EventType.EVENT_TYPE_CONNECTED, "a", "n1", "c1"));
+    assertThat(out).containsExactly(new PresenceTracker.Transition("a", true, 1_000_000));
+    assertThat(state.lastSeen("a")).hasValue(1_000_000 - 600_000);
+  }
+
+  /** Final review I7: NODE_DOWN handled before a late CONNECTED of that node leaves no zombie online. */
+  @Test
+  void nodeDownBeforeALateConnectedLeavesNoZombie() {
+    tracker.on(ConnectionEvent.newBuilder().setType(EventType.EVENT_TYPE_NODE_DOWN).setNodeId("n1").setEpoch(1)
+        .setEventId(Ids.next()).build());
+    tracker.on(ev(EventType.EVENT_TYPE_CONNECTED, "a", "n1", "c1"));
+    assertThat(state.online("a")).isFalse();
+    assertThat(out).isEmpty();
+  }
 }

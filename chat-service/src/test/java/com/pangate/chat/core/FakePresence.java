@@ -16,8 +16,15 @@ public final class FakePresence implements PresenceState {
   public final Map<String, Long> gone = new ConcurrentHashMap<>();
   public final Map<String, Long> lastSeen = new ConcurrentHashMap<>();
   public final Set<String> events = ConcurrentHashMap.newKeySet();
+  public final Map<String, Long> graces = new ConcurrentHashMap<>();
+  public final Set<String> deadNodes = ConcurrentHashMap.newKeySet();
+  /** Fail this many putLastSeen calls. */
+  public volatile int failLastSeenWrites;
 
   @Override public synchronized boolean add(String userId, String node, long epoch, String connId) {
+    if (deadNodes.contains(node + ":" + epoch)) {
+      return false;
+    }
     Set<String> s = conns.computeIfAbsent(userId, k -> new HashSet<>());
     boolean wasEmpty = s.isEmpty();
     s.add(node + "/" + connId);
@@ -43,6 +50,7 @@ public final class FakePresence implements PresenceState {
       }
     }
     byNode.remove(node + ":" + epoch);
+    deadNodes.add(node + ":" + epoch);
     return emptied;
   }
 
@@ -73,6 +81,26 @@ public final class FakePresence implements PresenceState {
   }
 
   @Override public void putLastSeen(String userId, long atMs) {
+    if (failLastSeenWrites > 0) {
+      failLastSeenWrites--;
+      throw new StoreUnavailableException("down", null);
+    }
     lastSeen.put(userId, atMs);
+  }
+
+  @Override public void scheduleGrace(String userId, long dueAtMs) {
+    graces.put(userId, dueAtMs);
+  }
+
+  @Override public List<String> dueGraces(long nowMs) {
+    return graces.entrySet().stream().filter(e -> e.getValue() <= nowMs).map(Map.Entry::getKey).toList();
+  }
+
+  @Override public boolean claimGrace(String userId) {
+    return graces.remove(userId) != null;
+  }
+
+  @Override public void cancelGrace(String userId) {
+    graces.remove(userId);
   }
 }

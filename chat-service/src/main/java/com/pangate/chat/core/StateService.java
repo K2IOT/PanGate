@@ -24,6 +24,8 @@ public final class StateService {
 
   public static final int MAX_UNREAD = 999;
   public static final int STATE_PAGE = 200;
+  /** Final review I5: "now" is this much early, so writes in flight (or on a slower pod clock) are not missed. */
+  public static final long SINCE_MARGIN_MS = 30_000;
   static final long COUNT_TTL_MS = 5_000;
 
   public record StatePage(List<Map<String, Object>> conversations, String cursor, long now) {}
@@ -113,7 +115,7 @@ public final class StateService {
 
   /** CH3 spec §7.2. No {@code since}: every conversation, like {@code GET /v1/conversations}. */
   public StatePage state(String viewer, OptionalLong sinceMs, String cursor) {
-    long now = wallMs.getAsLong();
+    long now = wallMs.getAsLong() - SINCE_MARGIN_MS;   // overlap is harmless: entries are full state
     List<Map<String, Object>> out = new ArrayList<>();
     String next = null;
     if (sinceMs.isEmpty()) {

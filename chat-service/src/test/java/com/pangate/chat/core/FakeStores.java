@@ -117,7 +117,7 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
         new UserConv(convId, null, seq, 0, atMs),
         (o, n) -> n.lastSeq() > o.lastSeq()
             ? new UserConv(convId, o.kind(), n.lastSeq(), o.readSeq(), n.lastMsgAtMs(), o.deliveredSeq()) : o);
-    touchState(userId, convId, atMs);
+    touchState(userId, convId, System.currentTimeMillis());
   }
 
   // --- CH3 marks: each column keeps its max, as USING TIMESTAMP <mark> does in ScyllaDB ---

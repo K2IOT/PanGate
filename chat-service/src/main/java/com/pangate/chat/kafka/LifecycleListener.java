@@ -74,12 +74,20 @@ public final class LifecycleListener implements AutoCloseable {
     try {
       consumer.subscribe(List.of(topic));
       while (running) {
-        var batch = consumer.poll(Duration.ofMillis(200));
-        for (ConsumerRecord<String, byte[]> r : batch) {
-          handle(r);
-        }
-        if (!batch.isEmpty()) {
-          consumer.commitSync();
+        try {
+          var batch = consumer.poll(Duration.ofMillis(200));
+          for (ConsumerRecord<String, byte[]> r : batch) {
+            handle(r);
+          }
+          if (!batch.isEmpty()) {
+            consumer.commitSync();
+          }
+        } catch (WakeupException e) {
+          throw e;
+        } catch (RuntimeException e) {
+          // final review I4: a commit failure (rebalance) must not end presence for this pod
+          meters.counter("chat.presence.errors").increment();
+          log.warn("presence listener step failed: {}", e.toString());
         }
       }
     } catch (WakeupException e) {

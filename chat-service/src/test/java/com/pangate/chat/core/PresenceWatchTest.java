@@ -150,12 +150,24 @@ class PresenceWatchTest {
     privacy.forget("b");   // as PUT /v1/me/privacy does
     pushed.clear();
     fanOut.on(new PresenceTracker.Transition("a", true, now.get()));
-    assertThat(pushed).hasSize(2);
-    PushRequest toMe = pushed.stream().filter(r -> r.getPrincipalId().equals("chat:me")).findFirst().orElseThrow();
-    assertThat(toMe.getDeviceId()).isEqualTo("d1");
-    assertThat(PresenceUpdate.parseFrom(toMe.getPayload()).getStates(0).getOnline()).isTrue();
-    PushRequest toB = pushed.stream().filter(r -> r.getPrincipalId().equals("chat:b")).findFirst().orElseThrow();
-    assertThat(PresenceUpdate.parseFrom(toB.getPayload()).getStates(0).getHidden()).isTrue();
+    // final review C2: a viewer who hides presence gets no push timed to others' transitions
+    assertThat(pushed).singleElement().satisfies(r -> {
+      assertThat(r.getPrincipalId()).isEqualTo("chat:me");
+      assertThat(r.getDeviceId()).isEqualTo("d1");
+    });
+    assertThat(PresenceUpdate.parseFrom(pushed.getFirst().getPayload()).getStates(0).getOnline()).isTrue();
+  }
+
+  /** Final review C2: the transitions of a user who hides presence are pushed to nobody (no timing signal). */
+  @Test
+  void hiddenSubjectTransitionsArePushedToNobody() {
+    watch.watch("me", "d1", of(g, "a"));
+    stores.putPrivacy("a", new ChatStores.Privacy(true, false), 0);
+    privacy.forget("a");
+    pushed.clear();
+    fanOut.on(new PresenceTracker.Transition("a", true, now.get()));
+    fanOut.on(new PresenceTracker.Transition("a", false, now.get()));
+    assertThat(pushed).isEmpty();
   }
 
   @Test

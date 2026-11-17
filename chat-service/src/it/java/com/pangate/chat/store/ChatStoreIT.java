@@ -236,4 +236,13 @@ class ChatStoreIT {
     assertThat(store.privacy("pv1")).isEqualTo(new com.pangate.chat.core.ChatStores.Privacy(true, false));
     assertThat(store.lastSeen("pv1")).hasValue(42_000);
   }
+
+  /** Final review I5: state_at is when the row was written, not the message's sentAt (fan-out runs later). */
+  @Test
+  void touchStampsStateWithWriteTime() {
+    String c = conv(ConversationKind.CONVERSATION_KIND_GROUP, "ws1", "ws2");
+    store.touchUserConv("ws1", c, 3, 1_000);   // a message sent long ago, touched now
+    assertThat(store.changedSince("ws1", System.currentTimeMillis() - 60_000, null, 10))
+        .extracting(com.pangate.chat.core.ChatStores.UserConvState::convId).contains(c);
+  }
 }

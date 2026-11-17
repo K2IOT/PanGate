@@ -74,4 +74,17 @@ class ReceiptAggregatorTest {
     agg.clear();
     assertThat(agg.pending("g")).isFalse();
   }
+
+  /** Final review C3: what came from chat.delivered is kept apart from what a read implied. */
+  @Test
+  void deliveredOnlyIsTrackedApartFromReads() {
+    agg.add(mark("d", "u", 3, 0), ConversationKind.CONVERSATION_KIND_DIRECT);
+    agg.add(mark("d", "u", 0, 5), ConversationKind.CONVERSATION_KIND_DIRECT);
+    agg.add(mark("d", "v", 0, 2), ConversationKind.CONVERSATION_KIND_DIRECT);
+    ms.set(500);
+    assertThat(agg.due()).singleElement().satisfies(f -> {
+      assertThat(f.byUser()).containsEntry("u", new Marks(5, 5));
+      assertThat(f.deliveredOnly()).containsEntry("u", 3L).doesNotContainKey("v");
+    });
+  }
 }

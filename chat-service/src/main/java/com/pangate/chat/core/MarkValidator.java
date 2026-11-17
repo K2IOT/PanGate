@@ -15,6 +15,8 @@ public final class MarkValidator {
   public static final String INVALID = "invalid";
   public static final String NOT_MEMBER = "not_member";
   public static final String RATE_LIMITED = "rate_limited";
+  /** The store or the queue failed: the mark is dropped (the client sends a later one). */
+  public static final String UNAVAILABLE = "unavailable";
 
   private final MemberLookup members;
   private final LastSeqCache lastSeq;
@@ -40,6 +42,11 @@ public final class MarkValidator {
     return c.command();
   }
 
+  /** Counts a mark dropped outside the validation (e.g. the queue refused it). */
+  public void dropped(String reason) {
+    onReject.accept(reason);
+  }
+
   public Checked validate(String userId, String deviceId, ChatMark m, boolean read, long nowMs) {
     if (!Ids.isUlid(m.getConversationId()) || m.getUpToSeq() < 1 || userId == null || userId.isEmpty()) {
       return refused(INVALID);
@@ -50,7 +57,7 @@ public final class MarkValidator {
     if (!perUser.tryAcquire(userId)) {
       return refused(RATE_LIMITED);
     }
-    long seq = Math.min(m.getUpToSeq(), lastSeq.lastSeq(m.getConversationId()));
+    long seq = Math.min(m.getUpToSeq(), lastSeq.lastSeq(m.getConversationId(), m.getUpToSeq()));
     if (seq < 1) {
       return refused(INVALID);
     }

@@ -6,7 +6,10 @@ import java.util.OptionalLong;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 
-/** CH3 spec §6.3: an online/offline transition, pushed to every device watching that user, filtered per viewer. */
+/**
+ * CH3 spec §6.3: an online/offline transition, pushed to every device watching that user. Nothing goes to a pair
+ * that may not see presence (either side hides it, spec §8): a push of any content would time the transition.
+ */
 public final class PresenceFanOut implements Consumer<PresenceTracker.Transition> {
 
   private final Watchers watchers;
@@ -35,11 +38,15 @@ public final class PresenceFanOut implements Consumer<PresenceTracker.Transition
   public int on(PresenceTracker.Transition t) {
     long now = wallMs.getAsLong();
     int n = 0;
+    ChatStores.Privacy subject = privacy.of(t.userId());
     for (String w : watchers.watchersOf(t.userId(), now)) {
       String[] parts = w.split("/", 3);
+      ChatStores.Privacy viewer = privacy.of(parts[0]);
+      if (!PrivacyRules.mayShowPresence(subject, viewer)) {
+        continue;   // final review C2: even a "hidden" push would time the transition
+      }
       PresenceUpdate.State s = PresenceView.state(t.userId(), t.online(),
-          t.online() ? OptionalLong.empty() : OptionalLong.of(t.atMs()), privacy.of(t.userId()), privacy.of(parts[0]),
-          now);
+          t.online() ? OptionalLong.empty() : OptionalLong.of(t.atMs()), subject, viewer, now);
       pusher.send(StatePushes.ephemeral(parts[0], parts[1], ChatTopics.TYPE_PRESENCE,
           PresenceUpdate.newBuilder().addStates(s).build().toByteString(), StatePushes.PRESENCE_TTL_SEC));
       n++;

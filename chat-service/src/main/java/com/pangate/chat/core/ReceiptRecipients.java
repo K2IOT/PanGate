@@ -18,8 +18,9 @@ import java.util.stream.Collectors;
  * CH3 spec §3.4 step 2, §8: the pushes of one flushed window.
  * <ul>
  *   <li>Each reader whose read mark moved: {@code own_read_seq} to all their devices (unread sync).</li>
- *   <li>DM and groups up to {@code listedMax}: every other current member gets the marks that changed; a read mark
- *   the pair may not show (either side hides reads) is sent as 0, delivered stays.</li>
+ *   <li>DM and groups up to {@code listedMax}: every other current member gets the marks that changed. For a pair
+ *   that may not see reads (either side hides them) only a delivered mark from a {@code chat.delivered} command is
+ *   sent, read as 0; a read alone sends nothing, so its timing tells nothing.</li>
  *   <li>Larger groups and channels: nobody else.</li>
  * </ul>
  * Users no longer members are neither listed nor told.
@@ -52,8 +53,17 @@ public final class ReceiptRecipients {
           continue;
         }
         boolean showRead = PrivacyRules.mayShowRead(privacy.apply(e.getKey()), pv);
-        u.addMarks(ReceiptUpdate.Mark.newBuilder().setUserId(e.getKey()).setDeliveredSeq(e.getValue().deliveredSeq())
-            .setReadSeq(showRead ? e.getValue().readSeq() : 0));
+        if (showRead) {
+          u.addMarks(ReceiptUpdate.Mark.newBuilder().setUserId(e.getKey())
+              .setDeliveredSeq(e.getValue().deliveredSeq()).setReadSeq(e.getValue().readSeq()));
+        } else {
+          // final review C3: only a real chat.delivered moves what this pair sees; a read must leave no trace,
+          // not even a push timed to it
+          Long delivered = f.deliveredOnly().get(e.getKey());
+          if (delivered != null && delivered > 0) {
+            u.addMarks(ReceiptUpdate.Mark.newBuilder().setUserId(e.getKey()).setDeliveredSeq(delivered));
+          }
+        }
       }
       if (u.getMarksCount() > 0) {
         out.add(StatePushes.ephemeral(viewer.userId(), "", ChatTopics.TYPE_RECEIPTS, u.build().toByteString(),

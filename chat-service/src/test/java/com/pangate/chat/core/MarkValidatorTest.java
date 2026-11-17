@@ -98,12 +98,12 @@ class MarkValidatorTest {
         .isPresent();
   }
 
+  /** Final review C1: a mark for a message newer than the cached last_seq is checked against a fresh read. */
   @Test
-  void lastSeqIsCachedFor5Seconds() {
-    assertThat(mark("u2", 12, true)).get().extracting(ReceiptCommand::getReadSeq).isEqualTo(10L);
-    stores.lastSeq.put(conv, 12L);
-    assertThat(mark("u2", 12, true)).get().extracting(ReceiptCommand::getReadSeq).isEqualTo(10L);
-    nanos.addAndGet(5_001_000_000L);
-    assertThat(mark("u2", 12, true)).get().extracting(ReceiptCommand::getReadSeq).isEqualTo(12L);
+  void aNewerMessageWithinTheCacheWindowIsNotClamped() {
+    assertThat(mark("u2", 10, true)).get().extracting(ReceiptCommand::getReadSeq).isEqualTo(10L);
+    stores.lastSeq.put(conv, 11L);   // a sends message 11 one second later
+    assertThat(mark("u2", 11, true)).get().extracting(ReceiptCommand::getReadSeq).isEqualTo(11L);
+    assertThat(mark("u2", 15, true)).get().extracting(ReceiptCommand::getReadSeq).isEqualTo(11L);
   }
 }

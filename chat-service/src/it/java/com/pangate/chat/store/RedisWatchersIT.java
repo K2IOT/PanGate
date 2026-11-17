@@ -64,4 +64,19 @@ class RedisWatchersIT {
     w.replace("v4", "dB", List.of(), now + 60_000);
     assertThat(w.devicesWithOpen("C4")).containsExactly("v3/dA");
   }
+
+  /** Final review I8: a connected device re-watching every 4 min keeps its own connection set alive past 24 h. */
+  @Test
+  void rewatchRenewsTheViewersConnectionSet() {
+    w.add("rv1", "n1", 1, "c1");
+    io.lettuce.core.RedisClient raw = io.lettuce.core.RedisClient.create("redis://" + redis.getHost() + ":"
+        + redis.getMappedPort(6379));
+    try (var c = raw.connect()) {
+      c.sync().pexpire("pres:rv1", 2_000);
+      w.replace("rv1", "d1", List.of(e("t9", "C9")), System.currentTimeMillis() + 60_000);
+      assertThat(c.sync().pttl("pres:rv1")).isGreaterThan(3_600_000L);
+    } finally {
+      raw.shutdown();
+    }
+  }
 }

@@ -22,9 +22,17 @@ public final class LastSeqCache {
   }
 
   public long lastSeq(String convId) {
+    return lastSeq(convId, 0);
+  }
+
+  /**
+   * The cached value when it covers {@code wanted}; otherwise a fresh read (final review C1: a mark for a message
+   * newer than the cache must not be clamped back).
+   */
+  public long lastSeq(String convId, long wanted) {
     long now = monoMs.getAsLong();
     Entry e = byConv.get(convId);
-    if (e != null && now < e.until()) {
+    if (e != null && now < e.until() && e.lastSeq() >= wanted) {
       return e.lastSeq();
     }
     if (byConv.size() >= MAX) {

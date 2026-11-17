@@ -275,7 +275,8 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   public void touchUserConv(String userId, String convId, long seq, long atMs) {
     exec(com.datastax.oss.driver.api.core.cql.BatchStatement.newInstance(
         com.datastax.oss.driver.api.core.cql.DefaultBatchType.UNLOGGED,
-        touchUserConv.bind(seq, seq, atMs, userId, convId), stamp(userId, convId, atMs)));
+        touchUserConv.bind(seq, seq, atMs, userId, convId),
+        stamp(userId, convId, System.currentTimeMillis())));   // final review I5: state_at = when written
   }
 
   // --- CH3 marks, state, privacy, last seen -----------------------------------------------------------------------

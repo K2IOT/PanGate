@@ -151,4 +151,31 @@ class ReceiptWorkerIT {
       await().atMost(Duration.ofSeconds(20)).until(() -> r.stores().own("b", g).equals(new Marks(5, 5)));
     }
   }
+
+  /** Final review I4: a Push API that never answers costs one deadline per flush, not one per request. */
+  @Test
+  void hungPushApiDoesNotStallOtherConversations() throws Exception {
+    String t = topic();
+    FakeStores stores = new FakeStores();
+    ReceiptWorkerLoop loop = new ReceiptWorkerLoop(ReceiptWorkerLoop.consumer(kafka.getBootstrapServers(),
+        "rw-" + t), t, stores, new MemberLookup(stores, stores), stores, new PrivacyCache(stores,
+        System::currentTimeMillis), r -> new CompletableFuture<>(), STATE, new SimpleMeterRegistry());
+    try (loop) {
+      List<String> groups = new java.util.ArrayList<>();
+      for (int i = 0; i < 3; i++) {
+        String[] users = new String[20];
+        for (int k = 0; k < 20; k++) {
+          users[k] = "h" + i + "_" + k;
+        }
+        groups.add(conv(stores, ConversationKind.CONVERSATION_KIND_GROUP, users));
+      }
+      loop.start();
+      for (String g : groups) {
+        send(t, read(g, "h" + groups.indexOf(g) + "_1", 3));
+      }
+      // serially that is 3 flushes x 20 requests x 3 tries x 5 s; concurrently a few deadlines
+      await().atMost(Duration.ofSeconds(40)).until(() -> groups.stream().allMatch(g ->
+          stores.own("h" + groups.indexOf(g) + "_1", g).equals(new Marks(3, 3))));
+    }
+  }
 }

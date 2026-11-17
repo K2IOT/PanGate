@@ -63,8 +63,9 @@ public final class TypingRelay {
     if (prev != null && now - prev < PER_USER_MS) {
       return "too_often";
     }
+    boolean large = current.size() > listedMax;
     Long conv = lastByConv.get(convId);
-    if (conv != null && now - conv < PER_CONV_MS) {
+    if (large && conv != null && now - conv < PER_CONV_MS) {   // final review I9: large groups only (spec §5)
       return "conversation_busy";
     }
     if (lastByUser.size() > MAX_KEYS || lastByConv.size() > MAX_KEYS) {
@@ -72,10 +73,12 @@ public final class TypingRelay {
       lastByConv.clear();
     }
     lastByUser.put(userId + "|" + convId, now);
-    lastByConv.put(convId, now);
+    if (large) {
+      lastByConv.put(convId, now);
+    }
     var payload = TypingUpdate.newBuilder().setConversationId(convId).setUserId(userId).setTtlMs(TTL_MS).build()
         .toByteString();
-    if (current.size() <= listedMax) {
+    if (!large) {
       for (Member m : current) {
         if (!m.userId().equals(userId)) {
           send(StatePushes.ephemeral(m.userId(), "", ChatTopics.TYPE_TYPING, payload, StatePushes.TYPING_TTL_SEC));

@@ -74,6 +74,9 @@ public final class RedisPresence implements PresenceState, com.pangate.chat.core
   @Override
   public boolean add(String userId, String node, long epoch, String connId) {
     return call(r -> {
+      if (r.exists("presdead:" + node + ":" + epoch) > 0) {
+        return false;   // final review I7: the node was reported down; this connection is dead
+      }
       long added = r.sadd("pres:" + userId, node + "/" + connId);
       r.expire("pres:" + userId, SET_TTL);
       r.sadd("presnode:" + node + ":" + epoch, userId + "/" + connId);
@@ -104,6 +107,7 @@ public final class RedisPresence implements PresenceState, com.pangate.chat.core
         }
       }
       r.del(key);
+      r.setex("presdead:" + node + ":" + epoch, SET_TTL.toSeconds(), "1");
       return emptied;
     });
   }
@@ -143,6 +147,29 @@ public final class RedisPresence implements PresenceState, com.pangate.chat.core
     call(r -> r.set("lastseen:" + userId, Long.toString(atMs)));
   }
 
+  // --- offline graces (final review I6): one sorted set, score = due time ---
+
+  @Override
+  public void scheduleGrace(String userId, long dueAtMs) {
+    call(r -> r.zadd("presgrace", dueAtMs, userId));
+  }
+
+  @Override
+  public List<String> dueGraces(long nowMs) {
+    return call(r -> r.zrangebyscore("presgrace", io.lettuce.core.Range.create(Double.NEGATIVE_INFINITY,
+        (double) nowMs), io.lettuce.core.Limit.create(0, 1000)));
+  }
+
+  @Override
+  public boolean claimGrace(String userId) {
+    return call(r -> r.zrem("presgrace", userId) == 1);
+  }
+
+  @Override
+  public void cancelGrace(String userId) {
+    call(r -> r.zrem("presgrace", userId));
+  }
+
   // --- watches (CH3 spec §6.3) -------------------------------------------------------------------------------
 
   @Override
@@ -151,6 +178,7 @@ public final class RedisPresence implements PresenceState, com.pangate.chat.core
     call(r -> {
       String dev = viewer + "/" + device;
       String list = "watching:" + dev;
+      r.expire("pres:" + viewer, SET_TTL);   // final review I8: a watching device is connected; keep its set alive
       for (String old : r.smembers(list)) {
         int bar = old.indexOf('|');
         String user = old.substring(0, bar);

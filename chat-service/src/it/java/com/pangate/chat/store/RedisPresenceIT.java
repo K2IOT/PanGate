@@ -68,4 +68,25 @@ class RedisPresenceIT {
     presence.putLastSeen("z1", 99);
     assertThat(presence.lastSeen("z1")).hasValue(99);
   }
+
+  /** Final review I7: after NODE_DOWN, a late CONNECTED of that node is ignored. */
+  @Test
+  void deadNodeConnectionsAreIgnored() {
+    presence.dropNode("n9", 4);
+    assertThat(presence.add("dz", "n9", 4, "c1")).isFalse();
+    assertThat(presence.online("dz")).isFalse();
+    assertThat(presence.add("dz", "n9", 5, "c1")).isTrue();   // the node's next epoch is alive
+  }
+
+  /** Final review I6: the grace queue is shared and each due grace is claimed once. */
+  @Test
+  void graceQueueIsClaimedOnce() {
+    presence.scheduleGrace("gq1", 1_000);
+    presence.scheduleGrace("gq2", 9_000);
+    assertThat(presence.dueGraces(5_000)).contains("gq1").doesNotContain("gq2");
+    assertThat(presence.claimGrace("gq1")).isTrue();
+    assertThat(presence.claimGrace("gq1")).isFalse();
+    presence.cancelGrace("gq2");
+    assertThat(presence.dueGraces(10_000)).doesNotContain("gq2");
+  }
 }

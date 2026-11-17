@@ -94,11 +94,16 @@ class StateApiIT {
     s.send("tb", g1, "z");
     await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
       JsonNode changed = s.json(s.call("GET", "/v1/state?since=" + now, "ta", null));
-      assertThat(changed.get("conversations")).singleElement().satisfies(c -> {
-        assertThat(c.get("id").asText()).isEqualTo(g1);
-        assertThat(c.get("lastSeq").asLong()).isEqualTo(2);
-        assertThat(c.get("unread").asInt()).isEqualTo(1);
-      });
+      // "now" is 30 s early (final review I5): overlap is allowed, the new state of g1 must be there
+      JsonNode c1 = null;
+      for (JsonNode c : changed.get("conversations")) {
+        if (c.get("id").asText().equals(g1)) {
+          c1 = c;
+        }
+      }
+      assertThat(c1).isNotNull();
+      assertThat(c1.get("lastSeq").asLong()).isEqualTo(2);
+      assertThat(c1.get("unread").asInt()).isEqualTo(1);
       assertThat(changed.get("now").asLong()).isGreaterThan(now);
     });
   }

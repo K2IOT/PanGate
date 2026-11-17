@@ -41,12 +41,18 @@ public final class StateIngest implements StateCommands {
 
   @Override
   public String mark(String userId, String deviceId, ChatMark m, boolean read) {
-    Optional<ReceiptCommand> c = marks.check(userId, deviceId, m, read, wallMs.getAsLong());
-    if (c.isEmpty()) {
+    try {
+      Optional<ReceiptCommand> c = marks.check(userId, deviceId, m, read, wallMs.getAsLong());
+      if (c.isEmpty()) {
+        return "rejected";
+      }
+      sink.publish(c.get());
+      return "accepted";
+    } catch (QueueUnavailableException | StoreUnavailableException e) {
+      // final review I10: a mark is a hint (spec §3.3, §9); it must not hold the upstream partition (chat.send)
+      marks.dropped(MarkValidator.UNAVAILABLE);
       return "rejected";
     }
-    sink.publish(c.get());
-    return "accepted";
   }
 
   /** The HTTP path (CH3 spec §3.3): "" when published, else the {@link MarkValidator} reason. */

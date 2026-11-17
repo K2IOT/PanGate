@@ -104,11 +104,29 @@ class ReceiptRecipientsTest {
     assertThat(out).singleElement().satisfies(r -> assertThat(r.getPrincipalId()).isEqualTo("chat:u1"));
   }
 
+  static ReceiptAggregator.Flush flush(ConversationKind kind, Map<String, Marks> byUser,
+      Map<String, Long> deliveredOnly) {
+    return new ReceiptAggregator.Flush("c1", kind, byUser, deliveredOnly);
+  }
+
+  /** Final review C3: a hidden read alone must produce no push to others (its timing would say "seen"). */
+  @Test
+  void hiddenReadAloneSendsNothingToOthers() throws Exception {
+    Function<String, Privacy> privacy = u -> u.equals("u0") ? new Privacy(false, true) : Privacy.OPEN;
+    List<PushRequest> out = ReceiptRecipients.plan(flush(ConversationKind.CONVERSATION_KIND_DIRECT,
+        Map.of("u0", new Marks(4, 4))), members(2), privacy, 50);
+    assertThat(to(out, "u1")).isEmpty();
+    assertThat(payload(to(out, "u0").getFirst()).getOwnReadSeq()).isEqualTo(4);   // own sync stays (S4)
+    Function<String, Privacy> viewerHides = u -> u.equals("u1") ? new Privacy(false, true) : Privacy.OPEN;
+    assertThat(to(ReceiptRecipients.plan(flush(ConversationKind.CONVERSATION_KIND_DIRECT,
+        Map.of("u0", new Marks(4, 4))), members(2), viewerHides, 50), "u1")).isEmpty();
+  }
+
   @Test
   void hideReadZeroesReadButKeepsDelivered() throws Exception {
     Function<String, Privacy> privacy = u -> u.equals("u0") ? new Privacy(false, true) : Privacy.OPEN;
     List<PushRequest> out = ReceiptRecipients.plan(flush(ConversationKind.CONVERSATION_KIND_DIRECT,
-        Map.of("u0", new Marks(4, 3))), members(2), privacy, 50);
+        Map.of("u0", new Marks(4, 3)), Map.of("u0", 4L)), members(2), privacy, 50);
     assertThat(payload(to(out, "u1").getFirst()).getMarksList()).singleElement().satisfies(m -> {
       assertThat(m.getDeliveredSeq()).isEqualTo(4);
       assertThat(m.getReadSeq()).isZero();
@@ -118,7 +136,7 @@ class ReceiptRecipientsTest {
     // reciprocal: a viewer who hides reads sees nobody's
     Function<String, Privacy> viewerHides = u -> u.equals("u1") ? new Privacy(false, true) : Privacy.OPEN;
     List<PushRequest> out2 = ReceiptRecipients.plan(flush(ConversationKind.CONVERSATION_KIND_DIRECT,
-        Map.of("u0", new Marks(4, 3))), members(2), viewerHides, 50);
+        Map.of("u0", new Marks(4, 3)), Map.of("u0", 4L)), members(2), viewerHides, 50);
     assertThat(payload(to(out2, "u1").getFirst()).getMarks(0).getReadSeq()).isZero();
   }
 

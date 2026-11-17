@@ -35,4 +35,14 @@ class StateServiceTest {
         ConversationKind.CONVERSATION_KIND_CHANNEL, row.lastSeq(), row.readSeq(), row.deliveredSeq(), 0));
     assertThat(v).containsEntry("lastSeq", 30L).containsEntry("readSeq", 25L).containsEntry("unread", 5);
   }
+
+  /** Final review I5: "now" leaves a margin, so a change written just before it (or by a slower pod) is not missed. */
+  @Test
+  void stateNowLeavesAMarginForInFlightWrites() {
+    FakeStores stores = new FakeStores();
+    StateService state = new StateService(stores, new MemberLookup(stores, stores), stores, stores, stores,
+        new PrivacyCache(stores, () -> 0L), 50, () -> 0L, () -> 100_000L);
+    assertThat(state.state("u", java.util.OptionalLong.empty(), null).now()).isEqualTo(100_000 - StateService.SINCE_MARGIN_MS);
+    assertThat(StateService.SINCE_MARGIN_MS).isEqualTo(30_000);
+  }
 }

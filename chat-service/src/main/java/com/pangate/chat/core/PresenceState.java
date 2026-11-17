@@ -9,13 +9,16 @@ import java.util.OptionalLong;
  */
 public interface PresenceState {
 
-  /** True when the user had no connection before. */
+  /**
+   * True when the user had no connection before. A connection of a node already reported down (NODE_DOWN tombstone,
+   * 24 h) is ignored: a late CONNECTED must not resurrect it (final review I7).
+   */
   boolean add(String userId, String node, long epoch, String connId);
 
   /** True when this removed the user's last connection. */
   boolean remove(String userId, String node, long epoch, String connId);
 
-  /** Drops every connection of a node; returns the users left with none. */
+  /** Drops every connection of a node and remembers it as down; returns the users left with none. */
   List<String> dropNode(String node, long epoch);
 
   boolean online(String userId);
@@ -33,4 +36,15 @@ public interface PresenceState {
   OptionalLong lastSeen(String userId);
 
   void putLastSeen(String userId, long atMs);
+
+  /** The offline graces, shared by every pod (final review I6): due at {@code dueAtMs}. */
+  void scheduleGrace(String userId, long dueAtMs);
+
+  /** Users whose grace is due. */
+  List<String> dueGraces(long nowMs);
+
+  /** Takes a due grace; true for exactly one caller. */
+  boolean claimGrace(String userId);
+
+  void cancelGrace(String userId);
 }

@@ -46,6 +46,7 @@ public final class ReceiptWorkerLoop implements AutoCloseable {
 
   public static final String GROUP = "chat-receipts";
   static final int PUSH_TRIES = 3;
+  static final Duration ROUND_DEADLINE = Duration.ofSeconds(3);
   static final long MAX_BACKOFF_MS = 5_000;
   static final int MAX_KINDS = 100_000;
 
@@ -118,16 +119,32 @@ public final class ReceiptWorkerLoop implements AutoCloseable {
             take(r);
           }
           ok = flushDue();
+          if (ok) {
+            commit();
+            backoff = 100;
+          }
+        } catch (WakeupException e) {
+          throw e;
         } catch (com.pangate.chat.core.StoreUnavailableException e) {
           meters.counter("chat.receipts.store.failures").increment();
           log.warn("receipt worker: store unavailable: {}", e.toString());
           ok = false;
+        } catch (RuntimeException e) {
+          // final review I4: a commit failure (rebalance) or anything unexpected rewinds; it never ends the thread
+          meters.counter("chat.receipts.errors").increment();
+          log.warn("receipt worker step failed: {}", e.toString());
+          ok = false;
         }
-        if (ok) {
-          commit();
-          backoff = 100;
-        } else {
-          rewind();
+        if (!ok) {
+          try {
+            rewind();
+          } catch (WakeupException e) {
+            throw e;
+          } catch (RuntimeException e) {
+            log.warn("receipt worker rewind failed: {}", e.toString());
+            reset();
+            Thread.sleep(backoff);
+          }
         }
       }
     } catch (WakeupException e) {
@@ -203,26 +220,41 @@ public final class ReceiptWorkerLoop implements AutoCloseable {
     return true;
   }
 
+  /** Final review I4: every push of a flush at once, one deadline per round, at most {@link #PUSH_TRIES} rounds. */
   private void push(List<PushRequest> requests) {
-    for (PushRequest r : requests) {
-      String result = "dropped";
-      for (int i = 0; i < PUSH_TRIES && running; i++) {
+    List<PushRequest> pending = requests;
+    for (int round = 0; round < PUSH_TRIES && running && !pending.isEmpty(); round++) {
+      List<java.util.concurrent.CompletableFuture<PushResponse>> sent = new java.util.ArrayList<>(pending.size());
+      for (PushRequest r : pending) {
         try {
-          PushResponse res = pusher.send(r).get(5, TimeUnit.SECONDS);
+          sent.add(pusher.send(r));
+        } catch (RuntimeException e) {
+          sent.add(java.util.concurrent.CompletableFuture.failedFuture(e));
+        }
+      }
+      long deadline = System.nanoTime() + ROUND_DEADLINE.toNanos();
+      List<PushRequest> retry = new java.util.ArrayList<>();
+      for (int i = 0; i < pending.size(); i++) {
+        boolean ok = false;
+        try {
+          PushResponse res = sent.get(i).get(Math.max(1, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
           String code = res.getCode().name();
-          if (!code.endsWith("UNAVAILABLE") && !code.endsWith("RATE_LIMITED")) {
-            result = "ok";
-            break;
-          }
+          ok = !code.endsWith("UNAVAILABLE") && !code.endsWith("RATE_LIMITED");
         } catch (InterruptedException e) {
           Thread.currentThread().interrupt();
           return;
         } catch (Exception e) {
-          // retried
+          // timed out or failed: retried next round
+        }
+        if (ok) {
+          meters.counter("chat.receipts.pushes", "result", "ok").increment();
+        } else {
+          retry.add(pending.get(i));
         }
       }
-      meters.counter("chat.receipts.pushes", "result", result).increment();
+      pending = retry;
     }
+    meters.counter("chat.receipts.pushes", "result", "dropped").increment(pending.size());
   }
 
   private void commit() {

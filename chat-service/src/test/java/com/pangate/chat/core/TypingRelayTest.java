@@ -107,9 +107,19 @@ class TypingRelayTest {
         .containsExactlyInAnyOrder("chat:u1", "chat:u2", "chat:u3", "chat:u4");
   }
 
+  /** Final review I9: in a DM or small group two people typing are both relayed. */
+  @Test
+  void twoTypersInASmallConversationAreBothRelayed() {
+    String d = conv(ConversationKind.CONVERSATION_KIND_DIRECT, 2);
+    assertThat(relay.typing("u0", d)).isEqualTo("relayed");
+    ms.addAndGet(300);
+    assertThat(relay.typing("u1", d)).isEqualTo("relayed");
+  }
+
+  /** Spec §5 "Nhóm lớn": the per-conversation cap is for groups above listedMax. */
   @Test
   void perConversationFanOutAtMostOncePerSecond() {
-    String g = conv(ConversationKind.CONVERSATION_KIND_GROUP, 5);
+    String g = conv(ConversationKind.CONVERSATION_KIND_GROUP, 60);
     assertThat(relay.typing("u0", g)).isEqualTo("relayed");
     ms.addAndGet(500);
     assertThat(relay.typing("u1", g)).isEqualTo("conversation_busy");

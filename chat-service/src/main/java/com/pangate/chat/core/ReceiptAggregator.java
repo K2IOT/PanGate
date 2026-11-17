@@ -18,12 +18,22 @@ import java.util.function.LongSupplier;
  */
 public final class ReceiptAggregator {
 
-  public record Flush(String convId, ConversationKind kind, Map<String, Marks> byUser) {}
+  /**
+   * {@code deliveredOnly}: per user, the highest delivered mark that came from a {@code chat.delivered} command (not
+   * implied by a read): what may be shown to a viewer who may not see that user's reads (final review C3).
+   */
+  public record Flush(String convId, ConversationKind kind, Map<String, Marks> byUser,
+      Map<String, Long> deliveredOnly) {
+    public Flush(String convId, ConversationKind kind, Map<String, Marks> byUser) {
+      this(convId, kind, byUser, Map.of());
+    }
+  }
 
   private static final class Pending {
     final ConversationKind kind;
     final long dueAt;
     final Map<String, Marks> byUser = new LinkedHashMap<>();
+    final Map<String, Long> deliveredOnly = new LinkedHashMap<>();
 
     Pending(ConversationKind kind, long dueAt) {
       this.kind = kind;
@@ -51,6 +61,9 @@ public final class ReceiptAggregator {
     Pending p = byConv.computeIfAbsent(c.getConversationId(), k -> new Pending(kind, monoMs.getAsLong() + window));
     long read = c.getReadSeq();
     long delivered = Math.max(c.getDeliveredSeq(), read);
+    if (read == 0 && c.getDeliveredSeq() > 0) {
+      p.deliveredOnly.merge(c.getUserId(), c.getDeliveredSeq(), Math::max);
+    }
     p.byUser.merge(c.getUserId(), new Marks(delivered, read),
         (o, n) -> new Marks(Math.max(o.deliveredSeq(), n.deliveredSeq()), Math.max(o.readSeq(), n.readSeq())));
   }
@@ -62,7 +75,8 @@ public final class ReceiptAggregator {
     for (Iterator<Map.Entry<String, Pending>> it = byConv.entrySet().iterator(); it.hasNext(); ) {
       Map.Entry<String, Pending> e = it.next();
       if (now >= e.getValue().dueAt) {
-        out.add(new Flush(e.getKey(), e.getValue().kind, Map.copyOf(e.getValue().byUser)));
+        out.add(new Flush(e.getKey(), e.getValue().kind, Map.copyOf(e.getValue().byUser),
+            Map.copyOf(e.getValue().deliveredOnly)));
         it.remove();
       }
     }
