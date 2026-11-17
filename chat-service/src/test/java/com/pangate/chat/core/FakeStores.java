@@ -15,7 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /** In-memory stores for core tests (same contracts as ScyllaChatStore / RedisChatCache). */
 public final class FakeStores implements ChatStores.ConversationStore, ChatStores.MemberStore, ChatStores.MessageStore,
     ChatStores.DedupStore, ChatStores.MemberCache, ChatStores.UserStore, ChatStores.MarkStore,
-    ChatStores.SettingsStore, ChatStores.LastSeenStore {
+    ChatStores.SettingsStore, ChatStores.LastSeenStore, ChatStores.MuteStore {
 
   public static final com.pangate.chat.config.ChatProperties.Limits LIMITS =
       new com.pangate.chat.config.ChatProperties.Limits(20, 40, 50, 100, 500, 4096, 50);
@@ -203,10 +203,29 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
   }
 
   @Override public synchronized void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead,
-      long atMs) {
+      Boolean hidePreview, long atMs) {
     ChatStores.Privacy cur = privacy(userId);
     privacy.put(userId, new ChatStores.Privacy(hidePresence == null ? cur.hidePresence() : hidePresence,
-        hideRead == null ? cur.hideRead() : hideRead));
+        hideRead == null ? cur.hideRead() : hideRead, hidePreview == null ? cur.hidePreview() : hidePreview));
+  }
+
+  /** CH4 §3.3: {@code conv|user} → muted until. */
+  public final Map<String, Long> mutes = new ConcurrentHashMap<>();
+
+  @Override public void setMute(String convId, String userId, long mutedUntil) {
+    if (members.getOrDefault(convId, Map.of()).containsKey(userId)) {
+      mutes.put(convId + "|" + userId, mutedUntil);
+    }
+  }
+
+  @Override public long mutedUntil(String convId, String userId) {
+    return mutes.getOrDefault(convId + "|" + userId, 0L);
+  }
+
+  @Override public List<ChatStores.MemberMute> membersPage(String convId, String afterUserId, int limit) {
+    return members.getOrDefault(convId, Map.of()).keySet().stream().sorted()
+        .filter(u -> u.compareTo(afterUserId == null ? "" : afterUserId) > 0).limit(limit)
+        .map(u -> new ChatStores.MemberMute(u, mutedUntil(convId, u))).toList();
   }
 
   @Override public java.util.OptionalLong lastSeen(String userId) {

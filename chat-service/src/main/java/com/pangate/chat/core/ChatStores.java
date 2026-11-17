@@ -20,11 +20,31 @@ public final class ChatStores {
   public record Member(String userId, Role role) {}
 
   /** One row of a user's inbox; {@code deliveredSeq} / {@code readSeq} are the user's own marks (CH3 §3.2). */
+  /** {@code mutedUntil}: CH4 §3.3, 0 = not muted, {@link Long#MAX_VALUE} = for ever. */
   public record UserConv(String convId, ConversationKind kind, long lastSeq, long readSeq, long lastMsgAtMs,
-      long deliveredSeq) {
-    public UserConv(String convId, ConversationKind kind, long lastSeq, long readSeq, long lastMsgAtMs) {
-      this(convId, kind, lastSeq, readSeq, lastMsgAtMs, 0);
+      long deliveredSeq, long mutedUntil) {
+    public UserConv(String convId, ConversationKind kind, long lastSeq, long readSeq, long lastMsgAtMs,
+        long deliveredSeq) {
+      this(convId, kind, lastSeq, readSeq, lastMsgAtMs, deliveredSeq, 0);
     }
+
+    public UserConv(String convId, ConversationKind kind, long lastSeq, long readSeq, long lastMsgAtMs) {
+      this(convId, kind, lastSeq, readSeq, lastMsgAtMs, 0, 0);
+    }
+  }
+
+  /** A member as the channel notifier pages them (CH4 §4.2). */
+  public record MemberMute(String userId, long mutedUntil) {}
+
+  /** Mute per conversation (CH4 §3.3); written only for an existing member row. */
+  public interface MuteStore {
+    void setMute(String convId, String userId, long mutedUntil);
+
+    /** 0 when not muted or not a member. */
+    long mutedUntil(String convId, String userId);
+
+    /** Members after {@code afterUserId} ("" = from the start), in user id order. */
+    List<MemberMute> membersPage(String convId, String afterUserId, int limit);
   }
 
   /** A user's delivered / read marks in one conversation (CH3 §3.1); 0 = none. */
@@ -39,8 +59,13 @@ public final class ChatStores {
       long stateAtMs) {}
 
   /** CH3 §8: what a user hides from others (and, reciprocally, does not see of others). */
-  public record Privacy(boolean hidePresence, boolean hideRead) {
-    public static final Privacy OPEN = new Privacy(false, false);
+  public record Privacy(boolean hidePresence, boolean hideRead, boolean hidePreview) {
+    public static final Privacy OPEN = new Privacy(false, false, false);
+
+    /** CH3 settings only; the preview shows (CH4 §3.4). */
+    public Privacy(boolean hidePresence, boolean hideRead) {
+      this(hidePresence, hideRead, false);
+    }
   }
 
   /**
@@ -81,10 +106,14 @@ public final class ChatStores {
      * Writes only the fields given (null = unchanged), so concurrent updates of different fields both stick (Codex
      * review of PR #6).
      */
-    void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead, long atMs);
+    void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead, Boolean hidePreview, long atMs);
+
+    default void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead, long atMs) {
+      updatePrivacy(userId, hidePresence, hideRead, null, atMs);
+    }
 
     default void putPrivacy(String userId, Privacy p, long atMs) {
-      updatePrivacy(userId, p.hidePresence(), p.hideRead(), atMs);
+      updatePrivacy(userId, p.hidePresence(), p.hideRead(), p.hidePreview(), atMs);
     }
   }
 

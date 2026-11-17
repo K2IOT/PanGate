@@ -24,7 +24,8 @@ public class StateController {
   public record MarkBody(Long upToSeq) {}
 
   /** {@code PUT /v1/me/privacy} body; a missing field keeps its value. */
-  public record PrivacyBody(Boolean hidePresence, Boolean hideRead) {}
+  /** {@code hidePreview}: CH4 spec §3.4, notifications without the sender or the text. */
+  public record PrivacyBody(Boolean hidePresence, Boolean hideRead, Boolean hidePreview) {}
 
   private final StateIngest state;
   private final com.pangate.chat.core.StateService views;
@@ -96,7 +97,7 @@ public class StateController {
   @GetMapping("/v1/me/privacy")
   public Map<String, Object> getPrivacy(HttpServletRequest req) {
     var p = settings.privacy(AuthFilter.caller(req).userId());
-    return Map.of("hidePresence", p.hidePresence(), "hideRead", p.hideRead());
+    return Map.of("hidePresence", p.hidePresence(), "hideRead", p.hideRead(), "hidePreview", p.hidePreview());
   }
 
   @PutMapping(path = "/v1/me/privacy", consumes = "application/json")
@@ -106,7 +107,7 @@ public class StateController {
     }
     String user = AuthFilter.caller(req).userId();
     // Codex review of PR #6: only the fields given are written, with no read first, so concurrent PUTs both stick
-    settings.updatePrivacy(user, body.hidePresence(), body.hideRead(), System.currentTimeMillis());
+    settings.updatePrivacy(user, body.hidePresence(), body.hideRead(), body.hidePreview(), System.currentTimeMillis());
     privacy.forget(user);
     return ResponseEntity.noContent().build();
   }
