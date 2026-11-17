@@ -1,0 +1,12 @@
+# Container in `make up` (platform-devenv/docker-compose.yml).
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/pangate
+    username: pangate
+    password: pangate
+notify:
+  auth:
+    issuer: http://auth:8090
+    jwks-uri: http://auth:8090/.well-known/jwks.json
+  kafka: { bootstrap: "kafka:29092" }
+  redis: { uri: "redis://redis:6379" }
