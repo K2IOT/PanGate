@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### account-service (CH2, accounts)
+- New module `account-service` (spec `docs/superpowers/specs/2026-11-16-account-service-design.md`): accounts of the
+  chat app on PostgreSQL (schema `account`):
+  - register and log in with email, phone or username + password (Argon2id, hashing gate per pod); attempt limits
+    per login + IP, per IP and per login (slow-down only), shared through Redis;
+  - one session per device: refresh token (`rt_…`, SHA-256 stored) exchanged for a 10-minute connect token from
+    auth-service; list and log out devices;
+  - profiles, exact username lookup, batch lookup; username, email, phone and password changes;
+  - admin API on the management port (`accounts:admin`): look up, lock / unlock, reset password, delete;
+  - outbox with two independent relays: `AccountState` to the compacted `account.users`, revocations to
+    auth-service (`device`; `principal` only when an account is deleted).
+- chat-service: `users` table from `account.users`; unknown or deleted users are refused (`user_not_found`,
+  `user_deleted`); a deleted account leaves its groups and channels (owner passed on), its DMs take no new messages.
+- Contracts: `account.proto` (`AccountState`), `AccountTopics`.
+- auth-service: scope `accounts:admin`, seed client `chat-admin`; the exec classifier at plugin level so the plain
+  jar stays a library.
+- Devenv: `account` service (8088 / 8089), topic `account.users`; `make smoke` adds the `ACCOUNT …` steps and runs the
+  chat steps with real accounts (`devtools smoke --account --account-admin`, `devtools account …`).
+- ADR 0033–0036.
+
 ### chat-service (CH1, chat core)
 - New module `chat-service` (spec `docs/superpowers/specs/2026-11-12-chat-core-design.md`), the first sub-project of
   the chat app on tenant `chat`:

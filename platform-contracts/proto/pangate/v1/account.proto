@@ -1,0 +1,21 @@
+// App chat, sub-project CH2 (account spec §6): the current state of each account on the compacted topic
+// account.users (key = user_id, never a tombstone). Additive only.
+syntax = "proto3";
+
+package pangate.v1;
+
+option java_package = "com.pangate.contracts.v1";
+option java_multiple_files = true;
+
+message AccountState {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_ACTIVE = 1;
+    STATUS_LOCKED = 2;
+    STATUS_DELETED = 3;
+  }
+  string user_id = 1;
+  Status status = 2;
+  // lets a consumer skip a state older than the one it has
+  int64 updated_at_ms = 3;
+}

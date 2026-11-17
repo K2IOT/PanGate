@@ -30,6 +30,9 @@ class QueryApiIT {
   @BeforeAll
   static void boot() throws Exception {
     s = new ChatStack().start();
+    // account spec §8: only users published on account.users join conversations
+    com.pangate.chat.support.KnownUsers.add(s.kafka.getBootstrapServers(), s.chat, "su", "sx", "sy", "sz", "ha",
+        "hb", "pa", "pb", "ra", "rb", "rc", "fan", "x");
   }
 
   @AfterAll

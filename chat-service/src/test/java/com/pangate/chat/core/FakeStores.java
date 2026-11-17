@@ -4,6 +4,7 @@ import com.pangate.chat.core.ChatStores.Conversation;
 import com.pangate.chat.core.ChatStores.Member;
 import com.pangate.chat.core.ChatStores.StoredMessage;
 import com.pangate.chat.core.ChatStores.UserConv;
+import com.pangate.chat.core.ChatStores.UserRecord;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -13,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** In-memory stores for core tests (same contracts as ScyllaChatStore / RedisChatCache). */
 public final class FakeStores implements ChatStores.ConversationStore, ChatStores.MemberStore, ChatStores.MessageStore,
-    ChatStores.DedupStore, ChatStores.MemberCache {
+    ChatStores.DedupStore, ChatStores.MemberCache, ChatStores.UserStore {
 
   public static final com.pangate.chat.config.ChatProperties.Limits LIMITS =
       new com.pangate.chat.config.ChatProperties.Limits(20, 40, 50, 100, 500, 4096, 50);
@@ -26,6 +27,10 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
   public final Map<String, Long> lastSeq = new ConcurrentHashMap<>();
   public final Map<String, String> dms = new ConcurrentHashMap<>();
   public final Map<String, List<Member>> cache = new ConcurrentHashMap<>();
+  public final Map<String, UserRecord> users = new ConcurrentHashMap<>();
+  /** convId|userId → join order, for membersByJoin. */
+  public final Map<String, Long> joined = new ConcurrentHashMap<>();
+  private final java.util.concurrent.atomic.AtomicLong joins = new java.util.concurrent.atomic.AtomicLong();
   public int reserveCalls;
   public boolean fail;
   /** Fail this many message writes / inbox touches (then succeed). */
@@ -79,6 +84,7 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
   @Override public void add(String convId, Member m) {
     check();
     members.computeIfAbsent(convId, k -> new ConcurrentHashMap<>()).put(m.userId(), m);
+    joined.putIfAbsent(convId + "|" + m.userId(), joins.incrementAndGet());
     Conversation c = convs.get(convId);
     userConvs.computeIfAbsent(m.userId(), k -> new ConcurrentHashMap<>())
         .putIfAbsent(convId, new UserConv(convId, c == null ? null : c.kind(), 0, 0, 0));
@@ -141,6 +147,32 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
       return false;
     }
     cache.remove(convId);
+    return true;
+  }
+
+  @Override public List<Member> membersByJoin(String convId) {
+    return members(convId).stream()
+        .sorted(Comparator.comparingLong((Member m) -> joined.getOrDefault(convId + "|" + m.userId(), 0L))).toList();
+  }
+
+  public final java.util.concurrent.atomic.AtomicInteger userReads = new java.util.concurrent.atomic.AtomicInteger();
+
+  @Override public Optional<UserRecord> user(String userId) {
+    userReads.incrementAndGet();
+    return Optional.ofNullable(users.get(userId));
+  }
+
+  @Override public void put(String userId, String status, long updatedAtMs) {
+    users.put(userId, new UserRecord(userId, status, updatedAtMs));
+  }
+
+  /** Test seeding helper. */
+  public boolean upsertIfNewer(String userId, String status, long updatedAtMs) {
+    UserRecord prior = users.get(userId);
+    if (prior != null && prior.updatedAtMs() > updatedAtMs) {
+      return false;
+    }
+    users.put(userId, new UserRecord(userId, status, updatedAtMs));
     return true;
   }
 }

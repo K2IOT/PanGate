@@ -8,4 +8,6 @@ public record Rejection(String reason, String detail) {
   public static final String NOT_FOUND = "not_found";
   public static final String NOT_MEMBER = "not_member";
   public static final String RATE_LIMITED = "rate_limited";
+  /** account spec §8: the other side of a DM deleted the account. */
+  public static final String USER_DELETED = "user_deleted";
 }

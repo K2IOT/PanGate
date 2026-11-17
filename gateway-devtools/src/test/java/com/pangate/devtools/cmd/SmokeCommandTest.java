@@ -71,14 +71,33 @@ class SmokeCommandTest {
     StringWriter err = new StringWriter();
     int code = run(err, "smoke", "--url", "wss://localhost:1/v1/ws", "--auth-url", "http://localhost:1",
         "--client-file", "/nonexistent.json", "--insecure", "--push-api", "http://localhost:2", "--chat",
-        "http://localhost:3");
+        "http://localhost:3", "--account", "http://localhost:4", "--account-admin", "http://localhost:5");
     assertThat(code).isEqualTo(1);   // ran (and failed to reach auth), no usage error
     assertThat(err.toString()).doesNotContain("--chat");
   }
 
+  /** account spec §8: chat-service only lets known users into conversations, so the chat steps need real accounts. */
   @Test
-  void chatUsersAreFreshPerRun() {
-    assertThat(ChatSmoke.user("a")).startsWith("smoke-a-").isNotEqualTo(ChatSmoke.user("a"));
+  void chatNeedsAccounts() {
+    StringWriter err = new StringWriter();
+    int code = run(err, "smoke", "--url", "wss://localhost:1/v1/ws", "--auth-url", "http://localhost:1",
+        "--client-file", "/nonexistent.json", "--insecure", "--push-api", "http://localhost:2", "--chat",
+        "http://localhost:3");
+    assertThat(code).isEqualTo(2);
+    assertThat(err.toString()).contains("--chat").contains("--account");
+  }
+
+  /** account spec §10: five account steps run before the chat steps. */
+  @Test
+  void accountFlagAddsAccountSteps() {
+    assertThat(AccountSmoke.STEPS).containsExactly("ACCOUNT register", "ACCOUNT login", "ACCOUNT device logout",
+        "ACCOUNT lock", "ACCOUNT unlock");
+  }
+
+  @Test
+  void chatUsersAreFreshPerRunAndValidUsernames() {
+    assertThat(ChatSmoke.user("a")).startsWith("smoke_a_").matches("^[a-zA-Z][a-zA-Z0-9_]{4,31}$")
+        .isNotEqualTo(ChatSmoke.user("a"));
   }
 
   private static int run(StringWriter err, String... args) {

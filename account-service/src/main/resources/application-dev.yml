@@ -1,0 +1,16 @@
+# Container in `make up` (platform-devenv/docker-compose.yml).
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/pangate
+    username: pangate
+    password: pangate
+account:
+  auth:
+    base-url: http://auth:8090
+    issuer: http://auth:8090
+    jwks-uri: http://auth:8090/.well-known/jwks.json
+    client-file: /dev-secrets/auth/clients.json
+  kafka: { bootstrap: "kafka:29092" }
+  redis: { uri: "redis://redis:6379" }
+  # every smoke run registers accounts from the devtools container's one address (spec §7 default: 5 per hour)
+  limits: { registrations-per-ip-per-hour: 10000, registration-attempts-per-ip-per-hour: 10000 }

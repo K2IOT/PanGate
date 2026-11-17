@@ -45,7 +45,9 @@ public class SeedRunner implements ApplicationRunner {
           Scope.PUSH_BROADCAST)),
       // app chat (chat spec §1, §8): one tenant for the whole app; its backend mints connect tokens for users
       new SeedClient("chat", "backend", EnumSet.of(Scope.TOKENS_MINT, Scope.SESSIONS_REVOKE, Scope.PUSH_SEND,
-          Scope.PUSH_BROADCAST))};
+          Scope.PUSH_BROADCAST)),
+      // account-service's admin API (account spec §5)
+      new SeedClient("chat", "admin", EnumSet.of(Scope.ACCOUNTS_ADMIN))};
 
   private final ManageTenants tenants;
   private final ManageClients clients;

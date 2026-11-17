@@ -12,6 +12,8 @@ public enum Scope {
   PUSH_BROADCAST("push:broadcast"),
   PRESENCE_READ("presence:read"),
   DEVICES_WRITE("devices:write"),
+  /** account-service's admin API (account spec §5). */
+  ACCOUNTS_ADMIN("accounts:admin"),
   ADMIN("admin");
 
   private final String value;

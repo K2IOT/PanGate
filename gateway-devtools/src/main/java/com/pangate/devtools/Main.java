@@ -15,6 +15,7 @@ import picocli.CommandLine.Command;
 @Command(name = "gateway-devtools", mixinStandardHelpOptions = true,
     description = "PanGate dev tools: issuer, token, client, smoke, health, fake-router, fake-pushapi.",
     subcommands = {IssuerCommand.class, TokenCommand.class, ClientCommand.class, SmokeCommand.class,
+        com.pangate.devtools.cmd.AccountCommand.class,
         HealthCommand.class, FakeRouterCommand.class, FakePushApiCommand.class,
         PushCommand.class, AwaitOfflineCommand.class})
 public final class Main {

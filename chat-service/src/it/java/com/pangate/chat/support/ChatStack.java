@@ -106,6 +106,7 @@ public final class ChatStack implements AutoCloseable {
     try (Admin a = Admin.create(Map.of("bootstrap.servers", kafka.getBootstrapServers()))) {
       a.createTopics(List.of(new NewTopic("gw.control", 2, (short) 1), new NewTopic(ChatTopics.COMMANDS, 4, (short) 1),
           new NewTopic(ChatTopics.EVENTS, 4, (short) 1), new NewTopic(ChatTopics.DLQ, 1, (short) 1),
+          new NewTopic(com.pangate.contracts.testkit.AccountTopics.USERS, 2, (short) 1),
           new NewTopic("c1.gw.upstream.cmd", 2, (short) 1), new NewTopic("c1.push.requests", 4, (short) 1)))
           .all().get();
     }

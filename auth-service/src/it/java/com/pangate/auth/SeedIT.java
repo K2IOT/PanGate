@@ -31,7 +31,11 @@ class SeedIT {
   @Test
   void seedIsIdempotentAndWritesClientsFileOnce() throws Exception {
     Map<String, String> first = file();  // written at startup
-    assertThat(first).containsOnlyKeys("pangate-admin", "t1-backend", "chat-backend");
+    assertThat(first).containsOnlyKeys("pangate-admin", "t1-backend", "chat-backend", "chat-admin");
+    // account spec §5, §9: account-service's admin API is called with a chat-admin API token
+    assertThat(clients.authenticates("chat-admin", first.get("chat-admin").toCharArray())).isTrue();
+    assertThat(jdbc.sql("SELECT tenant_id || ' ' || array_to_string(scopes, ' ') FROM auth.clients WHERE id = 'chat-admin'")
+        .query(String.class).single()).isEqualTo("chat accounts:admin");
     assertThat(clients.authenticates("t1-backend", first.get("t1-backend").toCharArray())).isTrue();
     assertThat(clients.authenticates("pangate-admin", first.get("pangate-admin").toCharArray())).isTrue();
     String scopes = jdbc.sql("SELECT array_to_string(scopes, ' ') FROM auth.clients WHERE id = 't1-backend'")

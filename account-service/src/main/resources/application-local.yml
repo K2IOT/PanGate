@@ -1,0 +1,17 @@
+# Run from the IDE against `make infra-up` and a local auth-service (`make auth-local`, admin port 8082).
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/pangate
+    username: pangate
+    password: pangate
+server:
+  port: 8088
+account:
+  admin-port: 8089
+  auth:
+    base-url: http://localhost:8090
+    issuer: http://localhost:8090
+    jwks-uri: http://localhost:8090/.well-known/jwks.json
+    client-file: .dev/auth/clients.json
+  kafka: { bootstrap: "localhost:9092" }
+  redis: { uri: "redis://localhost:6379" }

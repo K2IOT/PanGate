@@ -52,8 +52,11 @@ class ChatE2EIT {
     h.closeClients();
   }
 
+  /** A fresh user, published on account.users so chat-service lets it into conversations (account spec §8). */
   static String user(String name) {
-    return name + "-" + UUID.randomUUID().toString().substring(0, 6);
+    String id = name + "-" + UUID.randomUUID().toString().substring(0, 6);
+    com.pangate.chat.support.KnownUsers.add(h.bootstrap(), h.chat, id);
+    return id;
   }
 
   /** The next chat.message PUSH, acked. */

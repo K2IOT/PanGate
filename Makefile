@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 VERSION := 0.1.0
 MVNW := $(CURDIR)/mvnw
-MODULES := platform-parent platform-contracts platform-spring-starter platform-contracts-testkit gateway-devtools gateway-service push-router-service push-api-service auth-service chat-service
+MODULES := platform-parent platform-contracts platform-spring-starter platform-contracts-testkit gateway-devtools gateway-service push-router-service push-api-service auth-service chat-service account-service
 
 .PHONY: bootstrap verify
 
@@ -63,6 +63,7 @@ images:
 	$(MVNW) -q -f push-api-service/pom.xml compile jib:dockerBuild
 	$(MVNW) -q -f auth-service/pom.xml compile jib:dockerBuild
 	$(MVNW) -q -f chat-service/pom.xml compile jib:dockerBuild
+	$(MVNW) -q -f account-service/pom.xml compile jib:dockerBuild
 
 up:
 	$(COMPOSE) --profile app up -d --wait --wait-timeout 90
@@ -76,7 +77,8 @@ logs:
 smoke:
 	$(COMPOSE) --profile tools run --rm devtools smoke --url wss://gateway:8443/v1/ws \
 	  --auth-url http://auth:8090 --client-file /dev-secrets/auth/clients.json --ca /dev-secrets/ca.crt \
-	  --push-api http://push-api:8080 --chat http://chat:8080
+	  --push-api http://push-api:8080 --chat http://chat:8080 \
+	  --account http://account:8080 --account-admin http://account:8081
 
 AUTH_JAR := auth-service/target/auth-service-$(VERSION)-exec.jar
 ROUTER_JAR := push-router-service/target/push-router-service-$(VERSION)-exec.jar

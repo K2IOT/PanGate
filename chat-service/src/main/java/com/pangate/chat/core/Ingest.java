@@ -6,6 +6,7 @@ import com.pangate.chat.core.ChatStores.Member;
 import com.pangate.chat.core.ChatStores.Role;
 import com.pangate.contracts.v1.ChatCommand;
 import com.pangate.contracts.v1.ConversationKind;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
@@ -24,6 +25,7 @@ public final class Ingest {
   private final TokenBucketLimiter perUser;
   private final TokenBucketLimiter perConv;
   private final Consumer<String> onRejected;
+  private final UserDirectory users;
 
   public Ingest(ChatStores.ConversationStore conversations, ChatStores.MemberStore members,
       ChatStores.MemberCache cache, CommandSink sink, ChatProperties.Limits limits, LongSupplier nanos,
@@ -35,6 +37,14 @@ public final class Ingest {
   public Ingest(ChatStores.ConversationStore conversations, ChatStores.MemberStore members,
       ChatStores.MemberCache cache, CommandSink sink, ChatProperties.Limits limits, LongSupplier nanos,
       LongSupplier clockMs, Consumer<String> onRejected) {
+    this(conversations, members, cache, sink, limits, nanos, clockMs, onRejected, UserDirectory.ANY);
+  }
+
+  /** {@code users}: a DM whose other side deleted the account is refused ({@code user_deleted}, account spec §8). */
+  public Ingest(ChatStores.ConversationStore conversations, ChatStores.MemberStore members,
+      ChatStores.MemberCache cache, CommandSink sink, ChatProperties.Limits limits, LongSupplier nanos,
+      LongSupplier clockMs, Consumer<String> onRejected, UserDirectory users) {
+    this.users = users;
     this.conversations = conversations;
     this.members = new MemberLookup(members, cache);
     this.sink = sink;
@@ -70,9 +80,14 @@ public final class Ingest {
     if (conv.isEmpty()) {
       return Optional.of(new Rejection(Rejection.NOT_FOUND, "no such conversation"));
     }
-    Optional<Member> me = members.of(convId).stream().filter(m -> m.userId().equals(in.senderId())).findFirst();
+    List<Member> all = members.of(convId);
+    Optional<Member> me = all.stream().filter(m -> m.userId().equals(in.senderId())).findFirst();
     if (me.isEmpty()) {
       return Optional.of(new Rejection(Rejection.NOT_MEMBER, "not a member"));
+    }
+    if (conv.get().kind() == ConversationKind.CONVERSATION_KIND_DIRECT && all.stream()
+        .anyMatch(m -> !m.userId().equals(in.senderId()) && users.isDeleted(m.userId()))) {
+      return Optional.of(new Rejection(Rejection.USER_DELETED, "the other user deleted the account"));
     }
     if (conv.get().kind() == ConversationKind.CONVERSATION_KIND_CHANNEL && me.get().role() == Role.MEMBER) {
       return Optional.of(new Rejection(Rejection.NOT_MEMBER, "only owners and admins post in a channel"));

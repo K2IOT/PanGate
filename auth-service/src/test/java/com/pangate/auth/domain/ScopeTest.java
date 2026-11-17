@@ -20,8 +20,14 @@ class ScopeTest {
 
   @Test
   void everySpecScopeRoundTrips() {
-    String all = "tokens:mint sessions:revoke push:send push:broadcast presence:read devices:write admin";
+    String all = "tokens:mint sessions:revoke push:send push:broadcast presence:read devices:write accounts:admin admin";
     assertThat(Scope.format(Scope.parse(all))).isEqualTo(all);
     assertThat(Scope.parse(all)).isEqualTo(EnumSet.allOf(Scope.class));
+  }
+  /** account spec §5, §9: account-service's admin API needs this scope. */
+  @Test
+  void accountsAdminParses() {
+    org.assertj.core.api.Assertions.assertThat(Scope.of("accounts:admin")).isEqualTo(Scope.ACCOUNTS_ADMIN);
+    org.assertj.core.api.Assertions.assertThat(Scope.ACCOUNTS_ADMIN.value()).isEqualTo("accounts:admin");
   }
 }
