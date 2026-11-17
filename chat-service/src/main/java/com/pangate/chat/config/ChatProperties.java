@@ -24,7 +24,6 @@ public record ChatProperties(
   public record Notify(@DefaultValue("true") boolean enabled,
       @DefaultValue("c1.push.offline") String offlineTopic,
       @DefaultValue("c1.notify.requests") String requestsTopic,
-      @DefaultValue("chat.channel.notify") String channelTopic,
       @DefaultValue("1h") Duration maxAge,
       @DefaultValue("5000") int channelRate,
       @DefaultValue("1000") int channelPage) {}

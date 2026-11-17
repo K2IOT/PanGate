@@ -43,6 +43,5 @@ class NotifyRulesTest {
     assertThat(NotifyTopics.requests("c1").name()).isEqualTo("c1.notify.requests");
     assertThat(NotifyTopics.requests("c1").partitions()).isEqualTo(32);
     assertThat(NotifyTopics.requests("c1").retention()).isEqualTo(Duration.ofDays(1));
-    assertThat(ChatTopics.CHANNEL_NOTIFY).isEqualTo("chat.channel.notify");
   }
 }

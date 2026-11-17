@@ -26,7 +26,7 @@ import java.util.Optional;
  */
 public final class ScyllaChatStore implements ChatStores.ConversationStore, ChatStores.MemberStore, ChatStores.UserStore,
     ChatStores.MarkStore, ChatStores.SettingsStore, ChatStores.LastSeenStore,
-    ChatStores.MessageStore, ChatStores.DedupStore, ChatStores.MuteStore {
+    ChatStores.MessageStore, ChatStores.DedupStore, ChatStores.MuteStore, ChatStores.ChannelProgressStore {
 
   public static final long BUCKET = 10_000;
 
@@ -69,6 +69,8 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   private final PreparedStatement muteUserConv;
   private final PreparedStatement selectMute;
   private final PreparedStatement selectMembersPage;
+  private final PreparedStatement saveProgress;
+  private final PreparedStatement loadProgress;
   private final PreparedStatement selectLastSeen;
   private final PreparedStatement upsertLastSeen;
 
@@ -122,6 +124,9 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     muteMember = s.prepare("UPDATE " + ks + ".members SET muted_until = ? WHERE conv_id = ? AND user_id = ? IF EXISTS");
     muteUserConv = s.prepare("UPDATE " + ks + ".user_convs SET muted_until = ? WHERE user_id = ? AND conv_id = ? "
         + "IF EXISTS");
+    saveProgress = s.prepare("INSERT INTO " + ks + ".channel_notify_progress (conv_id, conv_seq, last_user_id) "
+        + "VALUES (?, ?, ?)");
+    loadProgress = s.prepare("SELECT conv_seq, last_user_id FROM " + ks + ".channel_notify_progress WHERE conv_id = ?");
     selectMute = s.prepare("SELECT muted_until FROM " + ks + ".members WHERE conv_id = ? AND user_id = ?");
     selectMembersPage = s.prepare("SELECT user_id, muted_until FROM " + ks + ".members WHERE conv_id = ? AND user_id > ? "
         + "LIMIT ?");
@@ -307,6 +312,17 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   public void setMute(String convId, String userId, long mutedUntil) {
     exec(muteMember.bind(mutedUntil, convId, userId));
     exec(muteUserConv.bind(mutedUntil, userId, convId));
+  }
+
+  @Override
+  public void saveChannelProgress(String convId, long convSeq, String lastUserId) {
+    exec(saveProgress.bind(convId, convSeq, lastUserId));
+  }
+
+  @Override
+  public Optional<ChatStores.ChannelProgress> loadChannelProgress(String convId) {
+    Row r = exec(loadProgress.bind(convId)).one();
+    return r == null ? Optional.empty() : Optional.of(new ChatStores.ChannelProgress(r.getLong(0), r.getString(1)));
   }
 
   @Override

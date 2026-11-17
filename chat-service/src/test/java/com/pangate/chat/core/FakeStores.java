@@ -15,7 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /** In-memory stores for core tests (same contracts as ScyllaChatStore / RedisChatCache). */
 public final class FakeStores implements ChatStores.ConversationStore, ChatStores.MemberStore, ChatStores.MessageStore,
     ChatStores.DedupStore, ChatStores.MemberCache, ChatStores.UserStore, ChatStores.MarkStore,
-    ChatStores.SettingsStore, ChatStores.LastSeenStore, ChatStores.MuteStore {
+    ChatStores.SettingsStore, ChatStores.LastSeenStore, ChatStores.MuteStore, ChatStores.ChannelProgressStore {
 
   public static final com.pangate.chat.config.ChatProperties.Limits LIMITS =
       new com.pangate.chat.config.ChatProperties.Limits(20, 40, 50, 100, 500, 4096, 50);
@@ -207,6 +207,17 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
     ChatStores.Privacy cur = privacy(userId);
     privacy.put(userId, new ChatStores.Privacy(hidePresence == null ? cur.hidePresence() : hidePresence,
         hideRead == null ? cur.hideRead() : hideRead, hidePreview == null ? cur.hidePreview() : hidePreview));
+  }
+
+  public final Map<String, ChatStores.ChannelProgress> channelProgress = new ConcurrentHashMap<>();
+
+  @Override public void saveChannelProgress(String convId, long convSeq, String lastUserId) {
+    check();
+    channelProgress.put(convId, new ChatStores.ChannelProgress(convSeq, lastUserId));
+  }
+
+  @Override public java.util.Optional<ChatStores.ChannelProgress> loadChannelProgress(String convId) {
+    return java.util.Optional.ofNullable(channelProgress.get(convId));
   }
 
   /** CH4 §3.3: {@code conv|user} → muted until. */

@@ -429,9 +429,21 @@ public class ChatConfig {
         notifications, sink, meters);
   }
 
+  /** CH4 spec §4: channel posts on chat.events → NotifyRequests for offline followers. */
+  @Bean(destroyMethod = "")
+  com.pangate.chat.kafka.ChannelNotifierLoop channelNotifierLoop(ChatProperties p, ScyllaChatStore store,
+      com.pangate.chat.store.RedisPresence presence, com.pangate.chat.core.PrivacyCache privacy,
+      com.pangate.chat.kafka.NotifyProducer sink, MeterRegistry meters) {
+    return new com.pangate.chat.kafka.ChannelNotifierLoop(com.pangate.chat.kafka.ChannelNotifierLoop.consumer(
+        p.kafka().bootstrap(), com.pangate.chat.kafka.ChannelNotifierLoop.GROUP), p.kafka().eventsTopic(), store,
+        presence, store, store, privacy, store, sink, p.notifications().channelPage(), p.notifications().channelRate(),
+        p.notifications().maxAge(), meters, System::currentTimeMillis);
+  }
+
   /** The notification loops start after the rest (their own lifecycle: chatBackground stays as it is). */
   @Bean
-  SmartLifecycle notifyBackground(ChatProperties p, com.pangate.chat.kafka.OfflineNotifierLoop offline) {
+  SmartLifecycle notifyBackground(ChatProperties p, com.pangate.chat.kafka.OfflineNotifierLoop offline,
+      com.pangate.chat.kafka.ChannelNotifierLoop channels) {
     return new SmartLifecycle() {
       private volatile boolean running;
 
@@ -439,6 +451,7 @@ public class ChatConfig {
       public void start() {
         if (p.notifications().enabled()) {
           offline.start();
+          channels.start();
         }
         running = true;
       }
@@ -447,6 +460,7 @@ public class ChatConfig {
       public void stop() {
         running = false;
         offline.close();
+        channels.close();
       }
 
       @Override

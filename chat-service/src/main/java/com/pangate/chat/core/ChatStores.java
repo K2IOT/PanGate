@@ -33,6 +33,23 @@ public final class ChatStores {
     }
   }
 
+  /** Where a channel notification job is (CH4 §4.2): the post's seq and the last follower handled. */
+  public record ChannelProgress(long convSeq, String lastUserId) {
+    /** The job of that post went through every follower. */
+    public static final String DONE = "\uffff";
+
+    public boolean done() {
+      return DONE.equals(lastUserId);
+    }
+  }
+
+  /** {@code channel_notify_progress}, kept one day (CH4 §4.2). */
+  public interface ChannelProgressStore {
+    void saveChannelProgress(String convId, long convSeq, String lastUserId);
+
+    Optional<ChannelProgress> loadChannelProgress(String convId);
+  }
+
   /** A member as the channel notifier pages them (CH4 §4.2). */
   public record MemberMute(String userId, long mutedUntil) {}
 

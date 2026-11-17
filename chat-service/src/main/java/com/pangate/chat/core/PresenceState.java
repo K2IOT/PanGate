@@ -23,6 +23,17 @@ public interface PresenceState {
 
   boolean online(String userId);
 
+  /** The online users of a page (CH4 spec §4.2: a channel's followers online now get no notification). */
+  default java.util.Set<String> onlineOf(java.util.Collection<String> userIds) {
+    java.util.Set<String> out = new java.util.HashSet<>();
+    for (String u : userIds) {
+      if (online(u)) {
+        out.add(u);
+      }
+    }
+    return out;
+  }
+
   /** True when this event id was handled before (dedup, kept 1 h); marks it handled otherwise. */
   boolean seen(String eventId);
 

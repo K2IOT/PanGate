@@ -109,8 +109,7 @@ public final class ChatStack implements AutoCloseable {
           new NewTopic(com.pangate.contracts.testkit.AccountTopics.USERS, 2, (short) 1),
           new NewTopic("c1.gw.upstream.cmd", 2, (short) 1), new NewTopic("c1.push.requests", 4, (short) 1),
           new NewTopic(ChatTopics.RECEIPTS, 4, (short) 1), new NewTopic("c1.gw.lifecycle", 2, (short) 1),
-          new NewTopic("c1.push.offline", 2, (short) 1), new NewTopic("c1.notify.requests", 2, (short) 1),
-          new NewTopic(ChatTopics.CHANNEL_NOTIFY, 2, (short) 1)))
+          new NewTopic("c1.push.offline", 2, (short) 1), new NewTopic("c1.notify.requests", 2, (short) 1)))
           .all().get();
     }
     jwks = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
