@@ -405,6 +405,57 @@ public class ChatConfig {
         com.pangate.contracts.testkit.PushTopics.lifecycle(p.cell()).name(), tracker, meters);
   }
 
+  /** CH4 spec §2.1: NotifyRequests for notify-service. */
+  @Bean(destroyMethod = "close")
+  com.pangate.chat.kafka.NotifyProducer notifyProducer(ChatProperties p) {
+    return new com.pangate.chat.kafka.NotifyProducer(com.pangate.chat.kafka.NotifyProducer.producer(
+        p.kafka().bootstrap()), p.notifications().requestsTopic(), p.kafka().produceTimeout());
+  }
+
+  @Bean
+  com.pangate.chat.core.OfflineNotifications offlineNotifications(ScyllaChatStore store,
+      com.pangate.chat.core.PrivacyCache privacy, ChatProperties p) {
+    return new com.pangate.chat.core.OfflineNotifications(store, store, privacy, store,
+        new com.pangate.chat.core.Badge(store), p.notifications().maxAge());
+  }
+
+  /** CH4 spec §3.1: cN.push.offline → cN.notify.requests. */
+  @Bean(destroyMethod = "")
+  com.pangate.chat.kafka.OfflineNotifierLoop offlineNotifierLoop(ChatProperties p,
+      com.pangate.chat.core.OfflineNotifications notifications, com.pangate.chat.kafka.NotifyProducer sink,
+      MeterRegistry meters) {
+    return new com.pangate.chat.kafka.OfflineNotifierLoop(com.pangate.chat.kafka.OfflineNotifierLoop.consumer(
+        p.kafka().bootstrap(), com.pangate.chat.kafka.OfflineNotifierLoop.GROUP), p.notifications().offlineTopic(),
+        notifications, sink, meters);
+  }
+
+  /** The notification loops start after the rest (their own lifecycle: chatBackground stays as it is). */
+  @Bean
+  SmartLifecycle notifyBackground(ChatProperties p, com.pangate.chat.kafka.OfflineNotifierLoop offline) {
+    return new SmartLifecycle() {
+      private volatile boolean running;
+
+      @Override
+      public void start() {
+        if (p.notifications().enabled()) {
+          offline.start();
+        }
+        running = true;
+      }
+
+      @Override
+      public void stop() {
+        running = false;
+        offline.close();
+      }
+
+      @Override
+      public boolean isRunning() {
+        return running;
+      }
+    };
+  }
+
   /** CH3 spec §3.4: chat.receipts → marks → receipt pushes. */
   @Bean(destroyMethod = "")
   com.pangate.chat.kafka.ReceiptWorkerLoop receiptWorkerLoop(ChatProperties p, ScyllaChatStore store,

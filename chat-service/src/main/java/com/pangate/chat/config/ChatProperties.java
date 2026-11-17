@@ -17,7 +17,17 @@ public record ChatProperties(
     @DefaultValue PushApi pushApi,
     @DefaultValue Limits limits,
     @DefaultValue Http http,
-    @DefaultValue State state) {
+    @DefaultValue State state,
+    @DefaultValue Notify notifications) {
+
+  /** CH4 spec §3, §4: offline notifications. */
+  public record Notify(@DefaultValue("true") boolean enabled,
+      @DefaultValue("c1.push.offline") String offlineTopic,
+      @DefaultValue("c1.notify.requests") String requestsTopic,
+      @DefaultValue("chat.channel.notify") String channelTopic,
+      @DefaultValue("1h") Duration maxAge,
+      @DefaultValue("5000") int channelRate,
+      @DefaultValue("1000") int channelPage) {}
 
   public record Kafka(@DefaultValue("kafka:9092") String bootstrap,
       @DefaultValue("chat.commands") String commandsTopic, @DefaultValue("chat.events") String eventsTopic,
