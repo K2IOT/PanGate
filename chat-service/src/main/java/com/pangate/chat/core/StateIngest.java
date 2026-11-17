@@ -13,15 +13,21 @@ public final class StateIngest implements StateCommands {
   private final MarkValidator marks;
   private final MarkSink sink;
   private final LongSupplier wallMs;
+  private final TypingRelay typing;
+  private final java.util.function.Consumer<String> onTyping;
 
   public StateIngest(MarkValidator marks, MarkSink sink) {
-    this(marks, sink, System::currentTimeMillis);
+    this(marks, sink, System::currentTimeMillis, null, r -> { });
   }
 
-  public StateIngest(MarkValidator marks, MarkSink sink, LongSupplier wallMs) {
+  /** {@code typing} may be null (no typing relay); {@code onTyping} counts each outcome. */
+  public StateIngest(MarkValidator marks, MarkSink sink, LongSupplier wallMs, TypingRelay typing,
+      java.util.function.Consumer<String> onTyping) {
     this.marks = marks;
     this.sink = sink;
     this.wallMs = wallMs;
+    this.typing = typing;
+    this.onTyping = onTyping;
   }
 
   @Override
@@ -46,7 +52,12 @@ public final class StateIngest implements StateCommands {
 
   @Override
   public String typing(String userId, String deviceId, ChatTyping t) {
-    return "ignored";
+    if (typing == null) {
+      return "ignored";
+    }
+    String r = typing.typing(userId, t.getConversationId());
+    onTyping.accept(r);
+    return r.equals("relayed") ? "accepted" : "rejected";
   }
 
   @Override

@@ -101,11 +101,27 @@ public class ChatConfig {
   /** CH3 spec §3.3: delivered / read marks into chat.receipts. */
   @Bean
   com.pangate.chat.core.StateIngest stateIngest(ScyllaChatStore store, RedisChatCache cache, CommandProducer producer,
-      ChatProperties p, MeterRegistry meters) {
+      ChatProperties p, MeterRegistry meters, com.pangate.chat.core.TypingRelay typing) {
     return new com.pangate.chat.core.StateIngest(new com.pangate.chat.core.MarkValidator(
         new MemberLookup(store, cache), new com.pangate.chat.core.LastSeqCache(store, () -> System.nanoTime() / 1_000_000),
         new com.pangate.chat.core.TokenBucketLimiter(p.state().markRate(), p.state().markBurst(), System::nanoTime),
-        reason -> meters.counter("chat.receipts.rejected", "reason", reason).increment()), producer);
+        reason -> meters.counter("chat.receipts.rejected", "reason", reason).increment()), producer,
+        System::currentTimeMillis, typing, r -> {
+          if (r.equals("relayed")) {
+            meters.counter("chat.typing.relayed").increment();
+          } else {
+            meters.counter("chat.typing.dropped", "reason", r).increment();
+          }
+        });
+  }
+
+  /** CH3 spec §5: typing, relayed directly (the open-conversation index comes with presence watch). */
+  @Bean
+  com.pangate.chat.core.TypingRelay typingRelay(ScyllaChatStore store, RedisChatCache cache, PushApiClient pusher,
+      ChatProperties p) {
+    return new com.pangate.chat.core.TypingRelay(store, new MemberLookup(store, cache), pusher,
+        com.pangate.chat.core.OpenConversations.NONE, () -> System.nanoTime() / 1_000_000,
+        p.state().listedReceiptsMax());
   }
 
   @Bean
