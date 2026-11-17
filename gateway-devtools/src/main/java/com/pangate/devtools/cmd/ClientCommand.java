@@ -76,6 +76,10 @@ public final class ClientCommand implements Callable<Integer> {
   @Option(names = "--ramp", defaultValue = "1000", description = "New sessions per second in --load mode.")
   int ramp;
 
+  @Option(names = "--retry-for", defaultValue = "PT0S",
+      description = "In --load mode, retry a session refused with 503 (the gateway shedding, spec §7.3) for this long.")
+  Duration retryFor;
+
   @Option(names = "--bind", split = ",", description = "Local addresses to spread --load connections over.")
   List<String> bind = new ArrayList<>();
 
@@ -166,6 +170,8 @@ public final class ClientCommand implements Callable<Integer> {
     Failures failed = new Failures();
     ConcurrentLinkedQueue<GatewayClient> clients = new ConcurrentLinkedQueue<>();
     Semaphore inFlight = new Semaphore(512);
+    java.util.concurrent.CountDownLatch pending = new java.util.concurrent.CountDownLatch(load);
+    AtomicInteger retried = new AtomicInteger();
     ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor();
     Thread reporter = Thread.ofPlatform().daemon().start(() -> {
       while (true) {
@@ -177,6 +183,8 @@ public final class ClientCommand implements Callable<Integer> {
         }
       }
     });
+    long retryUntil = System.nanoTime() + retryFor.toNanos();
+    java.util.Random rnd = new java.util.Random();
     long intervalNanos = TimeUnit.SECONDS.toNanos(1) / Math.max(1, ramp);
     long next = System.nanoTime();
     for (int i = 0; i < load; i++) {
@@ -188,23 +196,49 @@ public final class ClientCommand implements Callable<Integer> {
       int n = i;
       inFlight.acquire();
       pool.execute(() -> {
+        boolean holding = true;
         try {
-          InetSocketAddress local = bind.isEmpty() ? null : new InetSocketAddress(bind.get(n % bind.size()), 0);
-          GatewayClient c = GatewayClient.connect(url, tls, T, local);
-          String dev = "load-" + n;
-          c.hello(Hellos.jwt(minter.mint(new TokenRequest(tenant, tenant + ":load-" + n, dev, List.of(),
-              Duration.ofMinutes(10)), Instant.now()), dev), T);
-          clients.add(c);
-          connected.incrementAndGet();
-        } catch (RuntimeException e) {
-          failed.record(e);
+          while (true) {
+            try {
+              InetSocketAddress local = bind.isEmpty() ? null : new InetSocketAddress(bind.get(n % bind.size()), 0);
+              GatewayClient c = GatewayClient.connect(url, tls, T, local);
+              String dev = "load-" + n;
+              c.hello(Hellos.jwt(minter.mint(new TokenRequest(tenant, tenant + ":load-" + n, dev, List.of(),
+                  Duration.ofMinutes(10)), Instant.now()), dev), T);
+              clients.add(c);
+              connected.incrementAndGet();
+              return;
+            } catch (RuntimeException e) {
+              long delay;
+              synchronized (rnd) {
+                delay = retryDelayMs(rnd);
+              }
+              if (!shedRefusal(e) || System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(delay) > retryUntil) {
+                failed.record(e);
+                return;
+              }
+              retried.incrementAndGet();
+              // the wait does not hold an in-flight slot: the ramp goes on meanwhile
+              if (holding) {
+                inFlight.release();
+                holding = false;
+              }
+              Thread.sleep(delay);
+            }
+          }
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
         } finally {
-          inFlight.release();
+          if (holding) {
+            inFlight.release();
+          }
+          pending.countDown();
         }
       });
     }
-    inFlight.acquire(512);
-    System.out.println("connected=" + connected.get() + " failed=" + failed.total() + " " + failed.summary());
+    pending.await();
+    System.out.println("connected=" + connected.get() + " failed=" + failed.total() + " " + failed.summary()
+        + (retried.get() > 0 ? " retried_503=" + retried.get() : ""));
     Frame ping = Frame.newBuilder().setType(FrameType.FRAME_TYPE_PING).build();
     // Each client pings once per interval, spread evenly over it: real clients connect at different times, and one
     // burst of N pings would stall the gateway's loops every interval (and hold the shed ladder at L1).
@@ -226,6 +260,22 @@ public final class ClientCommand implements Callable<Integer> {
         return 0;
       }
     }
+  }
+
+  /** A 503 at the WebSocket upgrade: the gateway shedding at L3 (spec §7.3), which a client retries later. */
+  static boolean shedRefusal(Throwable e) {
+    for (Throwable t = e; t != null; t = t.getCause()) {
+      String m = t.getMessage();
+      if (m != null && m.contains("getStatus: 503")) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** 5..15 s, spread so refused sessions do not come back as one burst. */
+  static long retryDelayMs(java.util.Random rnd) {
+    return 5_000 + rnd.nextInt(10_001);
   }
 
   /** When, from the start of a ping round, client {@code i} of {@code n} sends its PING. */
