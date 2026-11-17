@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### chat-service (CH3, conversation state)
+- Spec `docs/superpowers/specs/2026-11-17-conversation-state-design.md`:
+  - delivered / read marks per user (`chat.delivered`, `chat.read`, `POST …/read|delivered`) through `chat.receipts`
+    and a windowed receipt worker; marks never move back (`USING TIMESTAMP`, table `conv_marks`); DM and groups ≤ 50
+    get the marks pushed, larger groups look up `readCount`;
+  - unread counts in `GET /v1/conversations`, synced across a user's devices (`own_read_seq`); `GET /v1/state?since=`
+    for reconnecting clients;
+  - typing (`chat.typing`, relayed directly, 6 s TTL);
+  - presence from `c1.gw.lifecycle` with a 5 s offline grace, pushed only to devices that watch the user
+    (`chat.presence.watch`, shared-conversation check: the watched user must have sent a message in that DM or
+    group); `GET /v1/presence`;
+  - reciprocal privacy (`GET|PUT /v1/me/privacy`: `hidePresence`, `hideRead`);
+  - the client sync contract (ADR 0039).
+- Contracts: `ChatMark`, `ChatTyping`, `PresenceWatch`, `ReceiptUpdate`, `TypingUpdate`, `PresenceUpdate`,
+  `ReceiptCommand`; testkit `ChatStateCases`, topic `chat.receipts`.
+- Devenv: topic `chat.receipts`; `make smoke` adds `CHAT receipts`, `CHAT typing`, `CHAT presence`.
+- ADR 0037–0039.
+
 ### account-service (CH2, accounts)
 - New module `account-service` (spec `docs/superpowers/specs/2026-11-16-account-service-design.md`): accounts of the
   chat app on PostgreSQL (schema `account`):

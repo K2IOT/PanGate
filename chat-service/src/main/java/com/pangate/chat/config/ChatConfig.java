@@ -95,7 +95,103 @@ public class ChatConfig {
   @Bean(destroyMethod = "")
   CommandProducer commandProducer(ChatProperties p) {
     return CommandProducer.create(p.kafka().bootstrap(), p.kafka().produceTimeout(), p.kafka().commandsTopic(),
-        p.kafka().dlqTopic());
+        p.kafka().dlqTopic(), p.kafka().receiptsTopic());
+  }
+
+  /** CH3 spec §3.3: delivered / read marks into chat.receipts. */
+  @Bean
+  com.pangate.chat.core.StateIngest stateIngest(ScyllaChatStore store, RedisChatCache cache, CommandProducer producer,
+      ChatProperties p, MeterRegistry meters, com.pangate.chat.core.TypingRelay typing,
+      com.pangate.chat.core.PresenceWatch watch, RecentCount watchers) {
+    return new com.pangate.chat.core.StateIngest(new com.pangate.chat.core.MarkValidator(
+        new MemberLookup(store, cache), new com.pangate.chat.core.LastSeqCache(store, () -> System.nanoTime() / 1_000_000),
+        new com.pangate.chat.core.TokenBucketLimiter(p.state().markRate(), p.state().markBurst(), System::nanoTime),
+        reason -> meters.counter("chat.receipts.rejected", "reason", reason).increment()), producer,
+        System::currentTimeMillis, typing, r -> {
+          if (r.equals("relayed")) {
+            meters.counter("chat.typing.relayed").increment();
+          } else {
+            meters.counter("chat.typing.dropped", "reason", r).increment();
+          }
+        }, watch, r -> {
+          if (r.equals("unavailable")) {
+            meters.counter("chat.presence.unavailable").increment();
+          } else {
+            watchers.add(r);
+          }
+        });
+  }
+
+  /** chat.presence.watchers: watch calls this pod took in the last watch TTL (an estimate, spec §9). */
+  @Bean
+  com.pangate.chat.config.ChatConfig.RecentCount presenceWatchers(MeterRegistry meters, ChatProperties p) {
+    RecentCount c = new RecentCount(p.state().watchTtl());
+    meters.gauge("chat.presence.watchers", c, RecentCount::size);
+    return c;
+  }
+
+  /** Events within a sliding window, for estimated gauges. */
+  public static final class RecentCount {
+    private final java.util.concurrent.ConcurrentLinkedDeque<Long> at = new java.util.concurrent.ConcurrentLinkedDeque<>();
+    private final long windowMs;
+
+    RecentCount(java.time.Duration window) {
+      this.windowMs = window.toMillis();
+    }
+
+    void add(String ignored) {
+      at.add(System.currentTimeMillis());
+      if (at.size() > 1_000_000) {
+        at.pollFirst();
+      }
+    }
+
+    double size() {
+      long cut = System.currentTimeMillis() - windowMs;
+      while (!at.isEmpty() && at.peekFirst() < cut) {
+        at.pollFirst();
+      }
+      return at.size();
+    }
+  }
+
+  /** CH3 spec §6.3. */
+  @Bean
+  com.pangate.chat.core.PresenceWatch presenceWatch(ScyllaChatStore store, RedisChatCache cache,
+      com.pangate.chat.store.RedisPresence presence, com.pangate.chat.core.PrivacyCache privacy, PushApiClient pusher,
+      ChatProperties p, MeterRegistry meters) {
+    com.pangate.chat.core.Pusher counted = r -> {
+      meters.counter("chat.presence.pushes").increment();
+      return pusher.send(r);
+    };
+    return new com.pangate.chat.core.PresenceWatch(store, new MemberLookup(store, cache), store, presence,
+        presence, store,
+        privacy, counted, System::currentTimeMillis, p.state().watchTtl(), p.state().watchMax());
+  }
+
+  /** CH3 spec §6.3: transitions to the devices watching; Redis down is counted, not thrown into the tracker. */
+  @Bean
+  java.util.function.Consumer<com.pangate.chat.core.PresenceTracker.Transition> presenceFanOut(
+      com.pangate.chat.store.RedisPresence presence, ScyllaChatStore store, RedisChatCache cache,
+      com.pangate.chat.core.PrivacyCache privacy, PushApiClient pusher, MeterRegistry meters) {
+    com.pangate.chat.core.PresenceFanOut f = new com.pangate.chat.core.PresenceFanOut(presence,
+        new MemberLookup(store, cache), presence, store, privacy, pusher, System::currentTimeMillis);
+    return t -> {
+      try {
+        meters.counter("chat.presence.pushes").increment(f.on(t));
+      } catch (com.pangate.chat.core.StoreUnavailableException e) {
+        meters.counter("chat.presence.unavailable").increment();
+      }
+    };
+  }
+
+  /** CH3 spec §5: typing, relayed directly (the open-conversation index comes with presence watch). */
+  @Bean
+  com.pangate.chat.core.TypingRelay typingRelay(ScyllaChatStore store, RedisChatCache cache, PushApiClient pusher,
+      ChatProperties p, com.pangate.chat.store.RedisPresence presence) {
+    return new com.pangate.chat.core.TypingRelay(store, new MemberLookup(store, cache), pusher,
+        presence, () -> System.nanoTime() / 1_000_000,
+        p.state().listedReceiptsMax());
   }
 
   @Bean
@@ -210,15 +306,16 @@ public class ChatConfig {
   FanOutLoop fanOutLoop(ChatProperties p, ScyllaChatStore store, RedisChatCache cache, PushApiClient pusher,
       MeterRegistry meters) {
     return new FanOutLoop(FanOutLoop.consumer(p.kafka().bootstrap(), FanOutLoop.GROUP), p.kafka().eventsTopic(),
-        new MemberLookup(store, cache), store, pusher, meters);
+        new MemberLookup(store, cache), store, store, pusher, meters);
   }
 
   @Bean(destroyMethod = "")
   UpstreamCommandListener upstreamCommandListener(ChatProperties p, Ingest ingest, Notifier notifier,
-      CommandProducer producer, MeterRegistry meters, ChannelSubscriptions channels) {
+      CommandProducer producer, MeterRegistry meters, ChannelSubscriptions channels,
+      com.pangate.chat.core.StateIngest state) {
     return new UpstreamCommandListener(UpstreamCommandListener.consumer(p.kafka().bootstrap()),
         p.kafka().upstreamTopic(), ingest, notifier, producer,
-        outcome -> meters.counter("chat.ingest.records", "result", outcome).increment(), channels);
+        outcome -> meters.counter("chat.ingest.records", "result", outcome).increment(), channels, state);
   }
 
   @Bean
@@ -268,12 +365,62 @@ public class ChatConfig {
     return new ChatHealth(revocations::caughtUp, verifier::loaded, ChatConfig::monoMs);
   }
 
+  /** CH3 spec §8: privacy settings cached 60 s per pod. */
+  @Bean
+  com.pangate.chat.core.PrivacyCache privacyCache(ScyllaChatStore store) {
+    return new com.pangate.chat.core.PrivacyCache(store, () -> System.nanoTime() / 1_000_000);
+  }
+
+  /** CH3 spec §4, §7.2, §3.4 lookups. */
+  @Bean
+  com.pangate.chat.core.StateService stateService(ScyllaChatStore store, RedisChatCache cache,
+      com.pangate.chat.core.PrivacyCache privacy, ChatProperties p) {
+    return new com.pangate.chat.core.StateService(store, new MemberLookup(store, cache), store, store, store, privacy,
+        p.state().listedReceiptsMax(), () -> System.nanoTime() / 1_000_000, System::currentTimeMillis);
+  }
+
+  /** CH3 spec §6.1: connection sets in Redis. */
+  @Bean(destroyMethod = "")
+  com.pangate.chat.store.RedisPresence redisPresence(ChatProperties p) {
+    return new com.pangate.chat.store.RedisPresence(p.redis());
+  }
+
+  /** Transitions are counted, then fanned out to watchers (presenceFanOut). */
+  @Bean
+  com.pangate.chat.core.PresenceTracker presenceTracker(com.pangate.chat.store.RedisPresence presence,
+      ScyllaChatStore store, ChatProperties p, MeterRegistry meters,
+      org.springframework.beans.factory.ObjectProvider<java.util.function.Consumer<
+          com.pangate.chat.core.PresenceTracker.Transition>> fanOut) {
+    return new com.pangate.chat.core.PresenceTracker(presence, store, t -> {
+      meters.counter("chat.presence.transitions", "to", t.online() ? "online" : "offline").increment();
+      fanOut.ifAvailable(f -> f.accept(t));
+    }, System::currentTimeMillis, p.state().offlineGrace());
+  }
+
+  @Bean(destroyMethod = "")
+  com.pangate.chat.kafka.LifecycleListener lifecycleListener(ChatProperties p,
+      com.pangate.chat.core.PresenceTracker tracker, MeterRegistry meters) {
+    return new com.pangate.chat.kafka.LifecycleListener(com.pangate.chat.kafka.LifecycleListener.consumer(
+        p.kafka().bootstrap(), com.pangate.chat.kafka.LifecycleListener.GROUP),
+        com.pangate.contracts.testkit.PushTopics.lifecycle(p.cell()).name(), tracker, meters);
+  }
+
+  /** CH3 spec §3.4: chat.receipts → marks → receipt pushes. */
+  @Bean(destroyMethod = "")
+  com.pangate.chat.kafka.ReceiptWorkerLoop receiptWorkerLoop(ChatProperties p, ScyllaChatStore store,
+      RedisChatCache cache, com.pangate.chat.core.PrivacyCache privacy, PushApiClient pusher, MeterRegistry meters) {
+    return new com.pangate.chat.kafka.ReceiptWorkerLoop(com.pangate.chat.kafka.ReceiptWorkerLoop.consumer(
+        p.kafka().bootstrap(), com.pangate.chat.kafka.ReceiptWorkerLoop.GROUP), p.kafka().receiptsTopic(), store,
+        new MemberLookup(store, cache), store, privacy, pusher, p.state(), meters);
+  }
+
   @Bean
   SmartLifecycle chatBackground(CqlSession cql, ChatHealth health, ConnectTokenVerifier verifier,
       RevocationListener revocationListener, UpstreamCommandListener upstream, CommandProducer producer,
       RedisChatCache redis, MeterRegistry meters, Revocations revocations, SequencerLoop sequencerLoop,
       EventProducer events, RedisSendResults results, FanOutLoop fanOut, PushApiClient pusher,
-      AccountsListener accounts) {
+      AccountsListener accounts, com.pangate.chat.kafka.ReceiptWorkerLoop receipts,
+      com.pangate.chat.kafka.LifecycleListener lifecycle, com.pangate.chat.store.RedisPresence presence) {
     return new SmartLifecycle() {
       private volatile boolean running;
       private ScheduledExecutorService timers;
@@ -299,6 +446,8 @@ public class ChatConfig {
         revocationListener.start();
         sequencerLoop.start();
         fanOut.start();
+        receipts.start();
+        lifecycle.start();
         accounts.start();
         upstream.start();
         running = true;
@@ -307,8 +456,8 @@ public class ChatConfig {
       @Override
       public void stop() {
         running = false;
-        closeInOrder(upstream, accounts, sequencerLoop, fanOut, pusher, revocationListener, producer, events, results,
-            timers::shutdownNow, redis, cql);
+        closeInOrder(upstream, accounts, lifecycle, sequencerLoop, fanOut, receipts, pusher, revocationListener,
+            producer, events, results, timers::shutdownNow, presence, redis, cql);
       }
 
       @Override

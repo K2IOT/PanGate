@@ -31,10 +31,15 @@ public class ProblemHandler {
     int status = switch (e.code()) {
       case com.pangate.chat.core.ChatRefusal.FORBIDDEN -> 403;
       case com.pangate.chat.core.ChatRefusal.NOT_FOUND, com.pangate.chat.core.ChatRefusal.USER_NOT_FOUND,
-          com.pangate.chat.core.ChatRefusal.USER_DELETED -> 404;
+          com.pangate.chat.core.ChatRefusal.USER_DELETED, com.pangate.chat.core.ChatRefusal.NOT_SUPPORTED -> 404;
+      case com.pangate.chat.core.ChatRefusal.RATE_LIMITED -> 429;
       default -> 400;
     };
-    return ResponseEntity.status(status).body(Problems.of(status, e.code(), e.getMessage()));
+    ResponseEntity.BodyBuilder b = ResponseEntity.status(status);
+    if (status == 429) {
+      b.header(HttpHeaders.RETRY_AFTER, "1");
+    }
+    return b.body(Problems.of(status, e.code(), e.getMessage()));
   }
 
   @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)

@@ -31,4 +31,28 @@ class ClientCommandTest {
         .isEqualTo("reasons={IllegalStateException: HELLO timed out=2, UncheckedIOException: Connection reset=1}");
     assertThat(new ClientCommand.Failures().summary()).isEmpty();
   }
+
+  /**
+   * CI load check: a 503 at the upgrade is the gateway shedding (L3, spec §7.3, with Retry-After); a real client tries
+   * again later, so the load client does too. Other failures stay failures.
+   */
+  @Test
+  void onlyASheddingRefusalIsRetried() {
+    assertThat(ClientCommand.shedRefusal(
+        new IllegalStateException("Invalid handshake response getStatus: 503 Service Unavailable"))).isTrue();
+    assertThat(ClientCommand.shedRefusal(new IllegalStateException("HELLO timed out"))).isFalse();
+    assertThat(ClientCommand.shedRefusal(
+        new IllegalStateException("Invalid handshake response getStatus: 401 Unauthorized"))).isFalse();
+    assertThat(ClientCommand.shedRefusal(new RuntimeException(
+        new IllegalStateException("Invalid handshake response getStatus: 503 Service Unavailable")))).isTrue();
+  }
+
+  /** Spread like the gateway's own Retry-After (5..30 s), so retries do not come back as one burst. */
+  @Test
+  void retriesWaitFiveToFifteenSeconds() {
+    java.util.Random rnd = new java.util.Random(7);
+    for (int i = 0; i < 1_000; i++) {
+      assertThat(ClientCommand.retryDelayMs(rnd)).isBetween(5_000L, 15_000L);
+    }
+  }
 }

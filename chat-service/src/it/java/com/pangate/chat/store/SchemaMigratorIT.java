@@ -34,15 +34,27 @@ class SchemaMigratorIT {
 
   @Test
   void migrationIsIdempotent() {
-    assertThat(SchemaMigrator.migrate(session, "chat_it")).isEqualTo(2);   // V1 schema, V2 users (account spec §8)
+    assertThat(SchemaMigrator.migrate(session, "chat_it")).isEqualTo(4);   // V1 schema, V2 users (account spec §8), V3 state (CH3 §3.2), V4 presence links
     assertThat(SchemaMigrator.migrate(session, "chat_it")).isZero();
     Set<String> tables = session.execute(
         "SELECT table_name FROM system_schema.tables WHERE keyspace_name = 'chat_it'").all().stream()
         .map(r -> r.getString("table_name")).collect(Collectors.toSet());
     assertThat(tables).contains("messages", "conversations", "members", "user_convs", "dm_index", "send_dedup", "users",
-        "schema_version");
+        "schema_version", "conv_marks", "user_settings", "last_seen");
     int ttl = session.execute("SELECT default_time_to_live FROM system_schema.tables "
         + "WHERE keyspace_name = 'chat_it' AND table_name = 'send_dedup'").one().getInt(0);
     assertThat(ttl).isEqualTo(86_400);
+  }
+
+  /** A V3 interrupted after its ALTERs but before its schema_version row reruns cleanly. */
+  @Test
+  void v3RerunsAfterAnInterruptedRecord() {
+    SchemaMigrator.migrate(session, "chat_it");
+    session.execute("DELETE FROM chat_it.schema_version WHERE version = 3");
+    session.execute("DELETE FROM chat_it.schema_version WHERE version = 4");
+    assertThat(SchemaMigrator.migrate(session, "chat_it")).isEqualTo(2);
+    Set<String> cols = session.execute("SELECT column_name FROM system_schema.columns WHERE keyspace_name = "
+        + "'chat_it' AND table_name = 'user_convs'").all().stream().map(r -> r.getString(0)).collect(Collectors.toSet());
+    assertThat(cols).contains("delivered_seq", "state_at", "read_seq");
   }
 }

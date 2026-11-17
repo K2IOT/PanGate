@@ -183,4 +183,88 @@ class ChatStoreIT {
     cache.putMembers(conv, before);   // a reader that loaded the list before the removal
     assertThat(cache.cachedMembers(conv)).isEmpty();
   }
+
+  // --- CH3: receipt marks, state, privacy, last seen ---
+
+  /** CH3 spec §3.2, bất biến 1: a later, smaller mark never moves a mark back; columns are independent. */
+  @Test
+  void marksNeverGoBack() {
+    String c = conv(ConversationKind.CONVERSATION_KIND_GROUP, "mk1", "mk2");
+    store.advance(c, "mk1", 5, 3, 1_000);
+    store.advance(c, "mk1", 4, 2, 2_000);
+    assertThat(store.own("mk1", c)).isEqualTo(new com.pangate.chat.core.ChatStores.Marks(5, 3));
+    assertThat(store.marks(c)).contains(new com.pangate.chat.core.ChatStores.MemberMarks("mk1", 5, 3));
+    store.advance(c, "mk1", 0, 6, 3_000);
+    assertThat(store.own("mk1", c)).isEqualTo(new com.pangate.chat.core.ChatStores.Marks(5, 6));
+  }
+
+  /** Ledger ruling (conv_marks): leaving deletes the members row; marks written after a re-join still count. */
+  @Test
+  void marksSurviveLeaveAndRejoin() {
+    String c = conv(ConversationKind.CONVERSATION_KIND_GROUP, "rj1", "rj2");
+    store.advance(c, "rj2", 3, 3, 1_000);
+    store.remove(c, "rj2");
+    store.add(c, new Member("rj2", Role.MEMBER));
+    store.advance(c, "rj2", 9, 8, 2_000);
+    assertThat(store.marks(c)).contains(new com.pangate.chat.core.ChatStores.MemberMarks("rj2", 9, 8));
+    assertThat(store.own("rj2", c)).isEqualTo(new com.pangate.chat.core.ChatStores.Marks(9, 8));
+  }
+
+  /** CH3 spec §7.2: /v1/state reads the conversations whose state changed after a time. */
+  @Test
+  void changedSinceReturnsOnlyNewer() {
+    String a = conv(ConversationKind.CONVERSATION_KIND_DIRECT, "cs1", "cs2");
+    String b = conv(ConversationKind.CONVERSATION_KIND_GROUP, "cs1", "cs3");
+    store.touchState("cs1", a, 100);
+    store.touchState("cs1", b, 200);
+    assertThat(store.changedSince("cs1", 150, null, 10)).extracting(
+        com.pangate.chat.core.ChatStores.UserConvState::convId).containsExactly(b);
+    store.touchUserConv("cs1", a, 4, 300);   // a new message is a change too
+    assertThat(store.changedSince("cs1", 150, null, 10)).extracting(
+        com.pangate.chat.core.ChatStores.UserConvState::convId).containsExactly(a, b);
+    assertThat(store.changedSince("cs1", 150, null, 1)).hasSize(1);
+    assertThat(store.changedSince("cs1", 150, "300:" + a, 10)).extracting(
+        com.pangate.chat.core.ChatStores.UserConvState::convId).containsExactly(b);
+  }
+
+  @Test
+  void privacyAndLastSeenRoundTrip() {
+    assertThat(store.privacy("pv1")).isEqualTo(com.pangate.chat.core.ChatStores.Privacy.OPEN);
+    assertThat(store.lastSeen("pv1")).isEmpty();
+    store.putPrivacy("pv1", new com.pangate.chat.core.ChatStores.Privacy(true, false), 1_000);
+    store.putLastSeen("pv1", 42_000);
+    assertThat(store.privacy("pv1")).isEqualTo(new com.pangate.chat.core.ChatStores.Privacy(true, false));
+    assertThat(store.lastSeen("pv1")).hasValue(42_000);
+  }
+
+  /** Final review I5: state_at is when the row was written, not the message's sentAt (fan-out runs later). */
+  @Test
+  void touchStampsStateWithWriteTime() {
+    String c = conv(ConversationKind.CONVERSATION_KIND_GROUP, "ws1", "ws2");
+    store.touchUserConv("ws1", c, 3, 1_000);   // a message sent long ago, touched now
+    assertThat(store.changedSince("ws1", System.currentTimeMillis() - 60_000, null, 10))
+        .extracting(com.pangate.chat.core.ChatStores.UserConvState::convId).contains(c);
+  }
+
+  /** Owner decision 2026-11-17 + review of PR #6: the sender's marks and last sent seq in one write, never back. */
+  @Test
+  void senderMarksRoundTrip() {
+    String c = conv(ConversationKind.CONVERSATION_KIND_GROUP, "sb1", "sb2");
+    assertThat(store.sentSeq(c, "sb2")).isZero();
+    store.sent(c, "sb2", 5, 1_000);
+    store.sent(c, "sb2", 3, 2_000);
+    assertThat(store.sentSeq(c, "sb2")).isEqualTo(5);
+    assertThat(store.own("sb2", c).deliveredSeq()).isEqualTo(5);
+    assertThat(store.own("sb2", c).readSeq()).isEqualTo(5);
+  }
+
+  /** Codex review of PR #6: a privacy update writes only the fields it names, so two concurrent PUTs both stick. */
+  @Test
+  void privacyUpdatesOnlyTheNamedFields() {
+    store.updatePrivacy("pv9", true, null, 1_000);
+    store.updatePrivacy("pv9", null, true, 2_000);
+    assertThat(store.privacy("pv9")).isEqualTo(new com.pangate.chat.core.ChatStores.Privacy(true, true));
+    store.updatePrivacy("pv9", false, null, 3_000);
+    assertThat(store.privacy("pv9")).isEqualTo(new com.pangate.chat.core.ChatStores.Privacy(false, true));
+  }
 }

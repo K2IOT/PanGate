@@ -16,12 +16,14 @@ public record ChatProperties(
     @DefaultValue Auth auth,
     @DefaultValue PushApi pushApi,
     @DefaultValue Limits limits,
-    @DefaultValue Http http) {
+    @DefaultValue Http http,
+    @DefaultValue State state) {
 
   public record Kafka(@DefaultValue("kafka:9092") String bootstrap,
       @DefaultValue("chat.commands") String commandsTopic, @DefaultValue("chat.events") String eventsTopic,
       @DefaultValue("chat.commands.dlq") String dlqTopic, @DefaultValue("c1.gw.upstream.cmd") String upstreamTopic,
-      @DefaultValue("5s") Duration produceTimeout) {}
+      @DefaultValue("5s") Duration produceTimeout,
+      @DefaultValue("chat.receipts") String receiptsTopic) {}
 
   public record Scylla(@DefaultValue("scylla:9042") List<String> contactPoints,
       @DefaultValue("datacenter1") String localDc, @DefaultValue("chat") String keyspace,
@@ -42,4 +44,11 @@ public record ChatProperties(
       @DefaultValue("50") int maxMentions) {}
 
   public record Http(@DefaultValue("3s") Duration sendWait) {}
+
+  /** Conversation state (CH3 spec §3.3, §3.4, §5, §6). */
+  public record State(@DefaultValue("50") int markRate, @DefaultValue("100") int markBurst,
+      @DefaultValue("500ms") Duration dmWindow, @DefaultValue("2s") Duration groupWindow,
+      @DefaultValue("50") int listedReceiptsMax, @DefaultValue("5s") Duration offlineGrace,
+      @DefaultValue("5m") Duration watchTtl, @DefaultValue("200") int watchMax,
+      @DefaultValue("2s") Duration typingEvery) {}
 }

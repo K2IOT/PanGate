@@ -274,7 +274,7 @@ public final class SmokeCommand implements Callable<Integer> {
           System.out.printf("revoke -> close 4003 in %.1f ms%n", (System.nanoTime() - t0) / 1e6);
         }
         System.out.println("SMOKE OK (connected, pong, upstream-ack, push-ack, " + (viaRouter() ? "offline, " : "")
-            + (accounts != null ? "accounts, " : "") + (chat != null ? "chat 1-1, chat group, chat channel, " : "")
+            + (accounts != null ? "accounts, " : "") + (chat != null ? "chat 1-1, chat group, chat channel, chat receipts, chat typing, chat presence, " : "")
             + "resume, revoke)");
         return 0;
       }

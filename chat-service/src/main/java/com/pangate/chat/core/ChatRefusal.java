@@ -9,6 +9,9 @@ public final class ChatRefusal extends RuntimeException {
   /** account spec §8: no such account, or a deleted one. */
   public static final String USER_NOT_FOUND = "user_not_found";
   public static final String USER_DELETED = "user_deleted";
+  /** CH3 spec §3.4: receipts of a channel. */
+  public static final String NOT_SUPPORTED = "not_supported";
+  public static final String RATE_LIMITED = "rate_limited";
 
   private final String code;
 

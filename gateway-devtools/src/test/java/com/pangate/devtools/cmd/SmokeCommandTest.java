@@ -94,6 +94,13 @@ class SmokeCommandTest {
         "ACCOUNT lock", "ACCOUNT unlock");
   }
 
+  /** CH3 spec §10: three conversation-state steps follow the chat steps. */
+  @Test
+  void chatStepsIncludeConversationState() {
+    assertThat(ChatSmoke.STEPS).containsExactly("CHAT 1-1", "CHAT group", "CHAT channel", "CHAT receipts",
+        "CHAT typing", "CHAT presence");
+  }
+
   @Test
   void chatUsersAreFreshPerRunAndValidUsernames() {
     assertThat(ChatSmoke.user("a")).startsWith("smoke_a_").matches("^[a-zA-Z][a-zA-Z0-9_]{4,31}$")

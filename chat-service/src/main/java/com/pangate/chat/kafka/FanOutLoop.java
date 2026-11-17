@@ -51,6 +51,7 @@ public final class FanOutLoop implements AutoCloseable {
   private final String topic;
   private final MemberLookup members;
   private final ChatStores.MemberStore inbox;
+  private final ChatStores.MarkStore marks;
   private final Pusher pusher;
   private final MeterRegistry meters;
   private final Timer lag;
@@ -81,14 +82,16 @@ public final class FanOutLoop implements AutoCloseable {
   }
 
   public FanOutLoop(Consumer<String, byte[]> consumer, String topic, MemberLookup members,
-      ChatStores.MemberStore inbox, Pusher pusher, MeterRegistry meters) {
-    this(consumer, topic, members, inbox, pusher, meters, STEP_BUDGET);
+      ChatStores.MemberStore inbox, ChatStores.MarkStore marks, Pusher pusher, MeterRegistry meters) {
+    this(consumer, topic, members, inbox, marks, pusher, meters, STEP_BUDGET);
   }
 
   /** {@code stepBudget}: no new event of a poll starts after this; the rest is polled again. */
   public FanOutLoop(Consumer<String, byte[]> consumer, String topic, MemberLookup members,
-      ChatStores.MemberStore inbox, Pusher pusher, MeterRegistry meters, Duration stepBudget) {
+      ChatStores.MemberStore inbox, ChatStores.MarkStore marks, Pusher pusher, MeterRegistry meters,
+      Duration stepBudget) {
     this.consumer = consumer;
+    this.marks = marks;
     this.topic = topic;
     this.members = members;
     this.inbox = inbox;
@@ -245,6 +248,9 @@ public final class FanOutLoop implements AutoCloseable {
     if (!channel && !touchAll(to, m, giveUpAt)) {
       return false;
     }
+    if (!senderMarks(m, giveUpAt)) {
+      return false;
+    }
     lag.record(Math.max(0, System.currentTimeMillis() - m.getSentAtMs()), TimeUnit.MILLISECONDS);
     return true;
   }
@@ -270,6 +276,27 @@ public final class FanOutLoop implements AutoCloseable {
       }
     }
     return true;
+  }
+
+  /**
+   * CH3 §3.1: the sender has delivered and read their own message (every kind, channels too), so their unread count
+   * never counts it. Retried like the inbox rows.
+   */
+  private boolean senderMarks(ChatMessage m, long giveUpAt) throws InterruptedException {
+    long backoff = 100;
+    while (true) {
+      try {
+        marks.sent(m.getConversationId(), m.getSenderId(), m.getConvSeq(), m.getSentAtMs());
+        return true;
+      } catch (RuntimeException e) {
+        meters.counter("chat.fanout.marks.retries").increment();
+        if (!running || System.nanoTime() > giveUpAt) {
+          return false;
+        }
+        Thread.sleep(backoff);
+        backoff = Math.min(MAX_BACKOFF_MS, backoff * 2);
+      }
+    }
   }
 
   private void count(String result) {

@@ -14,7 +14,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** In-memory stores for core tests (same contracts as ScyllaChatStore / RedisChatCache). */
 public final class FakeStores implements ChatStores.ConversationStore, ChatStores.MemberStore, ChatStores.MessageStore,
-    ChatStores.DedupStore, ChatStores.MemberCache, ChatStores.UserStore {
+    ChatStores.DedupStore, ChatStores.MemberCache, ChatStores.UserStore, ChatStores.MarkStore,
+    ChatStores.SettingsStore, ChatStores.LastSeenStore {
 
   public static final com.pangate.chat.config.ChatProperties.Limits LIMITS =
       new com.pangate.chat.config.ChatProperties.Limits(20, 40, 50, 100, 500, 4096, 50);
@@ -28,6 +29,13 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
   public final Map<String, String> dms = new ConcurrentHashMap<>();
   public final Map<String, List<Member>> cache = new ConcurrentHashMap<>();
   public final Map<String, UserRecord> users = new ConcurrentHashMap<>();
+  /** convId → userId → marks (CH3 conv_marks; never removed, like the real table). */
+  public final Map<String, Map<String, ChatStores.Marks>> convMarks = new ConcurrentHashMap<>();
+  /** userId|convId → state time. */
+  public final Map<String, Long> stateAt = new ConcurrentHashMap<>();
+  public final Map<String, ChatStores.Privacy> privacy = new ConcurrentHashMap<>();
+  public final Map<String, Long> lastSeen = new ConcurrentHashMap<>();
+  public final Map<String, Long> sent = new ConcurrentHashMap<>();
   /** convId|userId → join order, for membersByJoin. */
   public final Map<String, Long> joined = new ConcurrentHashMap<>();
   private final java.util.concurrent.atomic.AtomicLong joins = new java.util.concurrent.atomic.AtomicLong();
@@ -36,6 +44,10 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
   /** Fail this many message writes / inbox touches (then succeed). */
   public int failWrites;
   public int failTouches;
+  /** Conversation → how many more mark writes of it fail. */
+  public final Map<String, Integer> failAdvanceFor = new ConcurrentHashMap<>();
+  /** The next N sender-marks writes fail (fan-out retries them). */
+  public int failSent;
   public boolean evictFails;
   /** A message with this clientMsgId never writes: a deterministic (non-transient) failure. */
   public volatile String poisonClientMsgId;
@@ -108,7 +120,102 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
     }
     userConvs.computeIfAbsent(userId, k -> new ConcurrentHashMap<>()).merge(convId,
         new UserConv(convId, null, seq, 0, atMs),
-        (o, n) -> n.lastSeq() > o.lastSeq() ? new UserConv(convId, o.kind(), n.lastSeq(), o.readSeq(), n.lastMsgAtMs()) : o);
+        (o, n) -> n.lastSeq() > o.lastSeq()
+            ? new UserConv(convId, o.kind(), n.lastSeq(), o.readSeq(), n.lastMsgAtMs(), o.deliveredSeq()) : o);
+    touchState(userId, convId, System.currentTimeMillis());
+  }
+
+  // --- CH3 marks: each column keeps its max, as USING TIMESTAMP <mark> does in ScyllaDB ---
+
+  @Override public synchronized void advance(String convId, String userId, long deliveredSeq, long readSeq,
+      long atMs) {
+    check();
+    Integer left = failAdvanceFor.get(convId);
+    if (left != null && left > 0) {
+      failAdvanceFor.put(convId, left - 1);
+      throw new StoreUnavailableException("marks of " + convId + " down", null);
+    }
+    if (deliveredSeq <= 0 && readSeq <= 0) {
+      return;
+    }
+    convMarks.computeIfAbsent(convId, k -> new ConcurrentHashMap<>()).merge(userId,
+        new ChatStores.Marks(Math.max(0, deliveredSeq), Math.max(0, readSeq)),
+        (o, n) -> new ChatStores.Marks(Math.max(o.deliveredSeq(), n.deliveredSeq()), Math.max(o.readSeq(), n.readSeq())));
+    ChatStores.Marks m = convMarks.get(convId).get(userId);
+    userConvs.computeIfAbsent(userId, k -> new ConcurrentHashMap<>()).compute(convId, (k, o) -> o == null
+        ? new UserConv(convId, null, 0, m.readSeq(), 0, m.deliveredSeq())
+        : new UserConv(convId, o.kind(), o.lastSeq(), Math.max(o.readSeq(), m.readSeq()), o.lastMsgAtMs(),
+            Math.max(o.deliveredSeq(), m.deliveredSeq())));
+    touchState(userId, convId, atMs);
+  }
+
+  @Override public void sent(String convId, String userId, long seq, long atMs) {
+    synchronized (this) {
+      if (failSent > 0) {
+        failSent--;
+        throw new StoreUnavailableException("marks down", null);
+      }
+    }
+    advance(convId, userId, seq, seq, atMs);
+    sent.merge(convId + "|" + userId, seq, Math::max);
+  }
+
+  @Override public long sentSeq(String convId, String userId) {
+    return sent.getOrDefault(convId + "|" + userId, 0L);
+  }
+
+  @Override public void touchState(String userId, String convId, long atMs) {
+    stateAt.merge(userId + "|" + convId, atMs, Math::max);
+  }
+
+  @Override public List<ChatStores.MemberMarks> marks(String convId) {
+    check();
+    return convMarks.getOrDefault(convId, Map.of()).entrySet().stream()
+        .map(e -> new ChatStores.MemberMarks(e.getKey(), e.getValue().deliveredSeq(), e.getValue().readSeq())).toList();
+  }
+
+  @Override public ChatStores.Marks own(String userId, String convId) {
+    UserConv u = userConvs.getOrDefault(userId, Map.of()).get(convId);
+    return u == null ? ChatStores.Marks.NONE : new ChatStores.Marks(u.deliveredSeq(), u.readSeq());
+  }
+
+  @Override public List<ChatStores.UserConvState> changedSince(String userId, long sinceMs, String cursor, int limit) {
+    check();
+    return userConvs.getOrDefault(userId, Map.of()).values().stream()
+        .map(u -> new ChatStores.UserConvState(u.convId(), u.kind(), u.lastSeq(), u.readSeq(), u.deliveredSeq(),
+            stateAt.getOrDefault(userId + "|" + u.convId(), 0L)))
+        .filter(x -> x.stateAtMs() > sinceMs)
+        .filter(x -> cursor == null || cursor.isEmpty() || before(x, cursor))
+        .sorted(Comparator.comparingLong(ChatStores.UserConvState::stateAtMs).reversed()
+            .thenComparing(ChatStores.UserConvState::convId))
+        .limit(limit).toList();
+  }
+
+  private static boolean before(ChatStores.UserConvState x, String cursor) {
+    int colon = cursor.indexOf(':');
+    long at = Long.parseLong(cursor.substring(0, colon));
+    String id = cursor.substring(colon + 1);
+    return x.stateAtMs() < at || (x.stateAtMs() == at && x.convId().compareTo(id) > 0);
+  }
+
+  @Override public ChatStores.Privacy privacy(String userId) {
+    return privacy.getOrDefault(userId, ChatStores.Privacy.OPEN);
+  }
+
+  @Override public synchronized void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead,
+      long atMs) {
+    ChatStores.Privacy cur = privacy(userId);
+    privacy.put(userId, new ChatStores.Privacy(hidePresence == null ? cur.hidePresence() : hidePresence,
+        hideRead == null ? cur.hideRead() : hideRead));
+  }
+
+  @Override public java.util.OptionalLong lastSeen(String userId) {
+    Long v = lastSeen.get(userId);
+    return v == null ? java.util.OptionalLong.empty() : java.util.OptionalLong.of(v);
+  }
+
+  @Override public void putLastSeen(String userId, long atMs) {
+    lastSeen.put(userId, atMs);
   }
 
   @Override public void write(StoredMessage m) {

@@ -178,4 +178,5 @@ class ConversationsTest {
     assertThat(code(() -> checked.addMember("own", g.id(), "gone"))).isEqualTo("user_deleted");
     assertThat(code(() -> checked.openDm("own", "live"))).isEmpty();
   }
+
 }

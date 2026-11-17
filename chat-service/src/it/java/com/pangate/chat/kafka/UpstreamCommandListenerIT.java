@@ -234,4 +234,51 @@ class UpstreamCommandListenerIT {
       assertThat(took).as("ms for 16 commands").isLessThan(2_500);
     }
   }
+
+  /** CH3 spec §3.3: chat.read from the gateway lands on chat.receipts keyed by conversation; a bad payload is DLQ'd. */
+  @Test
+  void readOpLandsOnReceiptsTopic() throws Exception {
+    FakeStores stores = new FakeStores();
+    String conv = Ids.next();
+    stores.create(new Conversation(conv, ConversationKind.CONVERSATION_KIND_GROUP, "g", "u1", 0, false, 1),
+        List.of(new Member("u1", Role.MEMBER)));
+    stores.lastSeq.put(conv, 9L);
+    String upstream = "c1.gw.upstream.rd";
+    try (Admin a = Admin.create(Map.of("bootstrap.servers", kafka.getBootstrapServers()))) {
+      a.createTopics(List.of(new NewTopic(upstream, 1, (short) 1))).all().get();
+    }
+    try (CommandProducer producer = CommandProducer.create(kafka.getBootstrapServers(), Duration.ofSeconds(5),
+        ChatTopics.COMMANDS, "chat.commands.dlq.rd");
+        UpstreamCommandListener listener = new UpstreamCommandListener(UpstreamCommandListener.consumer(
+            kafka.getBootstrapServers()), upstream,
+            new Ingest(stores, stores, stores, producer, FakeStores.LIMITS, System::nanoTime,
+                System::currentTimeMillis),
+            (sender, r) -> { }, producer, outcome -> { },
+            new ChannelSubscriptions(stores, stores, r -> new CompletableFuture<>()),
+            new com.pangate.chat.core.StateIngest(new com.pangate.chat.core.MarkValidator(
+                new com.pangate.chat.core.MemberLookup(stores, stores),
+                new com.pangate.chat.core.LastSeqCache(stores, System::currentTimeMillis),
+                new com.pangate.chat.core.TokenBucketLimiter(50, 100, System::nanoTime), reason -> { }),
+                producer))) {
+      listener.start();
+      com.pangate.contracts.v1.ChatMark read = com.pangate.contracts.v1.ChatMark.newBuilder().setConversationId(conv)
+          .setUpToSeq(4).build();
+      try (KafkaProducer<String, byte[]> p = new KafkaProducer<>(Map.of("bootstrap.servers",
+          kafka.getBootstrapServers()), new StringSerializer(), new ByteArraySerializer())) {
+        p.send(new ProducerRecord<>(upstream, "chat:u1", upstream("chat", "chat:u1", "chat.read", read.toByteArray())));
+        p.send(new ProducerRecord<>(upstream, "chat:u1", upstream("chat", "chat:u1", "chat.delivered",
+            new byte[] {(byte) 0xff, 1, 2})));
+        p.flush();
+      }
+      assertThat(drain(ChatTopics.RECEIPTS, 1)).singleElement().satisfies(r -> {
+        assertThat(r.key()).isEqualTo(conv);
+        com.pangate.contracts.v1.ReceiptCommand c = com.pangate.contracts.v1.ReceiptCommand.parseFrom(r.value());
+        assertThat(c.getUserId()).isEqualTo("u1");
+        assertThat(c.getReadSeq()).isEqualTo(4);
+        assertThat(c.getDeliveredSeq()).isEqualTo(4);
+      });
+      assertThat(drain("chat.commands.dlq.rd", 1).stream().filter(r -> new String(r.headers().lastHeader("reason").value())
+          .contains("chat.delivered"))).hasSize(1);
+    }
+  }
 }

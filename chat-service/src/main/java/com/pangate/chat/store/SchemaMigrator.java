@@ -15,7 +15,8 @@ import java.util.List;
  */
 public final class SchemaMigrator {
 
-  static final List<String> MIGRATIONS = List.of("cql/V1__schema.cql", "cql/V2__users.cql");
+  static final List<String> MIGRATIONS = List.of("cql/V1__schema.cql", "cql/V2__users.cql", "cql/V3__state.cql",
+      "cql/V4__presence_links.cql");
 
   private SchemaMigrator() {}
 
@@ -30,7 +31,14 @@ public final class SchemaMigrator {
         continue;
       }
       for (String stmt : statements(MIGRATIONS.get(i))) {
-        s.execute(ScyllaSession.ddl(stmt.replace("${keyspace}", keyspace)));
+        try {
+          s.execute(ScyllaSession.ddl(stmt.replace("${keyspace}", keyspace)));
+        } catch (com.datastax.oss.driver.api.core.servererrors.InvalidQueryException e) {
+          // a migration interrupted before its schema_version row: the column is there already
+          if (!(stmt.strip().toUpperCase().startsWith("ALTER TABLE") && e.getMessage().toLowerCase().contains("exist"))) {
+            throw e;
+          }
+        }
       }
       s.execute(com.datastax.oss.driver.api.core.cql.SimpleStatement.newInstance(
           "INSERT INTO " + keyspace + ".schema_version (version, applied_at) VALUES (?, ?)", version, Instant.now()));
