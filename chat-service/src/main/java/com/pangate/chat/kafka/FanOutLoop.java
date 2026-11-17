@@ -287,6 +287,7 @@ public final class FanOutLoop implements AutoCloseable {
     while (true) {
       try {
         marks.advance(m.getConversationId(), m.getSenderId(), m.getConvSeq(), m.getConvSeq(), m.getSentAtMs());
+        marks.markSent(m.getConversationId(), m.getSenderId(), m.getConvSeq());   // presence rule (CH3 §6.3)
         return true;
       } catch (RuntimeException e) {
         meters.counter("chat.fanout.inbox.retries").increment();

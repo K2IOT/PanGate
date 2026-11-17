@@ -51,7 +51,7 @@ class StateControllerTest {
     presence.add("u2", "n1", 1, "c1");
     stores.add(conv, new Member("u2", Role.MEMBER));
     com.pangate.chat.core.PresenceWatch watch = new com.pangate.chat.core.PresenceWatch(stores,
-        new MemberLookup(stores, stores), new com.pangate.chat.core.FakeWatchers(System::currentTimeMillis), presence,
+        new MemberLookup(stores, stores), stores, stores, new com.pangate.chat.core.FakeWatchers(System::currentTimeMillis), presence,
         stores, privacy, r -> new java.util.concurrent.CompletableFuture<>(), System::currentTimeMillis,
         java.time.Duration.ofMinutes(5), 200);
     mvc = MockMvcBuilders.standaloneSetup(new StateController(state, new com.pangate.chat.core.StateService(stores,

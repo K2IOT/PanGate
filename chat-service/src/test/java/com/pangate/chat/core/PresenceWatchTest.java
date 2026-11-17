@@ -32,7 +32,7 @@ class PresenceWatchTest {
     return CompletableFuture.completedFuture(PushResponse.getDefaultInstance());
   };
   final com.pangate.chat.core.PresenceWatch watch = new com.pangate.chat.core.PresenceWatch(stores,
-      new MemberLookup(stores, stores), watchers, presence, stores, privacy, pusher, now::get, Duration.ofMinutes(5),
+      new MemberLookup(stores, stores), stores, stores, watchers, presence, stores, privacy, pusher, now::get, Duration.ofMinutes(5),
       200);
   final PresenceFanOut fanOut = new PresenceFanOut(watchers, presence, stores, privacy, pusher, now::get);
   final String g = conv(ConversationKind.CONVERSATION_KIND_GROUP, "me", "a", "b");
@@ -179,5 +179,39 @@ class PresenceWatchTest {
     PresenceUpdate.State s = PresenceUpdate.parseFrom(pushed.getFirst().getPayload()).getStates(0);
     assertThat(s.getOnline()).isFalse();
     assertThat(s.getLastSeenMs()).isEqualTo(at / 60_000 * 60_000);
+  }
+
+  /** Owner decision (2026-11-17): a DM counts only once the watched user has sent a message in it. */
+  @Test
+  void emptyDmDoesNotCount() {
+    String dm = conv(ConversationKind.CONVERSATION_KIND_DIRECT, "me", "x1");
+    watch.watch("me", "d1", of(dm, "x1"));
+    assertThat(watchers.watchersOf("x1", now.get())).isEmpty();
+    assertThat(pushed).isEmpty();
+    stores.markSent(dm, "me", 1);   // the viewer's own message does not count
+    watch.watch("me", "d1", of(dm, "x1"));
+    assertThat(watchers.watchersOf("x1", now.get())).isEmpty();
+    stores.markSent(dm, "x1", 2);
+    watch.watch("me", "d1", of(dm, "x1"));
+    assertThat(watchers.watchersOf("x1", now.get())).containsExactly("me/d1/" + dm);
+  }
+
+  /** Owner decision (2026-11-17): a group where the viewer added the watched user does not count, until they talk. */
+  @Test
+  void groupWhereTheViewerAddedTheUserDoesNotCount() {
+    String mine = conv(ConversationKind.CONVERSATION_KIND_GROUP, "me", "x2");
+    stores.recordAddedBy(mine, "x2", "me");
+    watch.watch("me", "d1", of(mine, "x2"));
+    assertThat(watchers.watchersOf("x2", now.get())).isEmpty();
+    assertThat(watch.states("me", mine, List.of("x2"))).isEmpty();   // HTTP too
+    stores.markSent(mine, "x2", 1);
+    watch.watch("me", "d1", of(mine, "x2"));
+    assertThat(watchers.watchersOf("x2", now.get())).hasSize(1);
+    String theirs = conv(ConversationKind.CONVERSATION_KIND_GROUP, "x3", "me", "x4");
+    stores.recordAddedBy(theirs, "x4", "x3");   // someone else added x4
+    stores.recordAddedBy(theirs, "me", "x3");
+    watch.watch("me", "d2", of(theirs, "x4", "x3"));
+    assertThat(watchers.watchersOf("x4", now.get())).hasSize(1);
+    assertThat(watchers.watchersOf("x3", now.get())).hasSize(1);   // x3 added me, not the other way round
   }
 }

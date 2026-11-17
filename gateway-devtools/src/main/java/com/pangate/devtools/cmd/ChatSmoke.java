@@ -244,6 +244,10 @@ final class ChatSmoke {
       System.out.printf("CHAT typing: typing -> peer in %.1f ms%n", (System.nanoTime() - t0) / 1e6);
 
       step.accept(STEPS.get(5));
+      // presence counts a DM once the watched user sent a message there (owner decision 2026-11-17)
+      command(cb, "chat.send", ChatSend.newBuilder().setConversationId(dm).setClientMsgId(ulid()).setText("hey")
+          .build().toByteArray());
+      next(ca, dm, T);
       command(ca, "chat.presence.watch", com.pangate.contracts.v1.PresenceWatch.newBuilder()
           .addEntries(com.pangate.contracts.v1.PresenceWatch.Entry.newBuilder().setUserId(b).setConversationId(dm))
           .build().toByteArray());

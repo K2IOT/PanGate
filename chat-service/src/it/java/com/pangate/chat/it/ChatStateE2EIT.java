@@ -91,6 +91,12 @@ class ChatStateE2EIT {
     return h.json(h.call("POST", "/v1/dm/" + b, a, null, Map.of())).get("id").asText();
   }
 
+  /** Presence counts a DM only once the watched user sent a message there (owner decision 2026-11-17). */
+  static void talk(GatewayClient c, String conv) {
+    command(c, "chat.send", chatSend(conv, "hello").toByteArray());
+    next(c, "chat.message");
+  }
+
   static void mark(GatewayClient c, String op, String conv, long seq) {
     command(c, op, ChatMark.newBuilder().setConversationId(conv).setUpToSeq(seq).build().toByteArray());
   }
@@ -212,6 +218,7 @@ class ChatStateE2EIT {
     GatewayClient b1 = h.connect(1, b, "d1");
     GatewayClient a1 = h.connect(0, a, "d1");
     String d = dm(a, b);
+    talk(b1, d);
     Thread.sleep(1_000);   // b's CONNECTED reached chat-service
     watch(a1, d, b);
     PresenceUpdate snap = PresenceUpdate.parseFrom(next(a1, ChatTopics.TYPE_PRESENCE).getPayload());
@@ -232,6 +239,7 @@ class ChatStateE2EIT {
     GatewayClient b1 = h.connect(1, b, "d1");
     GatewayClient a1 = h.connect(0, a, "d1");
     String d = dm(a, b);
+    talk(b1, d);
     Thread.sleep(1_000);
     watch(a1, d, b);
     next(a1, ChatTopics.TYPE_PRESENCE);
@@ -259,9 +267,10 @@ class ChatStateE2EIT {
   void hidePresenceIsReciprocal() throws Exception {
     String a = user("a");
     String b = user("b");
-    h.connect(1, b, "d1");
+    GatewayClient b1 = h.connect(1, b, "d1");
     GatewayClient a1 = h.connect(0, a, "d1");
     String d = dm(a, b);
+    talk(b1, d);
     assertThat(h.call("PUT", "/v1/me/privacy", a, Map.of("hidePresence", true), Map.of()).statusCode())
         .isEqualTo(204);
     Thread.sleep(1_000);
@@ -301,5 +310,24 @@ class ChatStateE2EIT {
     ids.add(m4.getMsgId());   // dedup by msg_id (chat spec §6)
     assertThat(seqs).containsExactly(1L, 2L, 3L, 4L);
     assertThat(ids).hasSize(4);
+  }
+
+  /** Owner decision 2026-11-17: an empty DM, or a group the viewer added the user to, does not reveal presence. */
+  @Test
+  void emptyDmOrSelfAddedGroupRevealsNothing() throws Exception {
+    String a = user("a");
+    String b = user("b");
+    h.connect(1, b, "d1");
+    GatewayClient a1 = h.connect(0, a, "d1");
+    String d = dm(a, b);
+    HttpResponse<String> r = h.call("POST", "/v1/conversations", a, Map.of("kind", "group", "title", "g",
+        "memberIds", List.of(b)), Map.of());
+    String g = h.json(r).get("id").asText();
+    watch(a1, d, b);
+    assertThat(poll(a1, ChatTopics.TYPE_PRESENCE, Duration.ofSeconds(2))).isNull();
+    watch(a1, g, b);
+    assertThat(poll(a1, ChatTopics.TYPE_PRESENCE, Duration.ofSeconds(2))).isNull();
+    assertThat(h.json(h.call("GET", "/v1/presence?ids=" + b + "&conversationId=" + g, a, null, Map.of()))
+        .get("states")).isEmpty();
   }
 }

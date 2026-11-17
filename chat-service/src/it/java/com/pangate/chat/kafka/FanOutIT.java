@@ -363,6 +363,8 @@ class FanOutIT {
         assertThat(r.stores().own(m7.senderId(), g)).isEqualTo(new com.pangate.chat.core.ChatStores.Marks(7, 7));
         assertThat(r.stores().own(m7.senderId(), ch)).isEqualTo(new com.pangate.chat.core.ChatStores.Marks(3, 3));
         assertThat(r.stores().own("u2", g)).isEqualTo(new com.pangate.chat.core.ChatStores.Marks(0, 0));
+        assertThat(r.stores().sentSeq(g, m7.senderId())).isEqualTo(7);   // presence rule
+        assertThat(r.stores().sentSeq(g, "u2")).isZero();
       });
     }
   }

@@ -15,7 +15,8 @@ import java.util.List;
  */
 public final class SchemaMigrator {
 
-  static final List<String> MIGRATIONS = List.of("cql/V1__schema.cql", "cql/V2__users.cql", "cql/V3__state.cql");
+  static final List<String> MIGRATIONS = List.of("cql/V1__schema.cql", "cql/V2__users.cql", "cql/V3__state.cql",
+      "cql/V4__presence_links.cql");
 
   private SchemaMigrator() {}
 

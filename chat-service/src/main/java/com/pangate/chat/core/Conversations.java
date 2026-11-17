@@ -85,6 +85,7 @@ public final class Conversations {
     Conversation c = new Conversation(Ids.next(), kind, t, userId, 0,
         kind == ConversationKind.CONVERSATION_KIND_CHANNEL && isPublic, ms.size());
     conversations.create(c, ms);
+    others.forEach(m -> members.recordAddedBy(c.id(), m, userId));   // presence rule (CH3 §6.3)
     return c;
   }
 
@@ -146,6 +147,7 @@ public final class Conversations {
       throw ChatRefusal.invalid("a group has at most " + limits.maxGroupMembers() + " members");
     }
     changeMembers(convId, () -> members.add(convId, new Member(userId, Role.MEMBER)));
+    members.recordAddedBy(convId, userId, actor);   // presence rule (CH3 §6.3)
   }
 
   /**

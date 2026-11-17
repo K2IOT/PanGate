@@ -164,7 +164,8 @@ public class ChatConfig {
       meters.counter("chat.presence.pushes").increment();
       return pusher.send(r);
     };
-    return new com.pangate.chat.core.PresenceWatch(store, new MemberLookup(store, cache), presence, presence, store,
+    return new com.pangate.chat.core.PresenceWatch(store, new MemberLookup(store, cache), store, store, presence,
+        presence, store,
         privacy, counted, System::currentTimeMillis, p.state().watchTtl(), p.state().watchMax());
   }
 

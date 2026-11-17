@@ -35,6 +35,8 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
   public final Map<String, Long> stateAt = new ConcurrentHashMap<>();
   public final Map<String, ChatStores.Privacy> privacy = new ConcurrentHashMap<>();
   public final Map<String, Long> lastSeen = new ConcurrentHashMap<>();
+  public final Map<String, String> addedBy = new ConcurrentHashMap<>();
+  public final Map<String, Long> sent = new ConcurrentHashMap<>();
   /** convId|userId → join order, for membersByJoin. */
   public final Map<String, Long> joined = new ConcurrentHashMap<>();
   private final java.util.concurrent.atomic.AtomicLong joins = new java.util.concurrent.atomic.AtomicLong();
@@ -137,6 +139,22 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
         : new UserConv(convId, o.kind(), o.lastSeq(), Math.max(o.readSeq(), m.readSeq()), o.lastMsgAtMs(),
             Math.max(o.deliveredSeq(), m.deliveredSeq())));
     touchState(userId, convId, atMs);
+  }
+
+  @Override public void recordAddedBy(String convId, String userId, String byUserId) {
+    addedBy.put(convId + "|" + userId, byUserId);
+  }
+
+  @Override public java.util.Optional<String> addedBy(String convId, String userId) {
+    return java.util.Optional.ofNullable(addedBy.get(convId + "|" + userId));
+  }
+
+  @Override public void markSent(String convId, String userId, long seq) {
+    sent.merge(convId + "|" + userId, seq, Math::max);
+  }
+
+  @Override public long sentSeq(String convId, String userId) {
+    return sent.getOrDefault(convId + "|" + userId, 0L);
   }
 
   @Override public void touchState(String userId, String convId, long atMs) {

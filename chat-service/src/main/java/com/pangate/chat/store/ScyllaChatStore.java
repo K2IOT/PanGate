@@ -57,6 +57,10 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   private final PreparedStatement inboxRead;
   private final PreparedStatement stampState;
   private final PreparedStatement selectMarks;
+  private final PreparedStatement markSentStmt;
+  private final PreparedStatement selectSent;
+  private final PreparedStatement setAddedBy;
+  private final PreparedStatement selectAddedBy;
   private final PreparedStatement selectOwn;
   private final PreparedStatement selectStates;
   private final PreparedStatement selectPrivacy;
@@ -97,6 +101,11 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
         + "WHERE user_id = ? AND conv_id = ?");
     inboxRead = s.prepare("UPDATE " + ks + ".user_convs USING TIMESTAMP ? SET read_seq = ? WHERE user_id = ? AND conv_id = ?");
     stampState = s.prepare("UPDATE " + ks + ".user_convs USING TIMESTAMP ? SET state_at = ? WHERE user_id = ? AND conv_id = ?");
+    markSentStmt = s.prepare("UPDATE " + ks + ".conv_marks USING TIMESTAMP ? SET last_sent_seq = ? "
+        + "WHERE conv_id = ? AND user_id = ?");
+    selectSent = s.prepare("SELECT last_sent_seq FROM " + ks + ".conv_marks WHERE conv_id = ? AND user_id = ?");
+    setAddedBy = s.prepare("UPDATE " + ks + ".members SET added_by = ? WHERE conv_id = ? AND user_id = ?");
+    selectAddedBy = s.prepare("SELECT added_by FROM " + ks + ".members WHERE conv_id = ? AND user_id = ?");
     selectMarks = s.prepare("SELECT user_id, delivered_seq, read_seq FROM " + ks + ".conv_marks WHERE conv_id = ?");
     selectOwn = s.prepare("SELECT delivered_seq, read_seq FROM " + ks + ".user_convs WHERE user_id = ? AND conv_id = ?");
     selectStates = s.prepare("SELECT conv_id, kind, last_seq, read_seq, delivered_seq, state_at, left FROM " + ks
@@ -305,6 +314,31 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     inbox.addStatement(stamp(userId, convId, atMs));
     exec(conv.build());
     exec(inbox.build());
+  }
+
+  @Override
+  public void markSent(String convId, String userId, long seq) {
+    if (seq > 0) {
+      exec(markSentStmt.bind(seq, seq, convId, userId));
+    }
+  }
+
+  @Override
+  public long sentSeq(String convId, String userId) {
+    Row r = exec(selectSent.bind(convId, userId)).one();
+    return r == null ? 0 : r.getLong(0);
+  }
+
+  /** Written after the member row; a membership removed meanwhile leaves a row with only added_by, never read. */
+  @Override
+  public void recordAddedBy(String convId, String userId, String byUserId) {
+    exec(setAddedBy.bind(byUserId, convId, userId));
+  }
+
+  @Override
+  public Optional<String> addedBy(String convId, String userId) {
+    Row r = exec(selectAddedBy.bind(convId, userId)).one();
+    return r == null || r.isNull(0) ? Optional.empty() : Optional.of(r.getString(0));
   }
 
   @Override

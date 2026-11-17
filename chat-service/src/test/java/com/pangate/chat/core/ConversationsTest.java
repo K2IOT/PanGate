@@ -178,4 +178,14 @@ class ConversationsTest {
     assertThat(code(() -> checked.addMember("own", g.id(), "gone"))).isEqualTo("user_deleted");
     assertThat(code(() -> checked.openDm("own", "live"))).isEmpty();
   }
+
+  /** Owner decision (2026-11-17): who added whom is recorded, for the presence rule. */
+  @Test
+  void whoAddedWhomIsRecorded() {
+    Conversation g = convs.create("u1", ConversationKind.CONVERSATION_KIND_GROUP, "g", List.of("u2"), false);
+    assertThat(stores.addedBy(g.id(), "u2")).hasValue("u1");
+    assertThat(stores.addedBy(g.id(), "u1")).isEmpty();
+    convs.addMember("u1", g.id(), "u3");
+    assertThat(stores.addedBy(g.id(), "u3")).hasValue("u1");
+  }
 }
