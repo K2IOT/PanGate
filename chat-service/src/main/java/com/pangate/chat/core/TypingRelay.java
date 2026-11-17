@@ -91,10 +91,12 @@ public final class TypingRelay {
       } catch (StoreUnavailableException e) {
         return "unavailable";
       }
+      java.util.Set<String> memberIds = new java.util.HashSet<>(current.size() * 2);
+      current.forEach(m -> memberIds.add(m.userId()));
       for (String d : devices) {
         int slash = d.indexOf('/');
         String u = d.substring(0, slash);
-        if (!u.equals(userId) && current.stream().anyMatch(m -> m.userId().equals(u))) {
+        if (!u.equals(userId) && memberIds.contains(u)) {
           send(StatePushes.ephemeral(u, d.substring(slash + 1), ChatTopics.TYPE_TYPING, payload,
               StatePushes.TYPING_TTL_SEC));
         }

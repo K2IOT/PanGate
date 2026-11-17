@@ -32,7 +32,7 @@ Over the gateway WebSocket, `UPSTREAM` with headers `type=cmd` and `op`:
 | `chat.channel.close` | `ChannelClose` | unsubscribes |
 | `chat.delivered` / `chat.read` | `ChatMark{conversation_id, up_to_seq}` | raise my marks (never back; clamped to the conversation's `last_seq`) |
 | `chat.typing` | `ChatTyping` | others in the DM / group get PUSH `type=chat.typing` (`TypingUpdate`, clear after `ttl_ms`) |
-| `chat.presence.watch` | `PresenceWatch{entries[≤200]: (user_id, conversation_id)}` | replaces this device's watch list (kept 5 min); a snapshot and later changes arrive as PUSH `type=chat.presence`. An entry counts only if both are members, not a channel, and the watched user took part: a DM once they sent a message there; a group the viewer added them to once they sent a message there |
+| `chat.presence.watch` | `PresenceWatch{entries[≤200]: (user_id, conversation_id)}` | replaces this device's watch list (kept 5 min); a snapshot and later changes arrive as PUSH `type=chat.presence`. An entry counts only if both are members, not a channel, and the watched user sent at least one message in that DM or group |
 
 Conversation-state pushes are EPHEMERAL: PUSH `type=chat.receipts` carries `ReceiptUpdate` (others' marks in a DM or
 a group ≤ 50, or `own_read_seq` to my other devices). See ADR 0039 for the sync contract: keep `syncedSeq` per

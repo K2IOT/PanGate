@@ -59,8 +59,6 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   private final PreparedStatement selectMarks;
   private final PreparedStatement markSentStmt;
   private final PreparedStatement selectSent;
-  private final PreparedStatement setAddedBy;
-  private final PreparedStatement selectAddedBy;
   private final PreparedStatement selectOwn;
   private final PreparedStatement selectStates;
   private final PreparedStatement selectPrivacy;
@@ -104,8 +102,6 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     markSentStmt = s.prepare("UPDATE " + ks + ".conv_marks USING TIMESTAMP ? SET last_sent_seq = ? "
         + "WHERE conv_id = ? AND user_id = ?");
     selectSent = s.prepare("SELECT last_sent_seq FROM " + ks + ".conv_marks WHERE conv_id = ? AND user_id = ?");
-    setAddedBy = s.prepare("UPDATE " + ks + ".members SET added_by = ? WHERE conv_id = ? AND user_id = ?");
-    selectAddedBy = s.prepare("SELECT added_by FROM " + ks + ".members WHERE conv_id = ? AND user_id = ?");
     selectMarks = s.prepare("SELECT user_id, delivered_seq, read_seq FROM " + ks + ".conv_marks WHERE conv_id = ?");
     selectOwn = s.prepare("SELECT delivered_seq, read_seq FROM " + ks + ".user_convs WHERE user_id = ? AND conv_id = ?");
     selectStates = s.prepare("SELECT conv_id, kind, last_seq, read_seq, delivered_seq, state_at, left FROM " + ks
@@ -296,6 +292,16 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
 
   @Override
   public void advance(String convId, String userId, long deliveredSeq, long readSeq, long atMs) {
+    advance(convId, userId, deliveredSeq, readSeq, 0, atMs);
+  }
+
+  /** Review of PR #6: the sender's three marks go in the same conv_marks batch, one round trip per message. */
+  @Override
+  public void sent(String convId, String userId, long seq, long atMs) {
+    advance(convId, userId, seq, seq, seq, atMs);
+  }
+
+  private void advance(String convId, String userId, long deliveredSeq, long readSeq, long sentSeq, long atMs) {
     var conv = com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
         com.datastax.oss.driver.api.core.cql.DefaultBatchType.UNLOGGED);
     var inbox = com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
@@ -308,6 +314,9 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
       conv.addStatement(markRead.bind(readSeq, readSeq, convId, userId));
       inbox.addStatement(inboxRead.bind(readSeq, readSeq, userId, convId));
     }
+    if (sentSeq > 0) {
+      conv.addStatement(markSentStmt.bind(sentSeq, sentSeq, convId, userId));
+    }
     if (deliveredSeq <= 0 && readSeq <= 0) {
       return;
     }
@@ -317,28 +326,9 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   }
 
   @Override
-  public void markSent(String convId, String userId, long seq) {
-    if (seq > 0) {
-      exec(markSentStmt.bind(seq, seq, convId, userId));
-    }
-  }
-
-  @Override
   public long sentSeq(String convId, String userId) {
     Row r = exec(selectSent.bind(convId, userId)).one();
     return r == null ? 0 : r.getLong(0);
-  }
-
-  /** Written after the member row; a membership removed meanwhile leaves a row with only added_by, never read. */
-  @Override
-  public void recordAddedBy(String convId, String userId, String byUserId) {
-    exec(setAddedBy.bind(byUserId, convId, userId));
-  }
-
-  @Override
-  public Optional<String> addedBy(String convId, String userId) {
-    Row r = exec(selectAddedBy.bind(convId, userId)).one();
-    return r == null || r.isNull(0) ? Optional.empty() : Optional.of(r.getString(0));
   }
 
   @Override

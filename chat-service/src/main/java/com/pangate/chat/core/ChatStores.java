@@ -60,8 +60,11 @@ public final class ChatStores {
     /** The user's own marks; {@link Marks#NONE} when none. */
     Marks own(String userId, String convId);
 
-    /** The user sent message {@code seq} here (fan-out); kept as the highest such seq, never back. */
-    void markSent(String convId, String userId, long seq);
+    /**
+     * The user sent message {@code seq} here (fan-out): delivered and read up to it (§3.1), and the highest seq they
+     * sent (the presence rule, §6.3), never back. One write.
+     */
+    void sent(String convId, String userId, long seq, long atMs);
 
     /** The highest seq this user sent in the conversation; 0 = never sent there. */
     long sentSeq(String convId, String userId);
@@ -114,13 +117,6 @@ public final class ChatStores {
 
     /** Raises the user's last_seq / last_msg_at for the conversation; a lower seq never wins. */
     void touchUserConv(String userId, String convId, long seq, long atMs);
-
-    /** Owner decision 2026-11-17 (CH3 spec §6.3): who added {@code userId} to the conversation. */
-    default void recordAddedBy(String convId, String userId, String byUserId) {}
-
-    default Optional<String> addedBy(String convId, String userId) {
-      return Optional.empty();
-    }
 
     /** Members, earliest joined first (owner succession, account spec §8). */
     default List<Member> membersByJoin(String convId) {

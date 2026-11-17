@@ -192,8 +192,14 @@ public final class ReceiptWorkerLoop implements AutoCloseable {
     return c.map(ChatStores.Conversation::kind);
   }
 
-  /** False when the store failed: the caller rewinds. */
+  /**
+   * False when the store failed: the caller rewinds. Review of PR #6: every due conversation's marks are written
+   * first and nothing is pushed unless all of them were, so a rewind never repeats a push; then all pushes of the step
+   * go out together, one set of rounds per step however many conversations were due.
+   */
   private boolean flushDue() {
+    List<PushRequest> pushes = new java.util.ArrayList<>();
+    List<String> flushed = new java.util.ArrayList<>();
     for (ReceiptAggregator.Flush f : agg.due()) {
       List<Member> to;
       try {
@@ -214,9 +220,11 @@ public final class ReceiptWorkerLoop implements AutoCloseable {
         log.warn("receipt marks of {} not written: {}", f.convId(), e.toString());
         return false;
       }
-      firstPending.remove(f.convId());
-      push(ReceiptRecipients.plan(f, to, privacy::of, cfg.listedReceiptsMax()));
+      flushed.add(f.convId());
+      pushes.addAll(ReceiptRecipients.plan(f, to, privacy::of, cfg.listedReceiptsMax()));
     }
+    flushed.forEach(firstPending::remove);
+    push(pushes);
     return true;
   }
 

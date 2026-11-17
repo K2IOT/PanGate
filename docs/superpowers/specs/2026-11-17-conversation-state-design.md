@@ -15,7 +15,7 @@
 
 | # | Câu hỏi | Quyết định |
 |---|---|---|
-| S1 | Ai thấy một người online / lần cuối hoạt động | Chỉ người đang chung ít nhất một hội thoại (DM hoặc nhóm) với họ. Người lạ không thấy. Bổ sung sau review (chủ dự án duyệt): DM chỉ tính khi người được xem đã gửi ít nhất một tin trong đó; nhóm do chính người xem thêm người kia vào không tính, cho tới khi người kia gửi tin trong nhóm đó |
+| S1 | Ai thấy một người online / lần cuối hoạt động | Chỉ người đang chung ít nhất một hội thoại (DM hoặc nhóm) với họ. Người lạ không thấy. Bổ sung sau review (chủ dự án duyệt): DM hay nhóm chỉ tính khi người được xem đã gửi ít nhất một tin trong đó (ai tạo nhóm hay ai thêm ai đều không chứng minh gì: một tài khoản phụ tạo được nhóm) |
 | S2 | Hiển thị online | "Đang hoạt động" hoặc "Hoạt động N phút trước"; quá 7 ngày chỉ "Hoạt động gần đây", không lộ giờ |
 | S3 | Đã nhận / đã xem | DM: Đã gửi → Đã nhận → Đã xem từng tin. Nhóm ≤ 50 người: danh sách ai đã xem. Nhóm 51–500: chỉ "N người đã xem". Kênh: không có |
 | S4 | Tắt được | Tắt online thì không ai thấy mình và mình không thấy ai. Tắt "đã xem" cũng có qua có lại. Số chưa đọc của mình vẫn đúng |
@@ -233,7 +233,7 @@ Một nhóm 50 người đang sôi nổi tốn tối đa 50 push mỗi 2 s, khô
 
 - Client gửi `chat.presence.watch` với danh sách `(userId, conversationId)`, tối đa 200: những người đang hiện trên màn hình (danh sách hội thoại, hội thoại đang mở, danh sách thành viên). Mỗi lần gửi **thay toàn bộ** danh sách của thiết bị đó. Client gửi lại khi đổi màn hình, sau khi nối lại, và mỗi 4 phút.
 - **Kiểm quyền từng mục:** cả người xem và `userId` là thành viên của `conversationId` (cache thành viên của CH1), và hội thoại không phải kênh. Mục sai thì bỏ lặng lẽ (không tiết lộ người đó có tồn tại không).
-- **Hội thoại phải chứng minh được quan hệ** (S1, bổ sung sau review): DM chỉ tính khi `userId` đã gửi ít nhất một tin trong đó (`conv_marks.last_sent_seq`, fan-out ghi); nhóm mà chính người xem đã thêm `userId` vào (`members.added_by`) không tính cho tới khi `userId` gửi tin trong nhóm. Chặn việc người lạ tự mở DM trống hoặc tự tạo nhóm để dò online. Migration `V4`.
+- **Hội thoại phải chứng minh được quan hệ** (S1, bổ sung sau review): DM hay nhóm chỉ tính khi `userId` đã gửi ít nhất một tin trong đó (`conv_marks.last_sent_seq`, fan-out ghi cùng lượt với mark của người gửi). Chặn việc người lạ tự mở DM trống, tự tạo nhóm, hay nhờ tài khoản phụ tạo nhóm để dò online. Migration `V4`.
 - Lưu: `watchers:{userId}` (sorted set, phần tử `<viewer>/<device>/<conversationId>`, điểm = hạn = now + 5 phút) và `watching:{viewer}/{device}` (danh sách đang xem, để thay thế). Hết hạn thì tự rơi.
 - Trả ngay **ảnh chụp**: một `PresenceUpdate` với trạng thái hiện tại của mọi mục hợp lệ, đẩy tới đúng thiết bị (`PushRequest.device_id`).
 - **`PresenceFanOut`:** khi một user chuyển online/offline, đọc `watchers:{user}` (bỏ phần tử hết hạn), lọc theo §8, đẩy `PresenceUpdate` (EPHEMERAL, `ttl_sec=30`) tới từng thiết bị đang xem.

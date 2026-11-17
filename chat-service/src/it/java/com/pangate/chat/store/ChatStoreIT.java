@@ -246,19 +246,15 @@ class ChatStoreIT {
         .extracting(com.pangate.chat.core.ChatStores.UserConvState::convId).contains(c);
   }
 
-  /** Owner decision 2026-11-17: who sent here and who added whom, for the presence rule. */
+  /** Owner decision 2026-11-17 + review of PR #6: the sender's marks and last sent seq in one write, never back. */
   @Test
-  void sentSeqAndAddedByRoundTrip() {
+  void senderMarksRoundTrip() {
     String c = conv(ConversationKind.CONVERSATION_KIND_GROUP, "sb1", "sb2");
     assertThat(store.sentSeq(c, "sb2")).isZero();
-    store.markSent(c, "sb2", 5);
-    store.markSent(c, "sb2", 3);
+    store.sent(c, "sb2", 5, 1_000);
+    store.sent(c, "sb2", 3, 2_000);
     assertThat(store.sentSeq(c, "sb2")).isEqualTo(5);
-    assertThat(store.addedBy(c, "sb2")).isEmpty();
-    store.recordAddedBy(c, "sb2", "sb1");
-    assertThat(store.addedBy(c, "sb2")).hasValue("sb1");
-    store.remove(c, "sb2");
-    store.add(c, new Member("sb2", Role.MEMBER));
-    assertThat(store.addedBy(c, "sb2")).isEmpty();   // a re-add starts over
+    assertThat(store.own("sb2", c).deliveredSeq()).isEqualTo(5);
+    assertThat(store.own("sb2", c).readSeq()).isEqualTo(5);
   }
 }

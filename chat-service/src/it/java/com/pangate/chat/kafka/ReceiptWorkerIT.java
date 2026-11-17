@@ -178,4 +178,68 @@ class ReceiptWorkerIT {
           stores.own("h" + groups.indexOf(g) + "_1", g).equals(new Marks(3, 3))));
     }
   }
+
+  static String singlePartitionTopic() throws Exception {
+    String t = "rc1-" + Ids.next();
+    try (Admin a = Admin.create(Map.of("bootstrap.servers", kafka.getBootstrapServers()))) {
+      a.createTopics(List.of(new NewTopic(t, 1, (short) 1))).all().get();
+    }
+    return t;
+  }
+
+  /**
+   * Review of PR #6: a Push API that never answers costs one set of push rounds per step, not one per conversation,
+   * so the marks of every conversation due together are written at once and poll() is not starved.
+   */
+  @Test
+  void hungPushApiCostsOneRoundSetPerStep() throws Exception {
+    String t = singlePartitionTopic();
+    FakeStores stores = new FakeStores();
+    ReceiptWorkerLoop loop = new ReceiptWorkerLoop(ReceiptWorkerLoop.consumer(kafka.getBootstrapServers(),
+        "rw-" + t), t, stores, new MemberLookup(stores, stores), stores, new PrivacyCache(stores,
+        System::currentTimeMillis), r -> new CompletableFuture<>(), STATE, new SimpleMeterRegistry());
+    try (loop) {
+      List<String> groups = new java.util.ArrayList<>();
+      for (int i = 0; i < 8; i++) {
+        groups.add(conv(stores, ConversationKind.CONVERSATION_KIND_GROUP, "q" + i + "a", "q" + i + "b"));
+      }
+      loop.start();
+      Thread.sleep(2_000);   // assigned
+      send(t, groups.stream().map(g -> read(g, "q" + groups.indexOf(g) + "b", 3)).toArray(ReceiptCommand[]::new));
+      // one flush after another that is 8 x 3 rounds x 3 s before the last marks are written
+      await().atMost(Duration.ofSeconds(20)).until(() -> groups.stream().allMatch(g ->
+          stores.own("q" + groups.indexOf(g) + "b", g).equals(new Marks(3, 3))));
+    }
+  }
+
+  /** Review of PR #6: a store failure part-way through a step does not push the earlier conversations twice. */
+  @Test
+  void storeFailureMidStepDoesNotRepeatPushes() throws Exception {
+    String t = singlePartitionTopic();
+    try (Rig r = rig(t)) {
+      List<String> groups = new java.util.ArrayList<>();
+      for (int i = 0; i < 6; i++) {
+        groups.add(conv(r.stores(), ConversationKind.CONVERSATION_KIND_GROUP, "p" + i + "a", "p" + i + "b"));
+      }
+      // the aggregator iterates a HashMap: fail the conversation it flushes last, after the others were handled
+      java.util.Map<String, Boolean> order = new java.util.HashMap<>();
+      groups.forEach(g -> order.put(g, true));
+      String last = null;
+      for (String g : order.keySet()) {
+        last = g;
+      }
+      r.stores().failAdvanceFor.put(last, 2);
+      r.loop().start();
+      Thread.sleep(2_000);   // assigned
+      send(t, groups.stream().map(g -> read(g, "p" + groups.indexOf(g) + "b", 3)).toArray(ReceiptCommand[]::new));
+      await().atMost(Duration.ofSeconds(30)).until(() -> groups.stream().allMatch(g ->
+          r.stores().own("p" + groups.indexOf(g) + "b", g).equals(new Marks(3, 3))));
+      Thread.sleep(1_000);
+      for (String g : groups) {
+        String peer = "chat:p" + groups.indexOf(g) + "a";
+        assertThat(r.pushed().stream().filter(p -> p.getPrincipalId().equals(peer)).count())
+            .as("receipt pushes to %s", peer).isEqualTo(1);
+      }
+    }
+  }
 }

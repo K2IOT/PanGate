@@ -11,7 +11,8 @@
     for reconnecting clients;
   - typing (`chat.typing`, relayed directly, 6 s TTL);
   - presence from `c1.gw.lifecycle` with a 5 s offline grace, pushed only to devices that watch the user
-    (`chat.presence.watch`, shared-conversation check); `GET /v1/presence`;
+    (`chat.presence.watch`, shared-conversation check: the watched user must have sent a message in that DM or
+    group); `GET /v1/presence`;
   - reciprocal privacy (`GET|PUT /v1/me/privacy`: `hidePresence`, `hideRead`);
   - the client sync contract (ADR 0039).
 - Contracts: `ChatMark`, `ChatTyping`, `PresenceWatch`, `ReceiptUpdate`, `TypingUpdate`, `PresenceUpdate`,

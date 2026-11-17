@@ -124,7 +124,7 @@ class FanOutIT {
   }
 
   record Rig(FakeStores stores, FakePushApi api, Server server, PushApiClient client, FanOutLoop loop,
-      String group) implements AutoCloseable {
+      String group, SimpleMeterRegistry meters) implements AutoCloseable {
     @Override
     public void close() {
       loop.close();
@@ -140,9 +140,10 @@ class FanOutIT {
     Server server = InProcessServerBuilder.forName(name).addService(api).build().start();
     PushApiClient client = new PushApiClient(InProcessChannelBuilder.forName(name).build(), Duration.ofSeconds(2));
     String group = "fanout-" + topic;
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
     FanOutLoop loop = new FanOutLoop(SequencerLoop.consumer(kafka.getBootstrapServers(), group), topic,
-        new MemberLookup(stores, stores), stores, stores, client, new SimpleMeterRegistry());
-    return new Rig(stores, api, server, client, loop, group);
+        new MemberLookup(stores, stores), stores, stores, client, meters);
+    return new Rig(stores, api, server, client, loop, group, meters);
   }
 
   @Test
@@ -299,6 +300,25 @@ class FanOutIT {
       await().atMost(Duration.ofSeconds(30)).until(() -> r.stores().touches == 2);
       await().atMost(Duration.ofSeconds(10)).until(() -> committed(t, r.group()) == end(t));
       assertThat(r.api().sends.get()).as("one push per member").isEqualTo(2);
+    }
+  }
+
+  /** Review of PR #6: a failing sender-marks write is retried and counted apart from the inbox writes. */
+  @Test
+  void senderMarksRetriesHaveTheirOwnCounter() throws Exception {
+    String t = topic();
+    try (Rig r = rig(t); EventProducer events = EventProducer.create(kafka.getBootstrapServers(), t,
+        Duration.ofSeconds(5))) {
+      String dm = Ids.next();
+      r.stores().create(new Conversation(dm, ConversationKind.CONVERSATION_KIND_DIRECT, "", "u1", 0, false, 2),
+          List.of(new Member("u1", Role.MEMBER), new Member("u2", Role.MEMBER)));
+      r.stores().failSent = 2;
+      r.loop().start();
+      StoredMessage m = msg(dm, 1);
+      events.send(SequencerLoop.event(m, ConversationKind.CONVERSATION_KIND_DIRECT));
+      await().atMost(Duration.ofSeconds(30)).until(() -> r.stores().sentSeq(dm, m.senderId()) == 1);
+      assertThat(r.meters().counter("chat.fanout.marks.retries").count()).isEqualTo(2);
+      assertThat(r.meters().counter("chat.fanout.inbox.retries").count()).isZero();
     }
   }
 

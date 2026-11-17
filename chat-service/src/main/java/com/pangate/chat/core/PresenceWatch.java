@@ -16,15 +16,14 @@ import java.util.function.LongSupplier;
 /**
  * CH3 spec §6.3: a device says whom it shows on screen, each with a conversation both share. An entry is kept only
  * when both are members of that conversation and it is not a channel, and (owner decision 2026-11-17) the watched
- * user took part in it: a DM counts once they sent a message there; a group the viewer added them to counts only
- * once they sent a message there. Others are dropped without a word (nothing tells whether such a user exists). The device's list is replaced, kept for {@code ttl}, and answered at once with
+ * user sent at least one message in it, DM or group alike. Others are dropped without a word (nothing tells whether
+ * such a user exists). The device's list is replaced, kept for {@code ttl}, and answered at once with
  * a snapshot to that device. The watch of a user who hides presence is still stored: typing uses it.
  */
 public final class PresenceWatch {
 
   private final ChatStores.ConversationStore conversations;
   private final MemberLookup members;
-  private final ChatStores.MemberStore memberStore;
   private final ChatStores.MarkStore marks;
   private final Watchers watchers;
   private final PresenceState presence;
@@ -36,11 +35,11 @@ public final class PresenceWatch {
   private final int max;
 
   public PresenceWatch(ChatStores.ConversationStore conversations, MemberLookup members,
-      ChatStores.MemberStore memberStore, ChatStores.MarkStore marks, Watchers watchers, PresenceState presence, ChatStores.LastSeenStore durable, PrivacyCache privacy, Pusher pusher,
+      ChatStores.MarkStore marks, Watchers watchers, PresenceState presence, ChatStores.LastSeenStore durable,
+      PrivacyCache privacy, Pusher pusher,
       LongSupplier wallMs, Duration ttl, int max) {
     this.conversations = conversations;
     this.members = members;
-    this.memberStore = memberStore;
     this.marks = marks;
     this.watchers = watchers;
     this.presence = presence;
@@ -100,12 +99,9 @@ public final class PresenceWatch {
     if (ms.stream().noneMatch(m -> m.userId().equals(viewer)) || ms.stream().noneMatch(m -> m.userId().equals(user))) {
       return false;
     }
-    // owner decision 2026-11-17: a conversation proves a relationship only once the watched user took part in it
-    boolean talked = marks.sentSeq(convId, user) > 0;
-    if (c.get().kind() == ConversationKind.CONVERSATION_KIND_DIRECT) {
-      return talked;   // an empty DM anyone can open proves nothing
-    }
-    return talked || !memberStore.addedBy(convId, user).map(viewer::equals).orElse(false);
+    // owner decision 2026-11-17: a DM or group proves a relationship only once the watched user sent a message in it
+    // (anyone can open an empty DM, and a second account can create a group)
+    return marks.sentSeq(convId, user) > 0;
   }
 
   PresenceUpdate.State stateFor(String user, String viewer, long now) {

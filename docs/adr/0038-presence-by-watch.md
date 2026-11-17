@@ -14,7 +14,7 @@ Báo online cho mọi người chung hội thoại khi trạng thái đổi tố
 - Tập về rỗng thì chờ ân hạn 5 s; vẫn rỗng mới là offline, `last_seen` = lúc ngắt; nối lại trong ân hạn không phát gì.
 - Client gửi `chat.presence.watch` với tối đa 200 cặp `(userId, conversationId)` đang hiện trên màn hình, gửi lại mỗi 4 phút; server giữ 5 phút. Mỗi mục chỉ được giữ khi cả hai là thành viên của hội thoại đó (không phải kênh); mục sai bỏ lặng lẽ.
 - Thay đổi chỉ đẩy tới thiết bị đang xem; ẩn online là có qua có lại; không có push nào cho cặp không được thấy (kể cả push "ẩn", vì nó lộ thời điểm).
-- Bổ sung sau review (chủ dự án duyệt 2026-11-17): DM chỉ tính khi người được xem đã gửi tin trong đó; nhóm do chính người xem thêm người kia vào chỉ tính khi người kia đã gửi tin trong nhóm. Một DM trống hay một nhóm tự lập không đủ để dò online.
+- Bổ sung sau review (chủ dự án duyệt 2026-11-17): DM hay nhóm chỉ tính khi người được xem đã gửi tin trong đó. Một DM trống, một nhóm tự lập hay một nhóm do tài khoản phụ lập đều không đủ để dò online (sau review PR #6, bỏ luật "ai thêm ai" vì tài khoản phụ lách được).
 
 ## Hệ quả
 

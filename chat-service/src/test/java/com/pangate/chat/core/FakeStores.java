@@ -35,7 +35,6 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
   public final Map<String, Long> stateAt = new ConcurrentHashMap<>();
   public final Map<String, ChatStores.Privacy> privacy = new ConcurrentHashMap<>();
   public final Map<String, Long> lastSeen = new ConcurrentHashMap<>();
-  public final Map<String, String> addedBy = new ConcurrentHashMap<>();
   public final Map<String, Long> sent = new ConcurrentHashMap<>();
   /** convId|userId → join order, for membersByJoin. */
   public final Map<String, Long> joined = new ConcurrentHashMap<>();
@@ -45,6 +44,10 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
   /** Fail this many message writes / inbox touches (then succeed). */
   public int failWrites;
   public int failTouches;
+  /** Conversation → how many more mark writes of it fail. */
+  public final Map<String, Integer> failAdvanceFor = new ConcurrentHashMap<>();
+  /** The next N sender-marks writes fail (fan-out retries them). */
+  public int failSent;
   public boolean evictFails;
   /** A message with this clientMsgId never writes: a deterministic (non-transient) failure. */
   public volatile String poisonClientMsgId;
@@ -127,6 +130,11 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
   @Override public synchronized void advance(String convId, String userId, long deliveredSeq, long readSeq,
       long atMs) {
     check();
+    Integer left = failAdvanceFor.get(convId);
+    if (left != null && left > 0) {
+      failAdvanceFor.put(convId, left - 1);
+      throw new StoreUnavailableException("marks of " + convId + " down", null);
+    }
     if (deliveredSeq <= 0 && readSeq <= 0) {
       return;
     }
@@ -141,15 +149,14 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
     touchState(userId, convId, atMs);
   }
 
-  @Override public void recordAddedBy(String convId, String userId, String byUserId) {
-    addedBy.put(convId + "|" + userId, byUserId);
-  }
-
-  @Override public java.util.Optional<String> addedBy(String convId, String userId) {
-    return java.util.Optional.ofNullable(addedBy.get(convId + "|" + userId));
-  }
-
-  @Override public void markSent(String convId, String userId, long seq) {
+  @Override public void sent(String convId, String userId, long seq, long atMs) {
+    synchronized (this) {
+      if (failSent > 0) {
+        failSent--;
+        throw new StoreUnavailableException("marks down", null);
+      }
+    }
+    advance(convId, userId, seq, seq, atMs);
     sent.merge(convId + "|" + userId, seq, Math::max);
   }
 

@@ -312,22 +312,32 @@ class ChatStateE2EIT {
     assertThat(ids).hasSize(4);
   }
 
-  /** Owner decision 2026-11-17: an empty DM, or a group the viewer added the user to, does not reveal presence. */
+  /**
+   * Owner decision 2026-11-17 (after review of PR #6): a DM or a group reveals nothing until the watched user sent a
+   * message there, whoever made it (a second account can create a group).
+   */
   @Test
-  void emptyDmOrSelfAddedGroupRevealsNothing() throws Exception {
+  void conversationWithoutTheirMessageRevealsNothing() throws Exception {
     String a = user("a");
     String b = user("b");
+    String c = user("c");
     h.connect(1, b, "d1");
     GatewayClient a1 = h.connect(0, a, "d1");
     String d = dm(a, b);
     HttpResponse<String> r = h.call("POST", "/v1/conversations", a, Map.of("kind", "group", "title", "g",
         "memberIds", List.of(b)), Map.of());
     String g = h.json(r).get("id").asText();
+    String puppet = h.json(h.call("POST", "/v1/conversations", c, Map.of("kind", "group", "title", "p",
+        "memberIds", List.of(a, b)), Map.of())).get("id").asText();
     watch(a1, d, b);
     assertThat(poll(a1, ChatTopics.TYPE_PRESENCE, Duration.ofSeconds(2))).isNull();
     watch(a1, g, b);
     assertThat(poll(a1, ChatTopics.TYPE_PRESENCE, Duration.ofSeconds(2))).isNull();
-    assertThat(h.json(h.call("GET", "/v1/presence?ids=" + b + "&conversationId=" + g, a, null, Map.of()))
-        .get("states")).isEmpty();
+    watch(a1, puppet, b);
+    assertThat(poll(a1, ChatTopics.TYPE_PRESENCE, Duration.ofSeconds(2))).isNull();
+    for (String conv : List.of(g, puppet)) {
+      assertThat(h.json(h.call("GET", "/v1/presence?ids=" + b + "&conversationId=" + conv, a, null, Map.of()))
+          .get("states")).isEmpty();
+    }
   }
 }
