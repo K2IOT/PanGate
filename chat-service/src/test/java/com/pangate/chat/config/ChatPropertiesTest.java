@@ -16,6 +16,17 @@ class ChatPropertiesTest {
     ChatProperties p = new Binder(new MapConfigurationPropertySource(Map.of("chat.cell", "c1")))
         .bind("chat", ChatProperties.class).get();
     assertThat(p.cell()).isEqualTo("c1");
+    // CH3 spec §3.3, §3.4, §5, §6
+    assertThat(p.state().markRate()).isEqualTo(50);
+    assertThat(p.state().markBurst()).isEqualTo(100);
+    assertThat(p.state().dmWindow()).isEqualTo(java.time.Duration.ofMillis(500));
+    assertThat(p.state().groupWindow()).isEqualTo(java.time.Duration.ofSeconds(2));
+    assertThat(p.state().listedReceiptsMax()).isEqualTo(50);
+    assertThat(p.state().offlineGrace()).isEqualTo(java.time.Duration.ofSeconds(5));
+    assertThat(p.state().watchTtl()).isEqualTo(java.time.Duration.ofMinutes(5));
+    assertThat(p.state().watchMax()).isEqualTo(200);
+    assertThat(p.state().typingEvery()).isEqualTo(java.time.Duration.ofSeconds(2));
+    assertThat(p.kafka().receiptsTopic()).isEqualTo("chat.receipts");
     assertThat(p.kafka().commandsTopic()).isEqualTo("chat.commands");
     assertThat(p.kafka().eventsTopic()).isEqualTo("chat.events");
     assertThat(p.kafka().dlqTopic()).isEqualTo("chat.commands.dlq");

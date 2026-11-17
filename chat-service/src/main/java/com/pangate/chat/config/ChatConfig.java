@@ -95,7 +95,17 @@ public class ChatConfig {
   @Bean(destroyMethod = "")
   CommandProducer commandProducer(ChatProperties p) {
     return CommandProducer.create(p.kafka().bootstrap(), p.kafka().produceTimeout(), p.kafka().commandsTopic(),
-        p.kafka().dlqTopic());
+        p.kafka().dlqTopic(), p.kafka().receiptsTopic());
+  }
+
+  /** CH3 spec §3.3: delivered / read marks into chat.receipts. */
+  @Bean
+  com.pangate.chat.core.StateIngest stateIngest(ScyllaChatStore store, RedisChatCache cache, CommandProducer producer,
+      ChatProperties p, MeterRegistry meters) {
+    return new com.pangate.chat.core.StateIngest(new com.pangate.chat.core.MarkValidator(
+        new MemberLookup(store, cache), new com.pangate.chat.core.LastSeqCache(store, () -> System.nanoTime() / 1_000_000),
+        new com.pangate.chat.core.TokenBucketLimiter(p.state().markRate(), p.state().markBurst(), System::nanoTime),
+        reason -> meters.counter("chat.receipts.rejected", "reason", reason).increment()), producer);
   }
 
   @Bean
@@ -215,10 +225,11 @@ public class ChatConfig {
 
   @Bean(destroyMethod = "")
   UpstreamCommandListener upstreamCommandListener(ChatProperties p, Ingest ingest, Notifier notifier,
-      CommandProducer producer, MeterRegistry meters, ChannelSubscriptions channels) {
+      CommandProducer producer, MeterRegistry meters, ChannelSubscriptions channels,
+      com.pangate.chat.core.StateIngest state) {
     return new UpstreamCommandListener(UpstreamCommandListener.consumer(p.kafka().bootstrap()),
         p.kafka().upstreamTopic(), ingest, notifier, producer,
-        outcome -> meters.counter("chat.ingest.records", "result", outcome).increment(), channels);
+        outcome -> meters.counter("chat.ingest.records", "result", outcome).increment(), channels, state);
   }
 
   @Bean

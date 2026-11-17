@@ -59,6 +59,7 @@ public final class UpstreamCommandListener implements AutoCloseable {
   private final CommandProducer dlq;
   private final Consumer<String> onOutcome;
   private final ChannelSubscriptions channels;
+  private final com.pangate.chat.core.StateCommands state;
   private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
   private final PoisonGuard poison = new PoisonGuard();
   private volatile boolean running = true;
@@ -68,6 +69,14 @@ public final class UpstreamCommandListener implements AutoCloseable {
   public UpstreamCommandListener(org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer, String topic,
       Ingest ingest, Notifier notifier, CommandProducer dlq, Consumer<String> onOutcome,
       ChannelSubscriptions channels) {
+    this(consumer, topic, ingest, notifier, dlq, onOutcome, channels, com.pangate.chat.core.StateCommands.NONE);
+  }
+
+  /** {@code state}: the CH3 ops ({@code chat.delivered}, {@code chat.read}, {@code chat.typing}, {@code chat.presence.watch}). */
+  public UpstreamCommandListener(org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer, String topic,
+      Ingest ingest, Notifier notifier, CommandProducer dlq, Consumer<String> onOutcome,
+      ChannelSubscriptions channels, com.pangate.chat.core.StateCommands state) {
+    this.state = state;
     this.consumer = consumer;
     this.topic = topic;
     this.ingest = ingest;
@@ -193,6 +202,10 @@ public final class UpstreamCommandListener implements AutoCloseable {
     if (op.equals(OP_OPEN) || op.equals(OP_CLOSE)) {
       return channel(r, u, op);
     }
+    if (op.equals(ChatTopics.OP_DELIVERED) || op.equals(ChatTopics.OP_READ) || op.equals(ChatTopics.OP_TYPING)
+        || op.equals(ChatTopics.OP_WATCH)) {
+      return state(r, u, op);
+    }
     if (!OP_SEND.equals(op)) {
       return "ignored";
     }
@@ -213,6 +226,27 @@ public final class UpstreamCommandListener implements AutoCloseable {
           .setClientMsgId(send.getClientMsgId()).setReason(rejected.get().reason()).build());
     }
     return "rejected";
+  }
+
+  /** CH3 spec §2: conversation-state ops. A payload that does not parse is dead-lettered like a bad chat.send. */
+  private String state(ConsumerRecord<String, byte[]> r, UpstreamRecord u, String op) {
+    Optional<String> user = UserIds.fromPrincipal(u.getPrincipalId());
+    if (user.isEmpty()) {
+      return "rejected";
+    }
+    try {
+      return switch (op) {
+        case ChatTopics.OP_DELIVERED, ChatTopics.OP_READ -> state.mark(user.get(), u.getDeviceId(),
+            com.pangate.contracts.v1.ChatMark.parseFrom(u.getPayload()), op.equals(ChatTopics.OP_READ));
+        case ChatTopics.OP_TYPING -> state.typing(user.get(), u.getDeviceId(),
+            com.pangate.contracts.v1.ChatTyping.parseFrom(u.getPayload()));
+        default -> state.watch(user.get(), u.getDeviceId(),
+            com.pangate.contracts.v1.PresenceWatch.parseFrom(u.getPayload()));
+      };
+    } catch (InvalidProtocolBufferException e) {
+      dlq.deadLetter(r.key(), r.value(), "malformed " + op);
+      return "malformed";
+    }
   }
 
   private String channel(ConsumerRecord<String, byte[]> r, UpstreamRecord u, String op) {

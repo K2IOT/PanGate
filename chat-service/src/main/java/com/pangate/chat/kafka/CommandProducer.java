@@ -20,12 +20,13 @@ import org.apache.kafka.common.serialization.StringSerializer;
  * be parsed (§8). Each send waits for the ack, at most the produce timeout; a failure throws
  * {@link com.pangate.chat.core.QueueUnavailableException} so the caller answers 503 or retries.
  */
-public final class CommandProducer implements CommandSink, AutoCloseable {
+public final class CommandProducer implements CommandSink, com.pangate.chat.core.MarkSink, AutoCloseable {
 
   private final Producer<String, byte[]> producer;
   private final Duration timeout;
   private final String commandsTopic;
   private final String dlqTopic;
+  private final String receiptsTopic;
 
   public CommandProducer(Producer<String, byte[]> producer, Duration timeout, String commandsTopic) {
     this(producer, timeout, commandsTopic, ChatTopics.DLQ);
@@ -33,6 +34,12 @@ public final class CommandProducer implements CommandSink, AutoCloseable {
 
   public CommandProducer(Producer<String, byte[]> producer, Duration timeout, String commandsTopic,
       String dlqTopic) {
+    this(producer, timeout, commandsTopic, dlqTopic, ChatTopics.RECEIPTS);
+  }
+
+  public CommandProducer(Producer<String, byte[]> producer, Duration timeout, String commandsTopic,
+      String dlqTopic, String receiptsTopic) {
+    this.receiptsTopic = receiptsTopic;
     this.producer = producer;
     this.timeout = timeout;
     this.commandsTopic = commandsTopic;
@@ -48,6 +55,11 @@ public final class CommandProducer implements CommandSink, AutoCloseable {
   }
 
   public static CommandProducer create(String bootstrap, Duration timeout, String commandsTopic, String dlqTopic) {
+    return create(bootstrap, timeout, commandsTopic, dlqTopic, ChatTopics.RECEIPTS);
+  }
+
+  public static CommandProducer create(String bootstrap, Duration timeout, String commandsTopic, String dlqTopic,
+      String receiptsTopic) {
     int ms = (int) timeout.toMillis();
     Map<String, Object> cfg = new HashMap<>();
     cfg.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap);
@@ -60,12 +72,18 @@ public final class CommandProducer implements CommandSink, AutoCloseable {
     cfg.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, ms + 2);
     cfg.put(ProducerConfig.CLIENT_ID_CONFIG, "chat-ingest");
     return new CommandProducer(new KafkaProducer<>(cfg, new StringSerializer(), new ByteArraySerializer()), timeout,
-        commandsTopic, dlqTopic);
+        commandsTopic, dlqTopic, receiptsTopic);
   }
 
   @Override
   public void publish(ChatCommand c) {
     send(new ProducerRecord<>(commandsTopic, c.getSend().getConversationId(), c.toByteArray()));
+  }
+
+  /** CH3 spec §3.3: an accepted mark to {@code chat.receipts}, key conversation id. */
+  @Override
+  public void publish(com.pangate.contracts.v1.ReceiptCommand c) {
+    send(new ProducerRecord<>(receiptsTopic, c.getConversationId(), c.toByteArray()));
   }
 
   /** The original record, with a {@code reason} header. */
