@@ -8,6 +8,8 @@ public final class ChatTopics {
   public static final String DLQ = "chat.commands.dlq";
   /** Delivered / read marks, key {@code conversation_id} (CH3 spec §3.3, §9). */
   public static final String RECEIPTS = "chat.receipts";
+  /** Offline notifications spec §4.1: one ChannelNotifyJob per channel post, key conversation id, 16 partitions. */
+  public static final String CHANNEL_NOTIFY = "chat.channel.notify";
   /** Upstream ops of conversation state (CH3 spec §2). */
   public static final String OP_DELIVERED = "chat.delivered";
   public static final String OP_READ = "chat.read";

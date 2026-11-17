@@ -114,3 +114,9 @@ message ReceiptCommand {
   uint64 read_seq = 5;                // 0 = unchanged
   int64 received_at_ms = 6;
 }
+
+// chat.channel.notify, key conversation_id (offline notifications spec §4.1): one job per channel post, read by the
+// channel notifier that pushes the post to offline followers.
+message ChannelNotifyJob {
+  ChatMessage message = 1;
+}

@@ -1,0 +1,34 @@
+// Notification requests (offline notifications spec §2.1): tenant backends → notify-service → APNs / FCM.
+syntax = "proto3";
+package pangate.v1;
+
+import "pangate/v1/control.proto";  // DeviceRef
+
+option java_package = "com.pangate.contracts.v1";
+option java_multiple_files = true;
+
+// cN.notify.requests — producers: tenant backends (chat-service); consumer: notify-service (group "notify").
+// Key: the recipient principal.
+message NotifyRequest {
+  string request_id = 1;             // dedup key, unique per (event, recipient); e.g. "<msgId>/<principal>"
+  string tenant_id = 2;
+  oneof target {
+    string principal_id = 3;         // every registered device of the principal
+    DeviceRef device = 4;            // one device
+  }
+  Alert alert = 5;
+  int32 badge = 6;                   // >= 0 sets the badge; -1 leaves it unchanged
+  string thread_id = 7;              // groups notifications on the device (APNs thread-id, FCM tag)
+  string collapse_id = 8;            // a later notification with the same id replaces the earlier one
+  map<string, string> data = 9;      // passed to the app as is (e.g. conversationId, convSeq, msgId)
+  int64 created_at_ms = 10;
+  int64 expires_at_ms = 11;          // not sent after this; also the APNs apns-expiration / FCM ttl
+  bool high_priority = 12;           // APNs priority 10 / FCM HIGH; false: 5 / NORMAL
+}
+
+message Alert {
+  string title = 1;                  // shown as is when set
+  string body = 2;
+  string loc_key = 3;                // instead of title/body: the app localizes (APNs loc-key, FCM body_loc_key)
+  repeated string loc_args = 4;
+}
