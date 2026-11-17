@@ -30,6 +30,13 @@ Over the gateway WebSocket, `UPSTREAM` with headers `type=cmd` and `op`:
 | `chat.send` | `ChatSend` | a message; every member's devices get a PUSH `type=chat.message` with `ChatMessage` |
 | `chat.channel.open` | `ChannelOpen` | subscribes all of the user's connections to `chat:chan:<convId>` (public channel, or member) |
 | `chat.channel.close` | `ChannelClose` | unsubscribes |
+| `chat.delivered` / `chat.read` | `ChatMark{conversation_id, up_to_seq}` | raise my marks (never back; clamped to the conversation's `last_seq`) |
+| `chat.typing` | `ChatTyping` | others in the DM / group get PUSH `type=chat.typing` (`TypingUpdate`, clear after `ttl_ms`) |
+| `chat.presence.watch` | `PresenceWatch{entries[≤200]: (user_id, conversation_id)}` | replaces this device's watch list (kept 5 min); a snapshot and later changes arrive as PUSH `type=chat.presence` |
+
+Conversation-state pushes are EPHEMERAL: PUSH `type=chat.receipts` carries `ReceiptUpdate` (others' marks in a DM or
+a group ≤ 50, or `own_read_seq` to my other devices). See ADR 0039 for the sync contract: keep `syncedSeq` per
+conversation, a gap means `POST /v1/sync`, and after a reconnect call `GET /v1/state?since=`.
 
 `UPSTREAM_ACK` means "received"; the message is in the conversation when its `ChatMessage` (same `clientMsgId`)
 arrives. A refused command comes back as PUSH `type=chat.rejected` with `ChatRejected{reason}`: `invalid`,
@@ -52,6 +59,11 @@ message twice, never as two messages.
 | `POST /v1/dm/{userId}` | the pair's DM, created once |
 | `POST /v1/conversations/{id}/members` · `DELETE …/members/{userId}` | owner or admin; anyone may leave |
 | `POST /v1/conversations/{id}/join` | public channels |
+| `POST /v1/conversations/{id}/read` · `…/delivered` | `{upToSeq}` → `204` (CH3) |
+| `GET /v1/state?since=&cursor=` | conversations whose state changed after `since` (all without it): `lastSeq`, `readSeq`, `deliveredSeq`, `unread`, DM `peer`; `now` |
+| `GET /v1/conversations/{id}/receipts?seq=` | DM / group ≤ 50: `marks`; larger groups: `readCount`; channels `404 not_supported`; 1/s |
+| `GET /v1/presence?ids=&conversationId=` | ≤ 100 ids sharing that conversation |
+| `GET` · `PUT /v1/me/privacy` | `{hidePresence, hideRead}`, reciprocal |
 
 A client's sync cursor is the highest `convSeq` it has received. `lastSeq` from `/v1/sync` (without `tooMany`) is
 exactly that; `lastSeq` elsewhere (conversation, history, `tooMany`) is the conversation's reserved `last_seq`, which
@@ -69,13 +81,18 @@ can run ahead of what is written for a moment: use it to see that something is n
 | `push-api.{target,plaintext,timeout}` | `dns:///push-api:9443`, `false`, `2s` | mTLS client certificates are not wired in CH1 |
 | `limits.*` | user 20/s burst 40, conversation 50/s burst 100, 500 members, 4096 bytes, 50 mentions | per pod |
 | `http.send-wait` | `3s` | |
+| `kafka.receipts-topic` | `chat.receipts` | |
+| `state.*` | marks 50/s burst 100, windows DM 500 ms / group 2 s, listed receipts ≤ 50, offline grace 5 s, watch TTL 5 m, ≤ 200 watch entries, typing every 2 s | CH3 |
 
 ## Metrics
 
 `chat.send.rejected{reason}`, `chat.ingest.records{result}`, `chat.send.latency` (command received → event written),
 `chat.sequencer.lag`, `chat.lwt.conflicts`, `chat.dedup.hits`, `chat.fanout.push{result}`, `chat.fanout.lag`
 (sent → pushed), `chat.rejected.push{result}`, `chat.channel.control{result}`, `chat.api.requests{route,code}`,
-`chat.revocations.active`.
+`chat.revocations.active`; CH3: `chat.receipts.rejected{reason}`, `chat.receipts.pushes{result}`,
+`chat.receipts.store.failures`, `chat.typing.relayed`, `chat.typing.dropped{reason}`,
+`chat.presence.transitions{to}`, `chat.presence.watchers` (estimate), `chat.presence.pushes`,
+`chat.presence.unavailable`.
 
 ## Failure behaviour
 
@@ -90,6 +107,8 @@ can run ahead of what is written for a moment: use it to see that something is n
 | Long fan-out backlog | polls of ≤ 100 events, a 120 s step budget, progress committed; `max.poll.interval.ms` 10 min |
 | Rebalance, two sequencers on one partition | the old one's LWT fails; it drops its batch; no `convSeq` is used twice |
 | Malformed record | counted and written to `chat.commands.dlq` |
+| ScyllaDB down under the receipt worker | windows dropped, rewind to the last commit with backoff; replayed marks are harmless |
+| Redis down (presence) | everyone reads offline and watches are not kept (`chat.presence.unavailable`); recovers when clients watch again |
 
 ## Measurement (CH1, dev machine)
 

@@ -29,6 +29,9 @@ import java.util.function.Consumer;
  */
 final class ChatSmoke {
 
+  static final List<String> STEPS = List.of("CHAT 1-1", "CHAT group", "CHAT channel", "CHAT receipts",
+      "CHAT typing", "CHAT presence");
+
   static final Duration T = Duration.ofSeconds(10);
   static final String ULID = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
@@ -151,9 +154,23 @@ final class ChatSmoke {
     }
   }
 
+  /** The next PUSH with {@code headers.type == type} within {@code within}; others are acked and skipped. */
+  static Frame nextOfType(GatewayClient c, String type, Duration within) {
+    long deadline = System.nanoTime() + within.toNanos();
+    while (true) {
+      Frame f = c.awaitPush(Duration.ofNanos(Math.max(1, deadline - System.nanoTime())));
+      if (f.getClass_() == DeliveryClass.DELIVERY_CLASS_RELIABLE) {
+        c.ack(f.getMsgId());
+      }
+      if (type.equals(f.getHeadersMap().get("type"))) {
+        return f;
+      }
+    }
+  }
+
   void run(Consumer<String> step) throws Exception {
     try {
-      step.accept("CHAT 1-1");
+      step.accept(STEPS.get(0));
       String a = newUser("a");
       String b = newUser("b");
       String c = newUser("c");
@@ -169,7 +186,7 @@ final class ChatSmoke {
       }
       System.out.printf("CHAT 1-1: send -> PUSH in %.1f ms%n", (System.nanoTime() - t0) / 1e6);
 
-      step.accept("CHAT group");
+      step.accept(STEPS.get(1));
       GatewayClient cc = connect(c);
       String g = callNewUsers("POST", "/v1/conversations", a, "{\"kind\":\"group\",\"title\":\"smoke\",\"memberIds\":[\""
           + b + "\",\"" + c + "\"]}").get("id").toString();
@@ -185,7 +202,7 @@ final class ChatSmoke {
       System.out.printf("CHAT group: HTTP %s -> 2 members in %.1f ms%n", sent.containsKey("msgId") ? "201" : "202",
           (System.nanoTime() - t0) / 1e6);
 
-      step.accept("CHAT channel");
+      step.accept(STEPS.get(2));
       String ch = call("POST", "/v1/conversations", a, "{\"kind\":\"channel\",\"title\":\"smoke\",\"public\":true}",
           null).get("id").toString();
       command(cb, "chat.channel.open", ChannelOpen.newBuilder().setConversationId(ch).build().toByteArray());
@@ -203,6 +220,46 @@ final class ChatSmoke {
         throw new IllegalStateException("no channel message within " + T);
       }
       System.out.println("CHAT channel: open -> broadcast seq " + cm.getConvSeq());
+
+      // CH3 spec §10: conversation state
+      step.accept(STEPS.get(3));
+      t0 = System.nanoTime();
+      command(cb, "chat.read", com.pangate.contracts.v1.ChatMark.newBuilder().setConversationId(dm).setUpToSeq(1)
+          .build().toByteArray());
+      boolean seen = false;
+      while (!seen) {
+        var u = com.pangate.contracts.v1.ReceiptUpdate.parseFrom(nextOfType(ca, "chat.receipts", T).getPayload());
+        seen = u.getMarksList().stream().anyMatch(x -> x.getUserId().equals(b) && x.getReadSeq() >= 1);
+      }
+      System.out.printf("CHAT receipts: read -> sender sees it in %.1f ms%n", (System.nanoTime() - t0) / 1e6);
+
+      step.accept(STEPS.get(4));
+      t0 = System.nanoTime();
+      command(cb, "chat.typing", com.pangate.contracts.v1.ChatTyping.newBuilder().setConversationId(dm).build()
+          .toByteArray());
+      var typing = com.pangate.contracts.v1.TypingUpdate.parseFrom(nextOfType(ca, "chat.typing", T).getPayload());
+      if (!typing.getUserId().equals(b)) {
+        throw new IllegalStateException("unexpected typing " + typing);
+      }
+      System.out.printf("CHAT typing: typing -> peer in %.1f ms%n", (System.nanoTime() - t0) / 1e6);
+
+      step.accept(STEPS.get(5));
+      command(ca, "chat.presence.watch", com.pangate.contracts.v1.PresenceWatch.newBuilder()
+          .addEntries(com.pangate.contracts.v1.PresenceWatch.Entry.newBuilder().setUserId(b).setConversationId(dm))
+          .build().toByteArray());
+      var snap = com.pangate.contracts.v1.PresenceUpdate.parseFrom(nextOfType(ca, "chat.presence", T).getPayload());
+      if (!snap.getStates(0).getOnline()) {
+        throw new IllegalStateException("watched user not online: " + snap);
+      }
+      t0 = System.nanoTime();
+      cb.close();
+      var off = com.pangate.contracts.v1.PresenceUpdate.parseFrom(nextOfType(ca, "chat.presence", T.plusSeconds(5))
+          .getPayload());
+      if (off.getStates(0).getOnline()) {
+        throw new IllegalStateException("expected offline: " + off);
+      }
+      System.out.printf("CHAT presence: online, then offline %.1f s after close (5 s grace)%n",
+          (System.nanoTime() - t0) / 1e9);
     } finally {
       for (GatewayClient x : open) {
         try {

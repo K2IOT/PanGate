@@ -1,6 +1,6 @@
 # Trạng thái hội thoại (CH3): đã nhận / đã xem, chưa đọc, đang gõ, online — thiết kế
 
-- **Trạng thái:** bản nháp, chờ duyệt
+- **Trạng thái:** đã hiện thực (plan `docs/superpowers/plans/2026-11-17-conversation-state-ch3.md`)
 - **Ngày:** 2026-11-17
 - **Vị trí trong lộ trình app chat:** sub-project 3/4. (CH1) Chat core và (CH2) Tài khoản đã xong; (CH4) Device Registry và Offline Delivery làm sau.
 - **Dựa trên:** spec chat core `2026-11-12-chat-core-design.md` (gọi tắt "CH1 §n"), spec tài khoản `2026-11-16-account-service-design.md`, contracts push `2026-11-10-push-contracts-design.md`.
