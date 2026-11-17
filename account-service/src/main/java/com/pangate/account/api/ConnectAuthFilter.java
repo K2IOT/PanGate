@@ -52,8 +52,8 @@ public class ConnectAuthFilter extends OncePerRequestFilter {
   }
 
   /** Forgets the cached answer for a device logged out through this pod. */
-  public void forget(String deviceId) {
-    liveUntil.keySet().removeIf(k -> k.endsWith("|" + deviceId));
+  public void forget(String userId, String deviceId) {
+    liveUntil.remove(userId + "|" + deviceId);
   }
 
   private boolean live(String userId, String deviceId) {

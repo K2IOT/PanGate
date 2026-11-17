@@ -166,7 +166,8 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
     users.put(userId, new UserRecord(userId, status, updatedAtMs));
   }
 
-  @Override public boolean upsertIfNewer(String userId, String status, long updatedAtMs) {
+  /** Test seeding helper. */
+  public boolean upsertIfNewer(String userId, String status, long updatedAtMs) {
     UserRecord prior = users.get(userId);
     if (prior != null && prior.updatedAtMs() > updatedAtMs) {
       return false;

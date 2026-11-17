@@ -72,4 +72,67 @@ class RegisterTest {
     assertThat(register.register("fresh1x", "secret-pw".toCharArray(), "f@x.vn", null, null, phone, "10.0.0.7")
         .userId()).isNotNull();
   }
+
+  /** Review round 2, Important 1: every attempt counts toward a looser cap, so "taken" answers are bounded. */
+  @Test
+  void takenAnswersStopAtTheAttemptCap() {
+    register.register("taken2x", "secret-pw".toCharArray(), "t2@x.vn", null, null, phone, "10.0.0.6");
+    for (int i = 1; i < TestLimits.SPEC.registrationAttemptsPerIpPerHour(); i++) {
+      assertThatThrownBy(() -> register.register("other2x", "secret-pw".toCharArray(), "t2@x.vn", null, null, phone,
+          "10.0.0.6")).isInstanceOfSatisfying(DomainException.class, e -> assertThat(e.code())
+          .isEqualTo("email_taken"));
+    }
+    assertThatThrownBy(() -> register.register("other2x", "secret-pw".toCharArray(), "t2@x.vn", null, null, phone,
+        "10.0.0.6")).isInstanceOfSatisfying(DomainException.class, e -> assertThat(e.code())
+        .isEqualTo("rate_limited"));
+  }
+
+  /** Review round 2, Important 1: a burst that passes the cheap check together still creates at most 5. */
+  @Test
+  void parallelRegistrationsFromOneIpCreateAtMostFive() throws Exception {
+    int n = 10;
+    java.util.concurrent.CyclicBarrier together = new java.util.concurrent.CyclicBarrier(n);
+    com.pangate.account.application.port.PasswordHasher slow = new com.pangate.account.application.port
+        .PasswordHasher() {
+      @Override
+      public String hash(char[] password) {
+        try {
+          together.await(5, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception e) {
+          throw new IllegalStateException(e);
+        }
+        return f.hasher.hash(password);
+      }
+
+      @Override
+      public boolean matches(char[] password, String hash) {
+        return f.hasher.matches(password, hash);
+      }
+
+      @Override
+      public void burn() {}
+    };
+    Register r = new Register(f.accountStore, f.sessionStore, f.outbox, slow, new HashGate(n),
+        new InMemoryAttemptCounter(f.clock), TestLimits.SPEC, Set.of(), f.tx, Metrics.NONE);
+    java.util.concurrent.atomic.AtomicInteger created = new java.util.concurrent.atomic.AtomicInteger();
+    try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      java.util.List<java.util.concurrent.Future<?>> all = new java.util.ArrayList<>();
+      for (int i = 0; i < n; i++) {
+        int k = i;
+        all.add(pool.submit(() -> {
+          try {
+            r.register("burst" + k + "x", "secret-pw".toCharArray(), "b" + k + "@x.vn", null, null, phone,
+                "10.0.0.5");
+            created.incrementAndGet();
+          } catch (DomainException e) {
+            assertThat(e.code()).isEqualTo("rate_limited");
+          }
+        }));
+      }
+      for (var x : all) {
+        x.get();
+      }
+    }
+    assertThat(created.get()).isEqualTo(5);
+  }
 }

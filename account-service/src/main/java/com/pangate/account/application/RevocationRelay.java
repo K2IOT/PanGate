@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory;
 public final class RevocationRelay {
 
   private static final Logger log = LoggerFactory.getLogger(RevocationRelay.class);
+  private volatile long nextWarnAt;
 
   private final Outbox outbox;
   private final AuthApi auth;
@@ -34,7 +35,12 @@ public final class RevocationRelay {
       try {
         auth.revoke(r.payload());
       } catch (AuthApi.AuthUnavailableException e) {
-        log.debug("revocation {} not sent yet: {}", r.id(), e.getMessage());
+        metrics.count("account.revocations.unavailable");
+        long now = System.currentTimeMillis();
+        if (now >= nextWarnAt) {   // at most once a minute: a stall (rotated secret, disabled client) must be seen
+          nextWarnAt = now + 60_000;
+          log.warn("revocations stalled: auth-service unavailable ({}); {} kept for retry", e.getMessage(), r.id());
+        }
         return done;
       } catch (AuthApi.AuthRejectedException e) {
         log.error("revocation {} refused by auth-service ({}); dropped", r.id(), e.status());

@@ -87,4 +87,58 @@ class HttpAuthApiTest {
     quick.join();
     assertThat((System.nanoTime() - t0) / 1_000_000).as("ms for an unrelated virtual thread").isLessThan(500);
   }
+
+  /**
+   * Review round 2, minor 3: a 401 that arrives late, for a request sent with the old API token, does not throw away
+   * the new token fetched in the meantime.
+   */
+  @Test
+  void aLate401ForTheOldTokenKeepsTheNewOne() throws Exception {
+    AtomicInteger fetches = new AtomicInteger();
+    AtomicInteger oldTokenCalls = new AtomicInteger();
+    java.util.concurrent.CountDownLatch arrived = new java.util.concurrent.CountDownLatch(1);
+    java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+    server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.setExecutor(java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
+    server.createContext("/oauth2/token", ex -> {
+      byte[] b = ("{\"access_token\":\"api" + fetches.incrementAndGet() + "\",\"expires_in\":900}")
+          .getBytes(StandardCharsets.UTF_8);
+      ex.sendResponseHeaders(200, b.length);
+      ex.getResponseBody().write(b);
+      ex.close();
+    });
+    server.createContext("/v1/revocations", ex -> {
+      if (ex.getRequestHeaders().getFirst("Authorization").equals("Bearer api1")) {
+        if (oldTokenCalls.incrementAndGet() == 1) {
+          arrived.countDown();
+          try {
+            release.await();
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+          }
+        }
+        ex.sendResponseHeaders(401, -1);
+      } else {
+        ex.sendResponseHeaders(202, -1);
+      }
+      ex.close();
+    });
+    server.start();
+    HttpAuthApi api = new HttpAuthApi("http://127.0.0.1:" + server.getAddress().getPort(), "chat-backend", "s",
+        Duration.ofSeconds(5));
+    Thread slow = Thread.ofVirtual().start(() -> {
+      try {
+        api.revoke("{}".getBytes());
+      } catch (AuthApi.AuthUnavailableException expected) {
+        // the late 401
+      }
+    });
+    arrived.await();
+    assertThatThrownBy(() -> api.revoke("{}".getBytes())).isInstanceOf(AuthApi.AuthUnavailableException.class);
+    api.revoke("{}".getBytes());   // fetches api2
+    release.countDown();
+    slow.join();
+    api.revoke("{}".getBytes());
+    assertThat(fetches.get()).as("token fetches").isEqualTo(2);
+  }
 }

@@ -66,9 +66,6 @@ public final class ChatStores {
   public interface UserStore {
     Optional<UserRecord> user(String userId);
 
-    /** Writes unless the stored state is newer; true when written. */
-    boolean upsertIfNewer(String userId, String status, long updatedAtMs);
-
     /** Writes unconditionally (the caller already compared with what is stored). */
     void put(String userId, String status, long updatedAtMs);
   }

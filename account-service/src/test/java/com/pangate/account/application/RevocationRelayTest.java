@@ -71,4 +71,12 @@ class RevocationRelayTest {
   void metricsNoneIsANoOp() {
     Metrics.NONE.count("x");
   }
+
+  /** Review round 2, minor 2: a stalled relay is visible, not only a debug line. */
+  @Test
+  void unavailableAuthServiceIsCounted() {
+    f.outbox.revokeDevice("u", "d1");
+    relay(failingAt("device:d1", new AuthUnavailableException("401"), sent, new AtomicInteger())).runOnce();
+    assertThat(counted).containsExactly("account.revocations.unavailable");
+  }
 }

@@ -196,7 +196,7 @@ Phiên bị thu hồi và phiên quá hạn không dùng được xoá sau 30 ng
 | `GET /v1/users?username=` | Connect token | Tìm đúng một username (không tìm gần đúng, không liệt kê). Không có: `404` |
 | `POST /v1/users:batch` | Connect token | `{userIds: [...]}` (≤ 100) → hồ sơ công khai của từng id; để client hiện tên người gửi trong lịch sử chat. Id không tồn tại bị bỏ qua |
 
-Đăng ký cho biết trường nào đã bị dùng (`username_taken`, `email_taken`, `phone_taken`): đây là trải nghiệm cần có, và được giới hạn bằng rate limit đăng ký (§7).
+Đăng ký cho biết trường nào đã bị dùng (`username_taken`, `email_taken`, `phone_taken`): đây là trải nghiệm cần có, và được giới hạn bằng rate limit số lần thử đăng ký (20 / IP / giờ, §7).
 
 ---
 
@@ -263,7 +263,7 @@ Hồ sơ (tên, username) **không** đi qua topic: client đọc qua `/v1/users
 | Đăng nhập sai | login + IP | 10 lần trong 15 phút → chặn cặp đó 15 phút (`429 too_many_attempts`, kể cả mật khẩu đúng) |
 | Đăng nhập sai | IP | 50 lần trong 15 phút → mỗi lần thử tiếp theo từ IP đó chờ thêm 2 s, không chặn (nhiều người dùng chung một IP qua NAT của nhà mạng); 1000 lần trong 15 phút (một đợt tấn công) → chặn IP 15 phút. Nới ngày 2026-11-17 |
 | Đăng nhập sai | login (mọi IP) | 100 lần trong 15 phút → mỗi lần thử tiếp theo của login đó chờ thêm 2 s trước khi trả lời. Không chặn hẳn: username là công khai, chặn theo login một mình sẽ cho người lạ khoá được tài khoản người khác |
-| Đăng ký | IP | 5 mỗi giờ |
+| Đăng ký | IP | 20 lần thử mỗi giờ (mọi lần, kể cả trả `*_taken` hay không hợp lệ: chặn việc dò email / số điện thoại đã có tài khoản); 5 tài khoản tạo thành công mỗi giờ (giữ chỗ trước khi ghi, trả lại nếu ghi lỗi, nên gửi dồn song song không vượt được và gõ nhầm không mất lượt). Sửa ngày 2026-11-17 |
 | Đổi token | phiên | 60 mỗi giờ |
 | Tra user (`/v1/users*`) | user | 600 mỗi phút |
 | `/admin/v1/**` | `client_id` | 20/s |

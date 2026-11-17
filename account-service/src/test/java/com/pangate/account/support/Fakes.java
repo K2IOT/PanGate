@@ -10,6 +10,7 @@ import com.pangate.account.application.port.TakenException;
 import com.pangate.account.application.port.Transactions;
 import com.pangate.account.domain.Account;
 import com.pangate.account.domain.AccountStatus;
+import com.pangate.account.domain.DomainException;
 import com.pangate.account.domain.Login;
 import com.pangate.account.domain.LoginKind;
 import com.pangate.account.domain.Session;
@@ -172,6 +173,10 @@ public final class Fakes {
 
     @Override
     public void erase(String userId) {
+      Account cur = accounts.get(userId);
+      if (cur == null || cur.status() == AccountStatus.DELETED) {
+        throw new DomainException("not_found", "no such account");
+      }
       accounts.computeIfPresent(userId, (k, a) -> new Account(a.userId(), null, null, null, null, false,
           AccountStatus.DELETED, null, null, a.createdAt(), now));
     }

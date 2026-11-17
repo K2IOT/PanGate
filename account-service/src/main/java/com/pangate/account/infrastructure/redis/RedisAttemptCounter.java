@@ -28,6 +28,9 @@ public final class RedisAttemptCounter implements AttemptCounter, AutoCloseable 
   /** INCR and the window's expiry in one step; also restores an expiry a failed earlier call left missing. */
   static final String INCREMENT = "local n = redis.call('INCR', KEYS[1]) "
       + "if n == 1 or redis.call('PTTL', KEYS[1]) == -1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end return n";
+  /** DECR only a key whose window is still running, never below zero. */
+  static final String DECREMENT = "if redis.call('GET', KEYS[1]) and tonumber(redis.call('GET', KEYS[1])) > 0 "
+      + "then return redis.call('DECR', KEYS[1]) end return 0";
   private volatile StatefulRedisConnection<String, String> conn;
   private volatile long nextConnectAt;
 
@@ -91,6 +94,19 @@ public final class RedisAttemptCounter implements AttemptCounter, AutoCloseable 
       log.debug("redis get failed: {}", e.toString());
     }
     return fallback.count(key);
+  }
+
+  @Override
+  public void decrement(String key) {
+    fallback.decrement(key);
+    try {
+      RedisCommands<String, String> r = redis();
+      if (r != null) {
+        r.eval(DECREMENT, io.lettuce.core.ScriptOutputType.INTEGER, new String[] {"acct:n:" + key});
+      }
+    } catch (RuntimeException e) {
+      log.debug("redis decrement failed: {}", e.toString());
+    }
   }
 
   @Override

@@ -8,6 +8,7 @@ import com.pangate.account.application.port.Outbox;
 import com.pangate.account.application.port.SessionStore;
 import com.pangate.account.application.port.TakenException;
 import com.pangate.account.application.port.Transactions;
+import com.pangate.account.domain.DomainException;
 import com.pangate.account.domain.Account;
 import com.pangate.account.domain.AccountStatus;
 import com.pangate.account.domain.Login;
@@ -99,6 +100,16 @@ class StoreIT {
           assertThat(x.phone()).isEqualTo(phone);
         });
     assertThat(accounts.byLogin(Login.parse("nobody" + name()))).isEmpty();
+  }
+
+  /** Review round 2, minor 4: a second deletion (self and admin racing) is not_found, so nothing is emitted twice. */
+  @Test
+  void erasingADeletedAccountIsNotFound() {
+    Account a = account(name(), name() + "@x.vn", null);
+    tx.inTx(() -> accounts.insert(a));
+    tx.inTx(() -> accounts.erase(a.userId()));
+    assertThatThrownBy(() -> tx.inTx(() -> accounts.erase(a.userId())))
+        .isInstanceOfSatisfying(DomainException.class, e -> assertThat(e.code()).isEqualTo("not_found"));
   }
 
   @Test

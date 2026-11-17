@@ -66,7 +66,7 @@ public class SessionsController {
   @DeleteMapping("/v1/sessions/{deviceId}")
   public ResponseEntity<Void> logout(@PathVariable("deviceId") String deviceId, HttpServletRequest req) {
     sessions.logout(ConnectAuthFilter.caller(req), deviceId);
-    auth.forget(deviceId);
+    auth.forget(ConnectAuthFilter.caller(req).userId(), deviceId);
     return ResponseEntity.noContent().build();
   }
 
@@ -74,7 +74,7 @@ public class SessionsController {
   public ResponseEntity<Void> logoutAll(@RequestParam(name = "others", defaultValue = "false") boolean others,
       HttpServletRequest req) {
     Caller c = ConnectAuthFilter.caller(req);
-    sessions.logoutAll(c.userId(), others ? c.deviceId() : null).forEach(auth::forget);
+    sessions.logoutAll(c.userId(), others ? c.deviceId() : null).forEach(d -> auth.forget(c.userId(), d));
     return ResponseEntity.noContent().build();
   }
 }

@@ -30,8 +30,16 @@ public final class HttpAuthApi implements AuthApi {
   private final String basic;
   private final Duration timeout;
   private final HttpClient http;
-  private volatile String apiToken;
-  private volatile Instant apiTokenUntil = Instant.EPOCH;
+  /** The API token and its validity, read and replaced as one value. */
+  private record ApiToken(String value, Instant until) {
+    boolean valid() {
+      return value != null && Instant.now().isBefore(until);
+    }
+  }
+
+  private static final ApiToken NONE = new ApiToken(null, Instant.EPOCH);
+  private final java.util.concurrent.atomic.AtomicReference<ApiToken> apiToken =
+      new java.util.concurrent.atomic.AtomicReference<>(NONE);
 
   public HttpAuthApi(String baseUrl, String clientId, String clientSecret, Duration timeout) {
     this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
@@ -60,10 +68,10 @@ public final class HttpAuthApi implements AuthApi {
    * 401 / 403 say account-service's own credentials do not work (secret rotated, client disabled, scope missing):
    * nothing is wrong with the request, so it is retried, never dropped. Only other 4xx reject the request itself.
    */
-  private void check(HttpResponse<String> r) {
+  private void check(HttpResponse<String> r, ApiToken used) {
     int s = r.statusCode();
     if (s == 401 || s == 403) {
-      apiTokenUntil = Instant.EPOCH;   // get a new API token next time
+      apiToken.compareAndSet(used, NONE);   // get a new one next time, unless it was already replaced
       throw new AuthUnavailableException("auth-service refused account-service's API token: " + s);
     }
     if (s == 429 || s >= 500) {
@@ -77,9 +85,10 @@ public final class HttpAuthApi implements AuthApi {
   /** A lock, not synchronized: a virtual thread waiting for the fetch must not pin its carrier (JDK 21). */
   private final java.util.concurrent.locks.ReentrantLock tokenLock = new java.util.concurrent.locks.ReentrantLock();
 
-  private String apiToken() {
-    if (apiToken != null && Instant.now().isBefore(apiTokenUntil)) {
-      return apiToken;
+  private ApiToken currentToken() {
+    ApiToken t = apiToken.get();
+    if (t.valid()) {
+      return t;
     }
     tokenLock.lock();
     try {
@@ -89,9 +98,10 @@ public final class HttpAuthApi implements AuthApi {
     }
   }
 
-  private String fetchApiToken() {
-    if (apiToken != null && Instant.now().isBefore(apiTokenUntil)) {
-      return apiToken;
+  private ApiToken fetchApiToken() {
+    ApiToken t = apiToken.get();
+    if (t.valid()) {
+      return t;
     }
     HttpResponse<String> r = send(HttpRequest.newBuilder(URI.create(baseUrl + "/oauth2/token")).timeout(timeout)
         .header("Authorization", basic).header("Content-Type", "application/x-www-form-urlencoded")
@@ -101,16 +111,18 @@ public final class HttpAuthApi implements AuthApi {
       throw new AuthUnavailableException("no API token from auth-service: " + r.statusCode());
     }
     JsonNode n = read(r.body());
-    apiToken = n.get("access_token").asText();
-    apiTokenUntil = Instant.now().plusSeconds(Math.max(0, n.get("expires_in").asLong() - 60));
-    return apiToken;
+    ApiToken fresh = new ApiToken(n.get("access_token").asText(),
+        Instant.now().plusSeconds(Math.max(0, n.get("expires_in").asLong() - 60)));
+    apiToken.set(fresh);
+    return fresh;
   }
 
   private HttpResponse<String> postJson(String path, String body) {
+    ApiToken t = currentToken();
     HttpResponse<String> r = send(HttpRequest.newBuilder(URI.create(baseUrl + path)).timeout(timeout)
-        .header("Authorization", "Bearer " + apiToken()).header("Content-Type", "application/json")
+        .header("Authorization", "Bearer " + t.value()).header("Content-Type", "application/json")
         .POST(HttpRequest.BodyPublishers.ofString(body)).build());
-    check(r);
+    check(r, t);
     return r;
   }
 

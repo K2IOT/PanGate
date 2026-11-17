@@ -13,4 +13,4 @@ account:
   kafka: { bootstrap: "kafka:29092" }
   redis: { uri: "redis://redis:6379" }
   # every smoke run registers accounts from the devtools container's one address (spec §7 default: 5 per hour)
-  limits: { registrations-per-ip-per-hour: 10000 }
+  limits: { registrations-per-ip-per-hour: 10000, registration-attempts-per-ip-per-hour: 10000 }

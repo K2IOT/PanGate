@@ -28,9 +28,14 @@ import java.util.Set;
 
 /**
  * {@code POST /v1/accounts} (account spec §4.2): account, identifiers, first session and {@code AccountState ACTIVE}
- * in one transaction. At most {@code registrationsPerIpPerHour} per IP (spec §7).
+ * in one transaction (spec §7, per IP per hour): at most {@code registrationAttemptsPerIpPerHour} attempts, taken
+ * and invalid ones included, which bounds what the {@code *_taken} answers reveal (spec §4); and at most
+ * {@code registrationsPerIpPerHour} accounts created, a slot reserved atomically before the insert and given back if
+ * the insert fails, so a burst cannot get past it and a mistyped username costs nothing.
  */
 public final class Register {
+
+  private static final Duration HOUR = Duration.ofHours(1);
 
   private final AccountStore accounts;
   private final SessionStore sessions;
@@ -60,9 +65,10 @@ public final class Register {
 
   public NewSession register(String username, char[] password, String email, String phone, String displayName,
       DeviceInfo device, String ip) {
-    if (counter.count("reg:" + ip) >= limits.registrationsPerIpPerHour()) {
-      metrics.count("account.ratelimited", "what", "register");
-      throw new RateLimitedException("rate_limited", 3600);
+    String created = "reg:" + ip;
+    if (counter.increment("regtry:" + ip, HOUR) > limits.registrationAttemptsPerIpPerHour()
+        || counter.count(created) >= limits.registrationsPerIpPerHour()) {
+      throw limited();
     }
     if (isBlank(email) && isBlank(phone)) {
       throw new DomainException("invalid_request", "an email or a phone number is required");
@@ -75,6 +81,10 @@ public final class Register {
     String hash = gate.run(() -> hasher.hash(pw));
     String userId = Ids.next();
     Instant now = Instant.now();
+    if (counter.increment(created, HOUR) > limits.registrationsPerIpPerHour()) {
+      counter.decrement(created);
+      throw limited();
+    }
     try {
       NewSession s = tx.inTx(() -> {
         accounts.insert(new Account(userId, u.display(), name, null, hash, false, AccountStatus.ACTIVE,
@@ -82,13 +92,20 @@ public final class Register {
         outbox.event(userId, AccountState.Status.STATUS_ACTIVE);
         return Sessions.open(sessions, userId, device, now);
       });
-      counter.increment("reg:" + ip, Duration.ofHours(1));   // only accounts actually created count (spec §7)
       metrics.count("account.registrations", "result", "ok");
       return s;
-    } catch (TakenException ex) {
-      metrics.count("account.registrations", "result", ex.code());
+    } catch (RuntimeException ex) {
+      counter.decrement(created);   // only accounts actually created keep their slot
+      if (ex instanceof TakenException t) {
+        metrics.count("account.registrations", "result", t.code());
+      }
       throw ex;
     }
+  }
+
+  private RateLimitedException limited() {
+    metrics.count("account.ratelimited", "what", "register");
+    return new RateLimitedException("rate_limited", 3600);
   }
 
   static boolean isBlank(String s) {

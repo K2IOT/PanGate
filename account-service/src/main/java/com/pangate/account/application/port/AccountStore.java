@@ -35,6 +35,9 @@ public interface AccountStore {
 
   void setStatus(String userId, AccountStatus status);
 
-  /** account spec §5.3: personal fields to NULL, identifiers deleted, status deleted; the row stays. */
+  /**
+   * account spec §5.3: personal fields to NULL, identifiers deleted, status deleted; the row stays. Row-locks the
+   * account first; already deleted (or unknown) is {@code not_found}.
+   */
   void erase(String userId);
 }

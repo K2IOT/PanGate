@@ -55,6 +55,8 @@ public record AccountProperties(
       @DefaultValue("15m") Duration block,
       @DefaultValue("2s") Duration loginAllDelay,
       @DefaultValue("5") int registrationsPerIpPerHour,
+      /** Every registration attempt from one IP, taken or invalid ones too: bounds the "taken" lookup (spec §4, §7). */
+      @DefaultValue("20") int registrationAttemptsPerIpPerHour,
       @DefaultValue("60") int tokensPerSessionPerHour,
       @DefaultValue("600") int lookupsPerUserPerMinute,
       @DefaultValue("20") int adminPerSecond) {}

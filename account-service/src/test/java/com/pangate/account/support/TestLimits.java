@@ -7,7 +7,7 @@ public final class TestLimits {
 
   /** The spec §7 table. */
   public static final AccountProperties.Limits SPEC = new AccountProperties.Limits(10, 50, 1000, 100,
-      Duration.ofMinutes(15), Duration.ofMinutes(15), Duration.ofSeconds(2), 5, 60, 600, 20);
+      Duration.ofMinutes(15), Duration.ofMinutes(15), Duration.ofSeconds(2), 5, 20, 60, 600, 20);
 
   private TestLimits() {}
 }

@@ -43,11 +43,14 @@ public final class DeleteAccount {
     tx.inTx(() -> deleteWithin(userId));
   }
 
-  /** The deletion's steps, inside a transaction the caller holds (the admin API adds its log row to it). */
+  /**
+   * The deletion's steps, inside a transaction the caller holds (the admin API adds its log row to it). The account
+   * row is locked first, as the admin lock does, so the two cannot deadlock; a second deletion stops there.
+   */
   void deleteWithin(String userId) {
+    accounts.erase(userId);
     ManageSessions.revokeAll(sessions, outbox, userId, null);
     outbox.revokePrincipal(userId);
-    accounts.erase(userId);
     outbox.event(userId, AccountState.Status.STATUS_DELETED);
   }
 }

@@ -79,7 +79,6 @@ public class JobsConfig {
       Gauge.builder("account.outbox.pending", pending, AtomicLong::get).tag("kind", kind).register(registry);
       Gauge.builder("account.outbox.oldest_age_seconds", oldestMs, v -> v.get() / 1000.0).tag("kind", kind)
           .register(registry);
-      registry.config();
       pendingGauges.put(kind, new AtomicLong[] {pending, oldestMs});
     }
     Gauge.builder("account.sessions.active", liveSessions, AtomicLong::get).register(registry);

@@ -191,17 +191,6 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     exec(upsertUser.bind(userId, status, updatedAtMs));
   }
 
-  /** One writer per user (the account.users partition of its key), so read-then-write needs no LWT. */
-  @Override
-  public boolean upsertIfNewer(String userId, String status, long updatedAtMs) {
-    Optional<ChatStores.UserRecord> prior = user(userId);
-    if (prior.isPresent() && prior.get().updatedAtMs() > updatedAtMs) {
-      return false;
-    }
-    exec(upsertUser.bind(userId, status, updatedAtMs));
-    return true;
-  }
-
   @Override
   public Optional<Member> member(String convId, String userId) {
     Row r = exec(selectMember.bind(convId, userId)).one();

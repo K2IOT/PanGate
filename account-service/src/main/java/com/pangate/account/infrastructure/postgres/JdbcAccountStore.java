@@ -106,10 +106,6 @@ public final class JdbcAccountStore implements AccountStore {
         .param(userIds.toArray(String[]::new)).query(JdbcAccountStore::map).list());
   }
 
-  /**
-   * Row-locks the account for the rest of the transaction unless it is deleted; a deletion that committed first makes
-   * this {@code not_found}, so no write brings personal data, a status or an identifier back to an erased account.
-   */
   /** One row written, else the account is deleted (or unknown). */
   private static void live(int rows) {
     if (rows == 0) {
@@ -117,6 +113,10 @@ public final class JdbcAccountStore implements AccountStore {
     }
   }
 
+  /**
+   * Row-locks the account for the rest of the transaction unless it is deleted; a deletion that committed first makes
+   * this {@code not_found}, so no write brings personal data, a status or an identifier back to an erased account.
+   */
   private void lockLive(String userId) {
     if (jdbc.sql("UPDATE account.accounts SET updated_at = now() WHERE user_id = ? AND status <> 'deleted'")
         .param(userId).update() == 0) {
@@ -169,6 +169,7 @@ public final class JdbcAccountStore implements AccountStore {
   @Override
   public void erase(String userId) {
     Db.run(() -> {
+      lockLive(userId);   // a second deletion (self and admin racing) is not_found: nothing emitted twice
       jdbc.sql("DELETE FROM account.identifiers WHERE user_id = ?").param(userId).update();
       jdbc.sql("UPDATE account.sessions SET device_name = '(deleted)' WHERE user_id = ?").param(userId).update();
       jdbc.sql("UPDATE account.accounts SET username = NULL, display_name = NULL, bio = NULL, password_hash = NULL, "

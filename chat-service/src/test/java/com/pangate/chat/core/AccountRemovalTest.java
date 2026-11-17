@@ -73,4 +73,18 @@ class AccountRemovalTest {
         .containsExactly("a1");
     assertThat(stores.member(g, "a2")).get().extracting(Member::role).isEqualTo(Role.ADMIN);
   }
+
+  /** Review round 2, minor 1: one conversation that cannot be left does not stop the others being left. */
+  @Test
+  void aBrokenConversationDoesNotStopTheRest() {
+    String broken = conv(ConversationKind.CONVERSATION_KIND_GROUP, new Member("gone", Role.OWNER),
+        new Member("m1", Role.MEMBER));
+    String fine = conv(ConversationKind.CONVERSATION_KIND_GROUP, new Member("gone", Role.OWNER),
+        new Member("m2", Role.MEMBER));
+    stores.touchUserConv("gone", broken, 1, Long.MAX_VALUE);   // handled first
+    stores.convs.remove(broken);                               // its member row outlived the conversation row
+    removal.removed("gone");
+    assertThat(stores.member(fine, "gone")).isEmpty();
+    assertThat(stores.member(fine, "m2")).get().extracting(Member::role).isEqualTo(Role.OWNER);
+  }
 }

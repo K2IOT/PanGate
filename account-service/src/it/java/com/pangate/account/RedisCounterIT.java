@@ -28,4 +28,21 @@ class RedisCounterIT {
       raw.shutdown();
     }
   }
+
+  /** Review round 2, Important 1: a registration slot given back after a failed insert; never below zero. */
+  @Test
+  void decrementGivesBackOneAndStopsAtZero() {
+    String key = "reg:" + UUID.randomUUID();
+    try (RedisAttemptCounter c = new RedisAttemptCounter(Containers.redisUri(), Duration.ofSeconds(1),
+        new InMemoryAttemptCounter(Clock.SYSTEM))) {
+      c.increment(key, Duration.ofMinutes(5));
+      c.increment(key, Duration.ofMinutes(5));
+      c.decrement(key);
+      assertThat(c.count(key)).isEqualTo(1);
+      c.decrement(key);
+      c.decrement(key);
+      assertThat(c.count(key)).isZero();
+      c.decrement("reg:" + UUID.randomUUID());   // no window: nothing created
+    }
+  }
 }

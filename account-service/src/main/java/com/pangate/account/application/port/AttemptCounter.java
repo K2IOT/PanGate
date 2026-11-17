@@ -14,6 +14,9 @@ public interface AttemptCounter {
 
   long count(String key);
 
+  /** Takes back one increment of the key's current window (never below zero); nothing when the window is over. */
+  void decrement(String key);
+
   void clear(String key);
 
   void block(String key, Duration duration);

@@ -45,6 +45,13 @@ public final class InMemoryAttemptCounter implements AttemptCounter {
   }
 
   @Override
+  public void decrement(String key) {
+    Instant now = clock.now();
+    counts.computeIfPresent(key, (k, w) -> !now.isBefore(w.end()) ? null
+        : new Window(Math.max(0, w.count() - 1), w.end()));
+  }
+
+  @Override
   public void clear(String key) {
     counts.remove(key);
   }
