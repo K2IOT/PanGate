@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### notify-service (CH4, offline notifications)
+- New module `notify-service` (spec `docs/superpowers/specs/2026-11-17-offline-notifications-design.md`): push tokens
+  per device (`PUT|DELETE /v1/devices/self/push`, connect token, PostgreSQL schema `notify`, one token per device),
+  removed on `gw.control` revocations, on dead-token answers and after 180 idle days; `cN.notify.requests` delivered to
+  APNs (HTTP/2, ES256 provider token) and FCM HTTP v1 (OAuth2 service account) with keys per tenant, deduplicated by
+  `request_id`, retried on 429/5xx (3 tries, Retry-After). ADR 0040.
+
+### chat-service (CH4, offline notifications)
+- A chat message no device of its recipient took (`c1.push.offline`) becomes a notification: sender, group or channel
+  name, a 200-character preview, the badge (every unread message); channel posts reach offline followers through a
+  paced, resumable job per channel (ADR 0041).
+- `PUT /v1/conversations/{id}/mute {until}` (a mention still notifies); `hidePreview` in `/v1/me/privacy`;
+  `mutedUntil` in the conversation list. Schema V5.
+- account-service: `account.users` carries `display_name` (and is emitted on a rename).
+- Contracts: `NotifyRequest`, `Alert`, `AccountState.display_name`; testkit `NotifyTopics`, `NotifyKeys`,
+  `NotifyRules`, `NotifyCases`.
+- Devtools: `fake-apns`, `fake-fcm`, `notify register`; `make smoke` adds `CHAT notify`.
+
+### CI
+- The idle-load client retries a 503 from a shedding gateway (`--retry-for`); `GatewayProtectionIT`'s budget sits
+  below what its paused clients hold; `KeyedSerialExecutor` releases a key before completing its result.
+
 ### chat-service (CH3, conversation state)
 - Spec `docs/superpowers/specs/2026-11-17-conversation-state-design.md`:
   - delivered / read marks per user (`chat.delivered`, `chat.read`, `POST …/read|delivered`) through `chat.receipts`

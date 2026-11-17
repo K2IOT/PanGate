@@ -1,6 +1,6 @@
 # Thông báo đẩy khi offline (CH4): notify-service và thông báo của app chat — thiết kế
 
-- **Trạng thái:** bản nháp, chờ chủ dự án duyệt
+- **Trạng thái:** đã hiện thực (plan `docs/superpowers/plans/2026-11-17-offline-notifications-ch4.md`). Đo trên máy dev 4 vCPU: kênh 100 000 người theo dõi offline → 100 000 yêu cầu trong 20,0 s (5 002/s, đúng giới hạn tốc độ)
 - **Ngày:** 2026-11-17
 - **Vị trí trong lộ trình app chat:** sub-project 4/4, cuối cùng. (CH1) Chat core, (CH2) Tài khoản, (CH3) Trạng thái hội thoại đã xong.
 - **Dựa trên:** spec chat core `2026-11-12-chat-core-design.md` ("CH1 §n"), spec tài khoản `2026-11-16-account-service-design.md` ("CH2 §n"), spec trạng thái hội thoại `2026-11-17-conversation-state-design.md` ("CH3 §n"), contracts push `2026-11-10-push-contracts-design.md` ("contracts §n"), ADR 0031 (fan-out của chat), ADR 0036 (thu hồi theo thiết bị).
@@ -51,7 +51,7 @@
                           ┌──────────── chat-service ────────────┐
 router ─▶ c1.push.offline ─▶ OfflineNotifier ─┐                  │
                           │                   ├─▶ c1.notify.requests ─▶ notify-service ─▶ APNs / FCM
-chat fan-out (kênh) ─▶ chat.channel.notify ─▶ ChannelNotifier ─┘     │   ▲         │
+sequencer ─▶ chat.events (bài kênh) ─▶ ChannelNotifier ─┘            │   ▲         │
                           └──────────────────────────────────────┘     │   │         └─ PostgreSQL (schema notify)
                                                                        │   └─ gw.control (thu hồi)
 app ── PUT /v1/devices/self/push (connect token) ──────────────────────┘
@@ -156,13 +156,13 @@ Store lỗi tạm thì thử lại như các loop khác của chat-service (lùi
 
 ### 4.1 Kích hoạt
 
-Khi fan-out một bài kênh (BROADCAST, CH1 §6), chat-service produce một job `ChannelNotifyJob{convId, convSeq, msgId, sentAt}` vào topic nội bộ `chat.channel.notify` (key `convId`, 16 partition). Job chỉ cần bài đã lưu bền; không chặn fan-out.
+`ChannelNotifier` đọc thẳng `chat.events` (group `chat-channel-notify`): sự kiện chỉ được phát sau khi bài đã lưu bền và có key là `conversationId`, nên không cần topic job riêng và không phải sửa đường fan-out (bổ sung khi hiện thực; ADR 0041). Sự kiện không phải kênh bị bỏ qua.
 
 ### 4.2 Worker `ChannelNotifier`
 
 - Consumer group `chat-channel-notify`. Một job duyệt `members` của kênh theo trang 1 000 dòng (partition `conv_id`, thứ tự `user_id`).
 - Với mỗi trang: bỏ người đã tắt kênh (`muted_until`, trừ khi được nhắc tên), bỏ người gửi, bỏ người **đang online** (presence của CH3: `pres:{user}` khác rỗng, đọc pipeline cả trang), bỏ người bật ẩn xem trước khỏi phần nội dung (vẫn đẩy, dạng `loc_key`). Produce một `NotifyRequest` mỗi người còn lại: `badge = -1` (không đổi badge, xem §9), `thread_id = convId`, **`collapse_id = convId`** (bài sau thay thông báo của bài trước trên máy).
-- **Bài mới thay job cũ:** chỉ giữ một job sống mỗi kênh. Job mới tới khi job cũ chưa xong thì job cũ dừng sau trang hiện tại, job mới duyệt lại từ đầu. Người chưa nhận bài cũ sẽ nhận bài mới (cùng `collapse_id`), không ai nhận hai lượt cho hai bài liên tiếp. Bài cũ hơn 1 giờ thì job bỏ.
+- **Bài mới thay job cũ:** chỉ giữ một job sống mỗi kênh. Bài mới tới khi job cũ chưa xong thì **tiếp con trỏ** của job cũ (chốt khi hiện thực: bản nháp nói "duyệt lại từ đầu", trái với "không ai nhận hai lượt"). Người chưa được báo nhận bài mới, người đã được báo giữ thông báo bài cũ (cùng `collapse_id`); không ai nhận hai lượt cho một loạt bài. Bài cũ hơn 1 giờ thì job bỏ.
 - **Giới hạn tốc độ:** mỗi pod tối đa 5 000 `NotifyRequest`/s cho kênh (`chat.notify.channel-rate`), dùng chung cho mọi kênh; DM/nhóm không bị giới hạn này.
 - **Bền qua restart:** sau mỗi trang ghi điểm dừng `(convId, convSeq, lastUserId)` vào bảng `channel_notify_progress` (Scylla, TTL 1 ngày) rồi mới commit offset khi job xong. Pod chết giữa chừng: pod nhận partition đọc lại job và đi tiếp từ điểm dừng. Trang cuối có thể bị gửi lại; notify dedup theo `request_id = "<msgId>/<userId>"`.
 
@@ -252,7 +252,7 @@ Consumer `c1.notify.requests`, group `notify`:
 
 ## 7. Devenv, devtools và kiểm thử
 
-- **Devenv:** service `notify-service` (Postgres schema `notify`, cùng Redis/Kafka); `kafka-init` tạo `c1.notify.requests` (32) và `chat.channel.notify` (16); `fake-apns` và `fake-fcm` chạy từ image devtools.
+- **Devenv:** service `notify` (Postgres schema `notify`, cùng Redis/Kafka); `kafka-init` tạo `c1.notify.requests` (32); `fake-apns` và `fake-fcm` chạy từ image devtools.
 - **gateway-devtools:** lệnh `fake-apns` và `fake-fcm`: máy chủ HTTP (h2c cho APNs giả) nhận đúng dạng request của Apple/Google, ghi lại từng thông báo, trả lỗi theo token cấu hình được (ví dụ token có tiền tố `dead` → 410 / `UNREGISTERED`), và có `GET /received?token=` để test đọc lại. Lệnh `notify register --token ... --platform ...` gọi API §5.1.
 - **Smoke:** bước `CHAT notify` như tiêu chí thành công.
 - **Unit:** soạn nội dung (§3.5, cắt 200 ký tự, ẩn xem trước, nhắc tên trong hội thoại đã tắt); badge; quy tắc tắt; bảng kết quả §5.4; làm mới JWT APNs / OAuth FCM; `NotifyRules`.

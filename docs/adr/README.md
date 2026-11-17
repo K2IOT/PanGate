@@ -43,3 +43,5 @@ Quyết định kiến trúc của gateway-service (spec §13). Mỗi ADR gồm:
 | [0037](0037-receipt-marks-per-user.md) | Mốc đã nhận / đã xem theo người, chỉ tăng bằng `USING TIMESTAMP`; không dùng receipt của router |
 | [0038](0038-presence-by-watch.md) | Online theo đăng ký xem của client, luật chung hội thoại, ân hạn 5 s |
 | [0039](0039-client-sync-contract.md) | Hợp đồng đồng bộ phía client: `syncedSeq`, lỗ → `/v1/sync`, `/v1/state` sau khi nối lại |
+| [0040](0040-notify-service-split.md) | notify-service của nền tảng giữ token và gửi APNs/FCM; app quyết định nói gì |
+| [0041](0041-channel-notification-jobs.md) | Thông báo kênh: một job mỗi kênh từ `chat.events`, bài sau tiếp con trỏ của bài trước |

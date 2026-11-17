@@ -30,7 +30,7 @@ import java.util.function.Consumer;
 final class ChatSmoke {
 
   static final List<String> STEPS = List.of("CHAT 1-1", "CHAT group", "CHAT channel", "CHAT receipts",
-      "CHAT typing", "CHAT presence");
+      "CHAT typing", "CHAT presence", "CHAT notify");
 
   static final Duration T = Duration.ofSeconds(10);
   static final String ULID = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -43,7 +43,17 @@ final class ChatSmoke {
   private final HttpClient http = HttpClient.newHttpClient();
   private final List<GatewayClient> open = new ArrayList<>();
 
+  private final URI notify;
+  private final URI fakeApns;
+
   ChatSmoke(URI chat, URI ws, ClientTls tls, AccountApi accounts) {
+    this(chat, ws, tls, accounts, null, null);
+  }
+
+  /** {@code notify}, {@code fakeApns}: the CHAT notify step (CH4 spec §7); both null skips it. */
+  ChatSmoke(URI chat, URI ws, ClientTls tls, AccountApi accounts, URI notify, URI fakeApns) {
+    this.notify = notify;
+    this.fakeApns = fakeApns;
     this.chat = chat;
     this.ws = ws;
     this.tls = tls;
@@ -264,6 +274,11 @@ final class ChatSmoke {
       }
       System.out.printf("CHAT presence: online, then offline %.1f s after close (5 s grace)%n",
           (System.nanoTime() - t0) / 1e9);
+
+      if (notify != null) {
+        step.accept(STEPS.get(6));
+        notifyStep(a, b, dm);
+      }
     } finally {
       for (GatewayClient x : open) {
         try {
@@ -272,6 +287,51 @@ final class ChatSmoke {
           // closed
         }
       }
+    }
+  }
+
+  /** Notifications the fake APNs got for {@code token} (CH4 spec §7). */
+  int received(String token) throws Exception {
+    String body = http.send(HttpRequest.newBuilder(fakeApns.resolve("/received?token=" + token)).timeout(T).build(),
+        HttpResponse.BodyHandlers.ofString()).body();
+    return body.equals("[]") ? 0 : body.split("\"headers\"").length - 1;
+  }
+
+  /**
+   * CHAT notify (CH4 spec §0): b, offline since the presence step, registers an APNs token; a's DM reaches the fake
+   * APNs once, with b's badge; after b logs that device out, the next DM sends nothing.
+   */
+  void notifyStep(String a, String b, String dm) throws Exception {
+    String token = (UUID.randomUUID().toString() + UUID.randomUUID()).replace("-", "").substring(0, 64);
+    String deviceB = byUserId.get(b).deviceId();
+    String connectB = token(b);
+    int status = NotifyCommand.register(notify.toString(), connectB, "apns", token, "sandbox");
+    if (status != 204) {
+      throw new IllegalStateException("push token registration answered " + status);
+    }
+    long t0 = System.nanoTime();
+    call("POST", "/v1/conversations/" + dm + "/messages", a, "{\"clientMsgId\":\"" + ulid()
+        + "\",\"text\":\"are you there?\"}", null);
+    long deadline = System.nanoTime() + T.toNanos();
+    while (received(token) < 1) {
+      if (System.nanoTime() > deadline) {
+        throw new IllegalStateException("no notification at the fake APNs");
+      }
+      Thread.sleep(100);
+    }
+    String got = http.send(HttpRequest.newBuilder(fakeApns.resolve("/received?token=" + token)).timeout(T).build(),
+        HttpResponse.BodyHandlers.ofString()).body();
+    if (!got.contains("are you there?") || !got.contains("badge")) {
+      throw new IllegalStateException("unexpected notification " + got);
+    }
+    System.out.printf("CHAT notify: offline DM -> APNs in %.1f ms%n", (System.nanoTime() - t0) / 1e6);
+    accounts.logout(connectB, deviceB);
+    Thread.sleep(2_000);   // the revocation reaches gw.control, notify-service drops the token
+    call("POST", "/v1/conversations/" + dm + "/messages", a, "{\"clientMsgId\":\"" + ulid()
+        + "\",\"text\":\"still there?\"}", null);
+    Thread.sleep(5_000);
+    if (received(token) != 1) {
+      throw new IllegalStateException("a logged-out device was notified");
     }
   }
 }

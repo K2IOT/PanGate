@@ -63,7 +63,8 @@ message twice, never as two messages.
 | `GET /v1/state?since=&cursor=` | conversations whose state changed after `since` (all without it): `lastSeq`, `readSeq`, `deliveredSeq`, `unread`, DM `peer`; `now` |
 | `GET /v1/conversations/{id}/receipts?seq=` | DM / group ≤ 50: `marks`; larger groups: `readCount`; channels `404 not_supported`; 1/s |
 | `GET /v1/presence?ids=&conversationId=` | ≤ 100 ids sharing that conversation |
-| `GET` · `PUT /v1/me/privacy` | `{hidePresence, hideRead}`, reciprocal |
+| `GET` · `PUT /v1/me/privacy` | `{hidePresence, hideRead, hidePreview}`; the first two reciprocal, `hidePreview` hides sender and text in notifications (CH4) |
+| `PUT /v1/conversations/{id}/mute` | `{until: <epoch ms> \| null}`: `null` = for ever, a past time unmutes; members only; a mention still notifies (CH4) |
 
 A client's sync cursor is the highest `convSeq` it has received. `lastSeq` from `/v1/sync` (without `tooMany`) is
 exactly that; `lastSeq` elsewhere (conversation, history, `tooMany`) is the conversation's reserved `last_seq`, which
@@ -109,6 +110,25 @@ can run ahead of what is written for a moment: use it to see that something is n
 | Malformed record | counted and written to `chat.commands.dlq` |
 | ScyllaDB down under the receipt worker | windows dropped, rewind to the last commit with backoff; replayed marks are harmless |
 | Redis down (presence) | everyone reads offline and watches are not kept (`chat.presence.unavailable`); recovers when clients watch again |
+
+## Offline notifications (CH4)
+
+A message no device of its recipient took arrives on `c1.push.offline` (router); `OfflineNotifierLoop` (group
+`chat-notify`) turns it into a `NotifyRequest` on `c1.notify.requests` for notify-service: title and preview as the
+spec's §3.5 table, the badge (every unread message), `thread_id` = conversation, `collapse_id` = message. Skipped:
+other tenants and types, the recipient's own message, messages older than 1 h, muted conversations without a mention.
+
+Channel posts are read from `chat.events` by `ChannelNotifierLoop` (group `chat-channel-notify`, ADR 0041): one live
+job per channel pages its members 1 000 at a time, skips the sender, followers online and muted ones, and produces
+at most `chat.notifications.channel-rate` (5 000) requests/s per pod with `badge = -1` and `collapse_id` = channel.
+A newer post takes over the running job's cursor; the cursor is saved per page (`channel_notify_progress`).
+
+`chat.notifications.*`: `enabled` (true), `offline-topic` (`c1.push.offline`), `requests-topic`
+(`c1.notify.requests`), `max-age` (1h), `channel-rate` (5000), `channel-page` (1000). Metrics
+`chat.notify.offline{result}`, `chat.notify.channel.jobs{result}`, `chat.notify.channel.sent`.
+
+Measured (4 vCPU dev machine, `ChannelNotifyMeasureIT`, `-Dchat.notify.measure=true`): a post to a channel of 100 000
+offline followers → 100 000 requests acked by Kafka in 20.0 s (5 002/s, the configured rate).
 
 ## Measurement (CH1, dev machine)
 
