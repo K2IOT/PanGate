@@ -30,9 +30,14 @@ public class StateController {
   private final com.pangate.chat.core.StateService views;
   private final com.pangate.chat.core.ChatStores.SettingsStore settings;
   private final com.pangate.chat.core.PrivacyCache privacy;
+  private final com.pangate.chat.core.PresenceWatch presence;
+
+  static final int MAX_PRESENCE_IDS = 100;
 
   public StateController(StateIngest state, com.pangate.chat.core.StateService views,
-      com.pangate.chat.core.ChatStores.SettingsStore settings, com.pangate.chat.core.PrivacyCache privacy) {
+      com.pangate.chat.core.ChatStores.SettingsStore settings, com.pangate.chat.core.PrivacyCache privacy,
+      com.pangate.chat.core.PresenceWatch presence) {
+    this.presence = presence;
     this.state = state;
     this.views = views;
     this.settings = settings;
@@ -63,6 +68,28 @@ public class StateController {
       throw new ChatHttpException(400, "invalid_request", "seq must be at least 1");
     }
     return views.receipts(AuthFilter.caller(req).userId(), id, seq);
+  }
+
+  /** CH3 spec §6.3: presence for bots and screens without WebSocket; ids sharing {@code conversationId} only. */
+  @GetMapping("/v1/presence")
+  public Map<String, Object> presence(@RequestParam("ids") String ids,
+      @RequestParam("conversationId") String conversationId, HttpServletRequest req) {
+    java.util.List<String> list = java.util.Arrays.stream(ids.split(",")).map(String::strip)
+        .filter(x -> !x.isEmpty()).toList();
+    if (list.isEmpty() || list.size() > MAX_PRESENCE_IDS) {
+      throw new ChatHttpException(400, "invalid_request", "1 to " + MAX_PRESENCE_IDS + " ids");
+    }
+    java.util.List<Map<String, Object>> out = new java.util.ArrayList<>();
+    for (var st : presence.states(AuthFilter.caller(req).userId(), conversationId, list)) {
+      Map<String, Object> m = new LinkedHashMap<>();
+      m.put("userId", st.getUserId());
+      m.put("online", st.getOnline());
+      m.put("lastSeenMs", st.getLastSeenMs());
+      m.put("recently", st.getRecently());
+      m.put("hidden", st.getHidden());
+      out.add(m);
+    }
+    return Map.of("states", out);
   }
 
   /** CH3 spec §8. */

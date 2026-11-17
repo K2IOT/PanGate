@@ -2,7 +2,6 @@ package com.pangate.chat.core;
 
 import com.pangate.contracts.v1.ChatMark;
 import com.pangate.contracts.v1.ChatTyping;
-import com.pangate.contracts.v1.PresenceWatch;
 import com.pangate.contracts.v1.ReceiptCommand;
 import java.util.Optional;
 import java.util.function.LongSupplier;
@@ -15,14 +14,24 @@ public final class StateIngest implements StateCommands {
   private final LongSupplier wallMs;
   private final TypingRelay typing;
   private final java.util.function.Consumer<String> onTyping;
+  private final PresenceWatch watch;
+  private final java.util.function.Consumer<String> onWatch;
 
   public StateIngest(MarkValidator marks, MarkSink sink) {
     this(marks, sink, System::currentTimeMillis, null, r -> { });
   }
 
-  /** {@code typing} may be null (no typing relay); {@code onTyping} counts each outcome. */
   public StateIngest(MarkValidator marks, MarkSink sink, LongSupplier wallMs, TypingRelay typing,
       java.util.function.Consumer<String> onTyping) {
+    this(marks, sink, wallMs, typing, onTyping, null, r -> { });
+  }
+
+  /** {@code typing} may be null (no typing relay); {@code onTyping} counts each outcome. */
+  /** {@code watch} may be null; {@code onWatch} counts {@code kept} entries or {@code unavailable}. */
+  public StateIngest(MarkValidator marks, MarkSink sink, LongSupplier wallMs, TypingRelay typing,
+      java.util.function.Consumer<String> onTyping, PresenceWatch watch, java.util.function.Consumer<String> onWatch) {
+    this.watch = watch;
+    this.onWatch = onWatch;
     this.marks = marks;
     this.sink = sink;
     this.wallMs = wallMs;
@@ -61,7 +70,17 @@ public final class StateIngest implements StateCommands {
   }
 
   @Override
-  public String watch(String userId, String deviceId, PresenceWatch w) {
-    return "ignored";
+  public String watch(String userId, String deviceId, com.pangate.contracts.v1.PresenceWatch w) {
+    if (watch == null) {
+      return "ignored";
+    }
+    try {
+      watch.watch(userId, deviceId, w);
+      onWatch.accept("kept");
+      return "accepted";
+    } catch (StoreUnavailableException e) {
+      onWatch.accept("unavailable");   // Redis down: presence is unknown until the client watches again (spec §9)
+      return "rejected";
+    }
   }
 }

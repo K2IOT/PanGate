@@ -31,6 +31,7 @@ class StateControllerTest {
 
   final FakeStores stores = new FakeStores();
   final List<ReceiptCommand> published = new ArrayList<>();
+  final com.pangate.chat.core.FakePresence presence = new com.pangate.chat.core.FakePresence();
   final String conv = Ids.next();
   final MockMvc mvc;
 
@@ -47,9 +48,15 @@ class StateControllerTest {
     StateIngest state = new StateIngest(new MarkValidator(new MemberLookup(stores, stores),
         new LastSeqCache(stores, () -> 0L), new TokenBucketLimiter(1, 1, () -> 0L), r -> { }), published::add);
     com.pangate.chat.core.PrivacyCache privacy = new com.pangate.chat.core.PrivacyCache(stores, () -> 0L);
+    presence.add("u2", "n1", 1, "c1");
+    stores.add(conv, new Member("u2", Role.MEMBER));
+    com.pangate.chat.core.PresenceWatch watch = new com.pangate.chat.core.PresenceWatch(stores,
+        new MemberLookup(stores, stores), new com.pangate.chat.core.FakeWatchers(System::currentTimeMillis), presence,
+        stores, privacy, r -> new java.util.concurrent.CompletableFuture<>(), System::currentTimeMillis,
+        java.time.Duration.ofMinutes(5), 200);
     mvc = MockMvcBuilders.standaloneSetup(new StateController(state, new com.pangate.chat.core.StateService(stores,
         new MemberLookup(stores, stores), stores, stores, stores, privacy, 50, () -> 0L, System::currentTimeMillis),
-        stores, privacy)).setControllerAdvice(new ProblemHandler())
+        stores, privacy, watch)).setControllerAdvice(new ProblemHandler())
         .addFilters(auth).build();
   }
 
@@ -86,5 +93,17 @@ class StateControllerTest {
     mvc.perform(post("/v1/conversations/" + conv + "/read").header("Authorization", "Bearer u1")
         .contentType(MediaType.APPLICATION_JSON).content("{\"upToSeq\":6}")).andExpect(status().isTooManyRequests())
         .andExpect(jsonPath("$.code").value("rate_limited"));
+  }
+
+  /** CH3 spec §6.3: presence over HTTP, only of users sharing the conversation. */
+  @Test
+  void presenceOfMembersOnly() throws Exception {
+    mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/v1/presence?ids=u2,zz&"
+        + "conversationId=" + conv).header("Authorization", "Bearer u1")).andExpect(status().isOk())
+        .andExpect(jsonPath("$.states.length()").value(1)).andExpect(jsonPath("$.states[0].userId").value("u2"))
+        .andExpect(jsonPath("$.states[0].online").value(true));
+    String tooMany = String.join(",", java.util.Collections.nCopies(101, "u2"));
+    mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/v1/presence?ids=" + tooMany
+        + "&conversationId=" + conv).header("Authorization", "Bearer u1")).andExpect(status().isBadRequest());
   }
 }

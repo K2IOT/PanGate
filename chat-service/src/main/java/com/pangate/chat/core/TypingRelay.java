@@ -82,7 +82,13 @@ public final class TypingRelay {
         }
       }
     } else {
-      for (String d : open.devicesWithOpen(convId)) {
+      java.util.Set<String> devices;
+      try {
+        devices = open.devicesWithOpen(convId);
+      } catch (StoreUnavailableException e) {
+        return "unavailable";
+      }
+      for (String d : devices) {
         int slash = d.indexOf('/');
         String u = d.substring(0, slash);
         if (!u.equals(userId) && current.stream().anyMatch(m -> m.userId().equals(u))) {

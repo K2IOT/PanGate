@@ -1,0 +1,171 @@
+package com.pangate.chat.core;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.pangate.chat.core.ChatStores.Conversation;
+import com.pangate.chat.core.ChatStores.Member;
+import com.pangate.chat.core.ChatStores.Role;
+import com.pangate.contracts.testkit.ChatTopics;
+import com.pangate.contracts.v1.ConversationKind;
+import com.pangate.contracts.v1.PresenceUpdate;
+import com.pangate.contracts.v1.PresenceWatch;
+import com.pangate.contracts.v1.PushRequest;
+import com.pangate.contracts.v1.PushResponse;
+import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicLong;
+import org.junit.jupiter.api.Test;
+
+/** CH3 spec §6.3: who may watch whom, the snapshot, and change fan-out. */
+class PresenceWatchTest {
+
+  final FakeStores stores = new FakeStores();
+  final FakePresence presence = new FakePresence();
+  final AtomicLong now = new AtomicLong(1_800_000_000_000L);
+  final FakeWatchers watchers = new FakeWatchers(now::get);
+  final List<PushRequest> pushed = new CopyOnWriteArrayList<>();
+  final PrivacyCache privacy = new PrivacyCache(stores, () -> 0L);
+  final Pusher pusher = r -> {
+    pushed.add(r);
+    return CompletableFuture.completedFuture(PushResponse.getDefaultInstance());
+  };
+  final com.pangate.chat.core.PresenceWatch watch = new com.pangate.chat.core.PresenceWatch(stores,
+      new MemberLookup(stores, stores), watchers, presence, stores, privacy, pusher, now::get, Duration.ofMinutes(5),
+      200);
+  final PresenceFanOut fanOut = new PresenceFanOut(watchers, presence, stores, privacy, pusher, now::get);
+  final String g = conv(ConversationKind.CONVERSATION_KIND_GROUP, "me", "a", "b");
+
+  String conv(ConversationKind kind, String... users) {
+    String id = Ids.next();
+    stores.create(new Conversation(id, kind, "t", users[0], 0, false, users.length),
+        java.util.Arrays.stream(users).map(u -> new Member(u, Role.MEMBER)).toList());
+    return id;
+  }
+
+  static PresenceWatch of(String conv, String... users) {
+    PresenceWatch.Builder b = PresenceWatch.newBuilder();
+    for (String u : users) {
+      b.addEntries(PresenceWatch.Entry.newBuilder().setUserId(u).setConversationId(conv));
+    }
+    return b.build();
+  }
+
+  static List<String> users(PushRequest r) throws Exception {
+    return PresenceUpdate.parseFrom(r.getPayload()).getStatesList().stream().map(PresenceUpdate.State::getUserId)
+        .toList();
+  }
+
+  @Test
+  void snapshotGoesToTheWatchingDeviceOnly() throws Exception {
+    presence.add("a", "n1", 1, "c1");
+    watch.watch("me", "d1", of(g, "a", "b"));
+    assertThat(pushed).singleElement().satisfies(r -> {
+      assertThat(r.getPrincipalId()).isEqualTo("chat:me");
+      assertThat(r.getDeviceId()).isEqualTo("d1");
+      assertThat(r.getHeadersMap()).containsEntry("type", ChatTopics.TYPE_PRESENCE);
+      assertThat(r.getTtlSec()).isEqualTo(30);
+    });
+    PresenceUpdate u = PresenceUpdate.parseFrom(pushed.getFirst().getPayload());
+    assertThat(u.getStatesList()).extracting(PresenceUpdate.State::getUserId, PresenceUpdate.State::getOnline)
+        .containsExactlyInAnyOrder(org.assertj.core.groups.Tuple.tuple("a", true),
+            org.assertj.core.groups.Tuple.tuple("b", false));
+  }
+
+  @Test
+  void strangerEntryIsDroppedSilently() throws Exception {
+    String other = conv(ConversationKind.CONVERSATION_KIND_GROUP, "x", "y");
+    watch.watch("me", "d1", PresenceWatch.newBuilder().addAllEntries(of(g, "a").getEntriesList())
+        .addAllEntries(of(other, "y").getEntriesList()).addAllEntries(of(g, "y").getEntriesList()).build());
+    assertThat(users(pushed.getFirst())).containsExactly("a");
+    assertThat(watchers.watchersOf("y", now.get())).isEmpty();
+  }
+
+  @Test
+  void channelEntryIsDropped() {
+    String ch = conv(ConversationKind.CONVERSATION_KIND_CHANNEL, "me", "a");
+    watch.watch("me", "d1", of(ch, "a"));
+    assertThat(pushed).isEmpty();
+    assertThat(watchers.watchersOf("a", now.get())).isEmpty();
+  }
+
+  @Test
+  void secondWatchReplacesTheFirst() {
+    watch.watch("me", "d1", of(g, "a"));
+    watch.watch("me", "d1", of(g, "b"));
+    assertThat(watchers.watchersOf("a", now.get())).isEmpty();
+    assertThat(watchers.watchersOf("b", now.get())).containsExactly("me/d1/" + g);
+  }
+
+  @Test
+  void moreThan200KeepsFirst200() {
+    String[] many = new String[210];
+    Member[] ms = new Member[211];
+    ms[0] = new Member("me", Role.MEMBER);
+    for (int i = 0; i < 210; i++) {
+      many[i] = "m" + i;
+      ms[i + 1] = new Member(many[i], Role.MEMBER);
+    }
+    String big = Ids.next();
+    stores.create(new Conversation(big, ConversationKind.CONVERSATION_KIND_GROUP, "b", "me", 0, false, 211),
+        List.of(ms));
+    watch.watch("me", "d1", of(big, many));
+    assertThat(watchers.byDevice.get("me/d1").entries()).hasSize(200);
+    assertThat(watchers.watchersOf("m199", now.get())).hasSize(1);
+    assertThat(watchers.watchersOf("m200", now.get())).isEmpty();
+  }
+
+  /** Review Focus 2. */
+  @Test
+  void leftMemberIsNotWatchedAfterRefresh() {
+    watch.watch("me", "d1", of(g, "a"));
+    stores.remove(g, "a");
+    stores.evictMembers(g);
+    watch.watch("me", "d1", of(g, "a"));
+    assertThat(watchers.watchersOf("a", now.get())).isEmpty();
+  }
+
+  @Test
+  void hidePresenceViewerStillStoresWatchForTyping() throws Exception {
+    stores.putPrivacy("me", new ChatStores.Privacy(true, false), 0);
+    presence.add("a", "n1", 1, "c1");
+    watch.watch("me", "d1", of(g, "a"));
+    assertThat(watchers.devicesWithOpen(g)).containsExactly("me/d1");
+    assertThat(PresenceUpdate.parseFrom(pushed.getFirst().getPayload()).getStates(0).getHidden()).isTrue();
+  }
+
+  @Test
+  void watchExpiresAfterTtl() {
+    watch.watch("me", "d1", of(g, "a"));
+    now.addAndGet(Duration.ofMinutes(5).toMillis() + 1);
+    assertThat(watchers.watchersOf("a", now.get())).isEmpty();
+  }
+
+  @Test
+  void transitionReachesWatchersFiltered() throws Exception {
+    watch.watch("me", "d1", of(g, "a"));
+    watch.watch("b", "d9", of(g, "a"));
+    stores.putPrivacy("b", new ChatStores.Privacy(true, false), 0);
+    privacy.forget("b");   // as PUT /v1/me/privacy does
+    pushed.clear();
+    fanOut.on(new PresenceTracker.Transition("a", true, now.get()));
+    assertThat(pushed).hasSize(2);
+    PushRequest toMe = pushed.stream().filter(r -> r.getPrincipalId().equals("chat:me")).findFirst().orElseThrow();
+    assertThat(toMe.getDeviceId()).isEqualTo("d1");
+    assertThat(PresenceUpdate.parseFrom(toMe.getPayload()).getStates(0).getOnline()).isTrue();
+    PushRequest toB = pushed.stream().filter(r -> r.getPrincipalId().equals("chat:b")).findFirst().orElseThrow();
+    assertThat(PresenceUpdate.parseFrom(toB.getPayload()).getStates(0).getHidden()).isTrue();
+  }
+
+  @Test
+  void offlineTransitionCarriesLastSeen() throws Exception {
+    watch.watch("me", "d1", of(g, "a"));
+    pushed.clear();
+    long at = now.get() - 61_000;
+    fanOut.on(new PresenceTracker.Transition("a", false, at));
+    PresenceUpdate.State s = PresenceUpdate.parseFrom(pushed.getFirst().getPayload()).getStates(0);
+    assertThat(s.getOnline()).isFalse();
+    assertThat(s.getLastSeenMs()).isEqualTo(at / 60_000 * 60_000);
+  }
+}

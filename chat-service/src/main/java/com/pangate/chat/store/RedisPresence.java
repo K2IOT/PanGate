@@ -16,9 +16,11 @@ import java.util.OptionalLong;
 /**
  * CH3 spec §6.1 in Redis: {@code pres:{user}} (set of {@code <node>/<conn>}), {@code presnode:{node}:{epoch}} (set of
  * {@code <user>/<conn>}), both TTL 24 h renewed on each write; {@code presgone:{user}}, {@code lastseen:{user}},
- * {@code presev:{eventId}} (1 h). A Redis failure is a {@link StoreUnavailableException}: presence is then unknown.
+ * {@code presev:{eventId}} (1 h). Watches (§6.3): {@code watchers:{user}} and {@code watchconv:{conv}} (sorted sets,
+ * score = expiry ms) and {@code watching:{viewer}/{device}} (the device's current list, for replacement). A Redis
+ * failure is a {@link StoreUnavailableException}: presence is then unknown.
  */
-public final class RedisPresence implements PresenceState, AutoCloseable {
+public final class RedisPresence implements PresenceState, com.pangate.chat.core.Watchers, AutoCloseable {
 
   static final Duration SET_TTL = Duration.ofHours(24);
   static final Duration EVENT_TTL = Duration.ofHours(1);
@@ -139,6 +141,54 @@ public final class RedisPresence implements PresenceState, AutoCloseable {
   @Override
   public void putLastSeen(String userId, long atMs) {
     call(r -> r.set("lastseen:" + userId, Long.toString(atMs)));
+  }
+
+  // --- watches (CH3 spec §6.3) -------------------------------------------------------------------------------
+
+  @Override
+  public void replace(String viewer, String device, List<com.pangate.contracts.v1.PresenceWatch.Entry> valid,
+      long expiresAtMs) {
+    call(r -> {
+      String dev = viewer + "/" + device;
+      String list = "watching:" + dev;
+      for (String old : r.smembers(list)) {
+        int bar = old.indexOf('|');
+        String user = old.substring(0, bar);
+        String conv = old.substring(bar + 1);
+        r.zrem("watchers:" + user, dev + "/" + conv);
+        r.zrem("watchconv:" + conv, dev);
+      }
+      r.del(list);
+      for (com.pangate.contracts.v1.PresenceWatch.Entry e : valid) {
+        String w = "watchers:" + e.getUserId();
+        String c = "watchconv:" + e.getConversationId();
+        r.zadd(w, expiresAtMs, dev + "/" + e.getConversationId());
+        r.pexpireat(w, expiresAtMs);
+        r.zadd(c, expiresAtMs, dev);
+        r.pexpireat(c, expiresAtMs);
+        r.sadd(list, e.getUserId() + "|" + e.getConversationId());
+      }
+      if (!valid.isEmpty()) {
+        r.pexpireat(list, expiresAtMs);
+      }
+      return null;
+    });
+  }
+
+  @Override
+  public List<String> watchersOf(String userId, long nowMs) {
+    return call(r -> {
+      String key = "watchers:" + userId;
+      r.zremrangebyscore(key, io.lettuce.core.Range.create(Double.NEGATIVE_INFINITY, (double) nowMs));
+      return r.zrangebyscore(key, io.lettuce.core.Range.create((double) nowMs, Double.POSITIVE_INFINITY));
+    });
+  }
+
+  @Override
+  public java.util.Set<String> devicesWithOpen(String convId) {
+    long now = System.currentTimeMillis();
+    return call(r -> new java.util.HashSet<>(r.zrangebyscore("watchconv:" + convId,
+        io.lettuce.core.Range.create((double) now, Double.POSITIVE_INFINITY))));
   }
 
   private static OptionalLong parse(String v) {

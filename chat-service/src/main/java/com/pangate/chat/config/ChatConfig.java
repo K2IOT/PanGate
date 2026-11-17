@@ -101,7 +101,8 @@ public class ChatConfig {
   /** CH3 spec §3.3: delivered / read marks into chat.receipts. */
   @Bean
   com.pangate.chat.core.StateIngest stateIngest(ScyllaChatStore store, RedisChatCache cache, CommandProducer producer,
-      ChatProperties p, MeterRegistry meters, com.pangate.chat.core.TypingRelay typing) {
+      ChatProperties p, MeterRegistry meters, com.pangate.chat.core.TypingRelay typing,
+      com.pangate.chat.core.PresenceWatch watch, RecentCount watchers) {
     return new com.pangate.chat.core.StateIngest(new com.pangate.chat.core.MarkValidator(
         new MemberLookup(store, cache), new com.pangate.chat.core.LastSeqCache(store, () -> System.nanoTime() / 1_000_000),
         new com.pangate.chat.core.TokenBucketLimiter(p.state().markRate(), p.state().markBurst(), System::nanoTime),
@@ -112,15 +113,83 @@ public class ChatConfig {
           } else {
             meters.counter("chat.typing.dropped", "reason", r).increment();
           }
+        }, watch, r -> {
+          if (r.equals("unavailable")) {
+            meters.counter("chat.presence.unavailable").increment();
+          } else {
+            watchers.add(r);
+          }
         });
+  }
+
+  /** chat.presence.watchers: watch calls this pod took in the last watch TTL (an estimate, spec §9). */
+  @Bean
+  com.pangate.chat.config.ChatConfig.RecentCount presenceWatchers(MeterRegistry meters, ChatProperties p) {
+    RecentCount c = new RecentCount(p.state().watchTtl());
+    meters.gauge("chat.presence.watchers", c, RecentCount::size);
+    return c;
+  }
+
+  /** Events within a sliding window, for estimated gauges. */
+  public static final class RecentCount {
+    private final java.util.concurrent.ConcurrentLinkedDeque<Long> at = new java.util.concurrent.ConcurrentLinkedDeque<>();
+    private final long windowMs;
+
+    RecentCount(java.time.Duration window) {
+      this.windowMs = window.toMillis();
+    }
+
+    void add(String ignored) {
+      at.add(System.currentTimeMillis());
+      if (at.size() > 1_000_000) {
+        at.pollFirst();
+      }
+    }
+
+    double size() {
+      long cut = System.currentTimeMillis() - windowMs;
+      while (!at.isEmpty() && at.peekFirst() < cut) {
+        at.pollFirst();
+      }
+      return at.size();
+    }
+  }
+
+  /** CH3 spec §6.3. */
+  @Bean
+  com.pangate.chat.core.PresenceWatch presenceWatch(ScyllaChatStore store, RedisChatCache cache,
+      com.pangate.chat.store.RedisPresence presence, com.pangate.chat.core.PrivacyCache privacy, PushApiClient pusher,
+      ChatProperties p, MeterRegistry meters) {
+    com.pangate.chat.core.Pusher counted = r -> {
+      meters.counter("chat.presence.pushes").increment();
+      return pusher.send(r);
+    };
+    return new com.pangate.chat.core.PresenceWatch(store, new MemberLookup(store, cache), presence, presence, store,
+        privacy, counted, System::currentTimeMillis, p.state().watchTtl(), p.state().watchMax());
+  }
+
+  /** CH3 spec §6.3: transitions to the devices watching; Redis down is counted, not thrown into the tracker. */
+  @Bean
+  java.util.function.Consumer<com.pangate.chat.core.PresenceTracker.Transition> presenceFanOut(
+      com.pangate.chat.store.RedisPresence presence, ScyllaChatStore store, com.pangate.chat.core.PrivacyCache privacy,
+      PushApiClient pusher, MeterRegistry meters) {
+    com.pangate.chat.core.PresenceFanOut f = new com.pangate.chat.core.PresenceFanOut(presence, presence, store,
+        privacy, pusher, System::currentTimeMillis);
+    return t -> {
+      try {
+        meters.counter("chat.presence.pushes").increment(f.on(t));
+      } catch (com.pangate.chat.core.StoreUnavailableException e) {
+        meters.counter("chat.presence.unavailable").increment();
+      }
+    };
   }
 
   /** CH3 spec §5: typing, relayed directly (the open-conversation index comes with presence watch). */
   @Bean
   com.pangate.chat.core.TypingRelay typingRelay(ScyllaChatStore store, RedisChatCache cache, PushApiClient pusher,
-      ChatProperties p) {
+      ChatProperties p, com.pangate.chat.store.RedisPresence presence) {
     return new com.pangate.chat.core.TypingRelay(store, new MemberLookup(store, cache), pusher,
-        com.pangate.chat.core.OpenConversations.NONE, () -> System.nanoTime() / 1_000_000,
+        presence, () -> System.nanoTime() / 1_000_000,
         p.state().listedReceiptsMax());
   }
 
@@ -315,7 +384,7 @@ public class ChatConfig {
     return new com.pangate.chat.store.RedisPresence(p.redis());
   }
 
-  /** Transitions are counted here; Task 8 adds the fan-out to watchers. */
+  /** Transitions are counted, then fanned out to watchers (presenceFanOut). */
   @Bean
   com.pangate.chat.core.PresenceTracker presenceTracker(com.pangate.chat.store.RedisPresence presence,
       ScyllaChatStore store, ChatProperties p, MeterRegistry meters,
