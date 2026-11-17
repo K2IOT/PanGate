@@ -43,4 +43,30 @@ class ChangeIdentifierTest {
         .isInstanceOfSatisfying(DomainException.class, e -> assertThat(e.code()).isEqualTo("invalid_credentials"));
     assertThat(f.accounts.get(s.userId()).email()).isEqualTo("l@x.vn");
   }
+
+  /** PR review (Codex P2): two requests each removing one identifier must not leave the account with neither. */
+  @Test
+  void racingRemovalsKeepOneIdentifier() {
+    change.set(me, LoginKind.PHONE, "+84901234567", "secret-pw".toCharArray());
+    com.pangate.account.application.port.Transactions otherFirst = new com.pangate.account.application.port
+        .Transactions() {
+      @Override
+      public <T> T inTx(java.util.function.Supplier<T> work) {
+        f.accountStore.setIdentifier(s.userId(), LoginKind.PHONE, null);   // the other request commits first
+        return f.tx.inTx(work);
+      }
+
+      @Override
+      public void inTx(Runnable work) {
+        inTx(() -> {
+          work.run();
+          return null;
+        });
+      }
+    };
+    assertThatThrownBy(() -> new ChangeIdentifier(f.accountStore, login, otherFirst).set(me, LoginKind.EMAIL, null,
+        "secret-pw".toCharArray())).isInstanceOfSatisfying(DomainException.class,
+        e -> assertThat(e.code()).isEqualTo("invalid_request"));
+    assertThat(f.accounts.get(s.userId()).email()).isEqualTo("l@x.vn");
+  }
 }

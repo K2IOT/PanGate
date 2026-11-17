@@ -33,6 +33,6 @@ public final class ChangeIdentifier {
     if (v == null && other == null) {
       throw new DomainException("invalid_request", "an account keeps an email or a phone number");
     }
-    tx.inTx(() -> accounts.setIdentifier(a.userId(), kind, v));
+    tx.inTx(() -> accounts.setIdentifier(a.userId(), kind, v));   // checks the rule again under the row lock
   }
 }

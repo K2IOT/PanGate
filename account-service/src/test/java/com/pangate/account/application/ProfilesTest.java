@@ -82,4 +82,28 @@ class ProfilesTest {
     assertThatThrownBy(() -> profiles.changeUsername(caller(a), "TAKEN55")).isInstanceOfSatisfying(
         DomainException.class, e -> assertThat(e.code()).isEqualTo("username_taken"));
   }
+
+  /** PR review (Codex P2): a bio-only patch must not restore a display name that changed since it was read. */
+  @Test
+  void aPatchWritesOnlyTheFieldsItCarries() {
+    NewSession a = user("carol1");
+    com.pangate.account.domain.Account stale = f.accounts.get(a.userId());
+    f.accountStore.updateProfile(a.userId(), "Renamed", null, false);   // committed after the patch read the row
+    com.pangate.account.application.port.AccountStore staleReads =
+        (com.pangate.account.application.port.AccountStore) java.lang.reflect.Proxy.newProxyInstance(
+            getClass().getClassLoader(), new Class<?>[] {com.pangate.account.application.port.AccountStore.class},
+            (proxy, m, args) -> {
+              if (m.getName().equals("byId")) {
+                return java.util.Optional.of(stale);
+              }
+              try {
+                return m.invoke(f.accountStore, args);
+              } catch (java.lang.reflect.InvocationTargetException e) {
+                throw e.getCause();
+              }
+            });
+    new Profiles(staleReads, Set.of(), counter, TestLimits.SPEC).update(caller(a), null, "new bio");
+    assertThat(f.accounts.get(a.userId()).displayName()).isEqualTo("Renamed");
+    assertThat(f.accounts.get(a.userId()).bio()).isEqualTo("new bio");
+  }
 }

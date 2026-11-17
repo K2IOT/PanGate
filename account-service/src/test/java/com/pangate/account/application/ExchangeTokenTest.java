@@ -111,4 +111,28 @@ class ExchangeTokenTest {
     f.accountStore.setStatus(s.userId(), AccountStatus.LOCKED);
     assertThat(code()).isEqualTo("account_locked");
   }
+
+  /**
+   * PR review (Codex P1): a lock that commits while the token is being minted. Its revocation may reach gw.control
+   * before the token's iat, so the token must not be handed out: the account and session are checked again after
+   * minting.
+   */
+  @Test
+  void aLockDuringMintingIsNotHandedOutAToken() {
+    AuthApi racing = new AuthApi() {
+      @Override
+      public ConnectToken mint(String userId, String deviceId) {
+        f.accountStore.setStatus(userId, AccountStatus.LOCKED);
+        f.sessionStore.revokeAll(userId, null);
+        return new ConnectToken("jwt-raced", Instant.now().plusSeconds(600));
+      }
+
+      @Override
+      public void revoke(byte[] json) {}
+    };
+    ExchangeToken x = new ExchangeToken(f.sessionStore, f.accountStore, racing, counter, TestLimits.SPEC, f.clock,
+        Duration.ofDays(180), Duration.ofMinutes(5), Metrics.NONE);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> x.exchange(s.refreshToken()))
+        .isInstanceOfSatisfying(DomainException.class, e -> assertThat(e.code()).isEqualTo("account_locked"));
+  }
 }

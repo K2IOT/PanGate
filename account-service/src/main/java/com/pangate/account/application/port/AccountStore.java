@@ -23,12 +23,20 @@ public interface AccountStore {
 
   List<Account> byIds(Collection<String> userIds);
 
-  void updateProfile(String userId, String displayName, String bio);
+  /**
+   * Writes only what is given, against the current row (so concurrent patches of different fields both stick): a
+   * null {@code displayName} leaves it; {@code setBio} false leaves the bio, true sets it (null clears it).
+   */
+  void updateProfile(String userId, String displayName, String bio, boolean setBio);
 
   /** Throws {@link TakenException} ({@code username_taken}). */
   void updateUsername(String userId, Username username);
 
-  /** {@code value} null removes it; throws {@link TakenException}. */
+  /**
+   * {@code value} null removes it; throws {@link TakenException}. Under the account's row lock, refuses
+   * ({@code invalid_request}) a removal that would leave neither an email nor a phone number, so two racing removals
+   * cannot both succeed.
+   */
   void setIdentifier(String userId, LoginKind kind, String value);
 
   void setPassword(String userId, String hash, boolean mustChange);

@@ -134,8 +134,9 @@ public final class Fakes {
     }
 
     @Override
-    public void updateProfile(String userId, String displayName, String bio) {
-      accounts.computeIfPresent(userId, (k, a) -> new Account(a.userId(), a.username(), displayName, bio,
+    public void updateProfile(String userId, String displayName, String bio, boolean setBio) {
+      accounts.computeIfPresent(userId, (k, a) -> new Account(a.userId(), a.username(),
+          displayName == null ? a.displayName() : displayName, setBio ? bio : a.bio(),
           a.passwordHash(), a.mustChangePassword(), a.status(), a.email(), a.phone(), a.createdAt(), a.deletedAt()));
     }
 
@@ -153,6 +154,10 @@ public final class Fakes {
       if (value != null && accounts.values().stream().anyMatch(a -> !a.userId().equals(userId)
           && value.equals(kind == LoginKind.EMAIL ? a.email() : a.phone()))) {
         throw new TakenException(kind == LoginKind.EMAIL ? "email_taken" : "phone_taken");
+      }
+      Account cur = accounts.get(userId);
+      if (value == null && cur != null && (kind == LoginKind.EMAIL ? cur.phone() : cur.email()) == null) {
+        throw new DomainException("invalid_request", "an account keeps an email or a phone number");
       }
       accounts.computeIfPresent(userId, (k, a) -> new Account(a.userId(), a.username(), a.displayName(), a.bio(),
           a.passwordHash(), a.mustChangePassword(), a.status(), kind == LoginKind.EMAIL ? value : a.email(),

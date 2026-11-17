@@ -102,6 +102,17 @@ class StoreIT {
     assertThat(accounts.byLogin(Login.parse("nobody" + name()))).isEmpty();
   }
 
+  /** PR review (Codex P2): the last identifier cannot be removed, checked under the row lock. */
+  @Test
+  void theLastIdentifierCannotBeRemoved() {
+    Account a = account(name(), name() + "@x.vn", null);
+    tx.inTx(() -> accounts.insert(a));
+    assertThatThrownBy(() -> tx.inTx(() -> accounts.setIdentifier(a.userId(),
+        com.pangate.account.domain.LoginKind.EMAIL, null)))
+        .isInstanceOfSatisfying(DomainException.class, e -> assertThat(e.code()).isEqualTo("invalid_request"));
+    assertThat(accounts.byId(a.userId()).get().email()).isEqualTo(a.email());
+  }
+
   /** Review round 2, minor 4: a second deletion (self and admin racing) is not_found, so nothing is emitted twice. */
   @Test
   void erasingADeletedAccountIsNotFound() {
@@ -171,7 +182,7 @@ class StoreIT {
     tx.inTx(() -> accounts.insert(a));
     tx.inTx(() -> accounts.erase(a.userId()));
     for (Runnable w : List.<Runnable>of(
-        () -> accounts.updateProfile(a.userId(), "Back", "again"),
+        () -> accounts.updateProfile(a.userId(), "Back", "again", true),
         () -> accounts.updateUsername(a.userId(), com.pangate.account.domain.Username.of(name(), java.util.Set.of())),
         () -> accounts.setIdentifier(a.userId(), com.pangate.account.domain.LoginKind.EMAIL, name() + "@x.vn"),
         () -> accounts.setPassword(a.userId(), "h", false),

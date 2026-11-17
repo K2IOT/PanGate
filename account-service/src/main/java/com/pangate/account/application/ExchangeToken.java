@@ -57,7 +57,32 @@ public final class ExchangeToken {
       throw invalid();
     }
     Instant now = clock.now();
-    Session s = sessions.byRefreshHash(RefreshTokens.hash(refreshToken)).orElseThrow(this::invalid);
+    byte[] hash = RefreshTokens.hash(refreshToken);
+    Session s = usable(hash, now);
+    if (counter.increment("tok:" + s.deviceId(), Duration.ofHours(1)) > limits.tokensPerSessionPerHour()) {
+      metrics.count("account.ratelimited", "what", "token");
+      throw new RateLimitedException("rate_limited", 60);
+    }
+    AuthApi.ConnectToken t;
+    try {
+      t = auth.mint(s.userId(), s.deviceId());
+    } catch (AuthApi.AuthUnavailableException | AuthApi.AuthRejectedException e) {
+      metrics.count("account.tokens", "result", "unavailable");
+      throw new DomainException("unavailable", "try again shortly");
+    }
+    // A lock or deletion that committed while minting: its revocation may predate this token's iat, and chat-service
+    // only refuses tokens issued before a revocation, so check again and do not hand the token out.
+    usable(hash, now);
+    if (s.lastUsedAt().isBefore(now.minus(writeEvery))) {
+      sessions.touch(s.deviceId(), now);
+    }
+    metrics.count("account.tokens", "result", "ok");
+    return t;
+  }
+
+  /** The session of this refresh token when it may get a connect token, else why not. */
+  private Session usable(byte[] hash, Instant now) {
+    Session s = sessions.byRefreshHash(hash).orElseThrow(this::invalid);
     Optional<Account> a = accounts.byId(s.userId()).filter(x -> x.status() != AccountStatus.DELETED);
     if (a.isEmpty()) {
       throw invalid();
@@ -70,21 +95,6 @@ public final class ExchangeToken {
     if (s.revokedAt() != null || s.lastUsedAt().isBefore(now.minus(idleTtl))) {
       throw invalid();
     }
-    if (counter.increment("tok:" + s.deviceId(), Duration.ofHours(1)) > limits.tokensPerSessionPerHour()) {
-      metrics.count("account.ratelimited", "what", "token");
-      throw new RateLimitedException("rate_limited", 60);
-    }
-    AuthApi.ConnectToken t;
-    try {
-      t = auth.mint(s.userId(), s.deviceId());
-    } catch (AuthApi.AuthUnavailableException | AuthApi.AuthRejectedException e) {
-      metrics.count("account.tokens", "result", "unavailable");
-      throw new DomainException("unavailable", "try again shortly");
-    }
-    if (s.lastUsedAt().isBefore(now.minus(writeEvery))) {
-      sessions.touch(s.deviceId(), now);
-    }
-    metrics.count("account.tokens", "result", "ok");
-    return t;
+    return s;
   }
 }

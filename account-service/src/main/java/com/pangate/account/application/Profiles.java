@@ -66,12 +66,12 @@ public final class Profiles {
     return new MeView(a.userId(), a.username(), a.displayName(), a.bio(), a.email(), a.phone(), a.createdAt());
   }
 
-  /** Null leaves a field as it is; an empty bio clears it. */
+  /** Null leaves a field as it is; an empty bio clears it. Only the fields given are written. */
   public void update(Caller c, String displayName, String bio) {
     Account a = mine(c);
-    String name = displayName == null ? a.displayName() : ProfileRules.displayName(displayName);
-    String b = bio == null ? a.bio() : (bio.isBlank() ? null : ProfileRules.bio(bio));
-    accounts.updateProfile(a.userId(), name, b);
+    String name = displayName == null ? null : ProfileRules.displayName(displayName);
+    String b = bio == null || bio.isBlank() ? null : ProfileRules.bio(bio);
+    accounts.updateProfile(a.userId(), name, b, bio != null);
   }
 
   /** The old username is free at once (spec §4.2). */

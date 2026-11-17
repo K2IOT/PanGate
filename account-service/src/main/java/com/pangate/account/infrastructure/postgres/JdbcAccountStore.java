@@ -125,9 +125,10 @@ public final class JdbcAccountStore implements AccountStore {
   }
 
   @Override
-  public void updateProfile(String userId, String displayName, String bio) {
-    Db.run(() -> live(jdbc.sql("UPDATE account.accounts SET display_name = ?, bio = ?, updated_at = now() "
-        + "WHERE user_id = ? AND status <> 'deleted'").params(displayName, bio, userId).update()));
+  public void updateProfile(String userId, String displayName, String bio, boolean setBio) {
+    Db.run(() -> live(jdbc.sql("UPDATE account.accounts SET display_name = COALESCE(?, display_name), "
+        + "bio = CASE WHEN ? THEN ? ELSE bio END, updated_at = now() WHERE user_id = ? AND status <> 'deleted'")
+        .params(displayName, setBio, bio, userId).update()));
   }
 
   @Override
@@ -146,6 +147,12 @@ public final class JdbcAccountStore implements AccountStore {
   public void setIdentifier(String userId, LoginKind kind, String value) {
     Db.run(() -> {
       lockLive(userId);
+      if (value == null && jdbc.sql("SELECT count(*) FROM account.identifiers WHERE user_id = ? AND kind = ?")
+          .params(userId, kind(kind == LoginKind.EMAIL ? LoginKind.PHONE : LoginKind.EMAIL)).query(Long.class)
+          .single() == 0) {
+        throw new com.pangate.account.domain.DomainException("invalid_request",
+            "an account keeps an email or a phone number");
+      }
       jdbc.sql("DELETE FROM account.identifiers WHERE user_id = ? AND kind = ?").params(userId, kind(kind)).update();
       if (value != null) {
         insertIdentifier(userId, kind, value);
