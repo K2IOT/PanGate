@@ -309,6 +309,32 @@ public class ChatConfig {
         p.state().listedReceiptsMax(), () -> System.nanoTime() / 1_000_000, System::currentTimeMillis);
   }
 
+  /** CH3 spec §6.1: connection sets in Redis. */
+  @Bean(destroyMethod = "")
+  com.pangate.chat.store.RedisPresence redisPresence(ChatProperties p) {
+    return new com.pangate.chat.store.RedisPresence(p.redis());
+  }
+
+  /** Transitions are counted here; Task 8 adds the fan-out to watchers. */
+  @Bean
+  com.pangate.chat.core.PresenceTracker presenceTracker(com.pangate.chat.store.RedisPresence presence,
+      ScyllaChatStore store, ChatProperties p, MeterRegistry meters,
+      org.springframework.beans.factory.ObjectProvider<java.util.function.Consumer<
+          com.pangate.chat.core.PresenceTracker.Transition>> fanOut) {
+    return new com.pangate.chat.core.PresenceTracker(presence, store, t -> {
+      meters.counter("chat.presence.transitions", "to", t.online() ? "online" : "offline").increment();
+      fanOut.ifAvailable(f -> f.accept(t));
+    }, System::currentTimeMillis, p.state().offlineGrace());
+  }
+
+  @Bean(destroyMethod = "")
+  com.pangate.chat.kafka.LifecycleListener lifecycleListener(ChatProperties p,
+      com.pangate.chat.core.PresenceTracker tracker, MeterRegistry meters) {
+    return new com.pangate.chat.kafka.LifecycleListener(com.pangate.chat.kafka.LifecycleListener.consumer(
+        p.kafka().bootstrap(), com.pangate.chat.kafka.LifecycleListener.GROUP),
+        com.pangate.contracts.testkit.PushTopics.lifecycle(p.cell()).name(), tracker, meters);
+  }
+
   /** CH3 spec §3.4: chat.receipts → marks → receipt pushes. */
   @Bean(destroyMethod = "")
   com.pangate.chat.kafka.ReceiptWorkerLoop receiptWorkerLoop(ChatProperties p, ScyllaChatStore store,
@@ -323,7 +349,8 @@ public class ChatConfig {
       RevocationListener revocationListener, UpstreamCommandListener upstream, CommandProducer producer,
       RedisChatCache redis, MeterRegistry meters, Revocations revocations, SequencerLoop sequencerLoop,
       EventProducer events, RedisSendResults results, FanOutLoop fanOut, PushApiClient pusher,
-      AccountsListener accounts, com.pangate.chat.kafka.ReceiptWorkerLoop receipts) {
+      AccountsListener accounts, com.pangate.chat.kafka.ReceiptWorkerLoop receipts,
+      com.pangate.chat.kafka.LifecycleListener lifecycle, com.pangate.chat.store.RedisPresence presence) {
     return new SmartLifecycle() {
       private volatile boolean running;
       private ScheduledExecutorService timers;
@@ -350,6 +377,7 @@ public class ChatConfig {
         sequencerLoop.start();
         fanOut.start();
         receipts.start();
+        lifecycle.start();
         accounts.start();
         upstream.start();
         running = true;
@@ -358,8 +386,8 @@ public class ChatConfig {
       @Override
       public void stop() {
         running = false;
-        closeInOrder(upstream, accounts, sequencerLoop, fanOut, receipts, pusher, revocationListener, producer, events,
-            results, timers::shutdownNow, redis, cql);
+        closeInOrder(upstream, accounts, lifecycle, sequencerLoop, fanOut, receipts, pusher, revocationListener,
+            producer, events, results, timers::shutdownNow, presence, redis, cql);
       }
 
       @Override
