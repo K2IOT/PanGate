@@ -279,12 +279,27 @@ public class ChatConfig {
     return new ChatHealth(revocations::caughtUp, verifier::loaded, ChatConfig::monoMs);
   }
 
+  /** CH3 spec §8: privacy settings cached 60 s per pod. */
+  @Bean
+  com.pangate.chat.core.PrivacyCache privacyCache(ScyllaChatStore store) {
+    return new com.pangate.chat.core.PrivacyCache(store, () -> System.nanoTime() / 1_000_000);
+  }
+
+  /** CH3 spec §3.4: chat.receipts → marks → receipt pushes. */
+  @Bean(destroyMethod = "")
+  com.pangate.chat.kafka.ReceiptWorkerLoop receiptWorkerLoop(ChatProperties p, ScyllaChatStore store,
+      RedisChatCache cache, com.pangate.chat.core.PrivacyCache privacy, PushApiClient pusher, MeterRegistry meters) {
+    return new com.pangate.chat.kafka.ReceiptWorkerLoop(com.pangate.chat.kafka.ReceiptWorkerLoop.consumer(
+        p.kafka().bootstrap(), com.pangate.chat.kafka.ReceiptWorkerLoop.GROUP), p.kafka().receiptsTopic(), store,
+        new MemberLookup(store, cache), store, privacy, pusher, p.state(), meters);
+  }
+
   @Bean
   SmartLifecycle chatBackground(CqlSession cql, ChatHealth health, ConnectTokenVerifier verifier,
       RevocationListener revocationListener, UpstreamCommandListener upstream, CommandProducer producer,
       RedisChatCache redis, MeterRegistry meters, Revocations revocations, SequencerLoop sequencerLoop,
       EventProducer events, RedisSendResults results, FanOutLoop fanOut, PushApiClient pusher,
-      AccountsListener accounts) {
+      AccountsListener accounts, com.pangate.chat.kafka.ReceiptWorkerLoop receipts) {
     return new SmartLifecycle() {
       private volatile boolean running;
       private ScheduledExecutorService timers;
@@ -310,6 +325,7 @@ public class ChatConfig {
         revocationListener.start();
         sequencerLoop.start();
         fanOut.start();
+        receipts.start();
         accounts.start();
         upstream.start();
         running = true;
@@ -318,8 +334,8 @@ public class ChatConfig {
       @Override
       public void stop() {
         running = false;
-        closeInOrder(upstream, accounts, sequencerLoop, fanOut, pusher, revocationListener, producer, events, results,
-            timers::shutdownNow, redis, cql);
+        closeInOrder(upstream, accounts, sequencerLoop, fanOut, receipts, pusher, revocationListener, producer, events,
+            results, timers::shutdownNow, redis, cql);
       }
 
       @Override
