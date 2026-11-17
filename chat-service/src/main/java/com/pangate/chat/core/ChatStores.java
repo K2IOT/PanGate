@@ -77,7 +77,15 @@ public final class ChatStores {
     /** {@link Privacy#OPEN} when the user never set anything. */
     Privacy privacy(String userId);
 
-    void putPrivacy(String userId, Privacy p, long atMs);
+    /**
+     * Writes only the fields given (null = unchanged), so concurrent updates of different fields both stick (Codex
+     * review of PR #6).
+     */
+    void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead, long atMs);
+
+    default void putPrivacy(String userId, Privacy p, long atMs) {
+      updatePrivacy(userId, p.hidePresence(), p.hideRead(), atMs);
+    }
   }
 
   public interface LastSeenStore {

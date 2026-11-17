@@ -11,7 +11,7 @@ import java.util.stream.Collectors;
 /** In-memory {@link Watchers}: device → (entries, expiry). */
 public final class FakeWatchers implements Watchers {
 
-  record Watch(List<PresenceWatch.Entry> entries, long until) {}
+  record Watch(List<PresenceWatch.Entry> entries, Set<String> open, long until) {}
 
   public final Map<String, Watch> byDevice = new ConcurrentHashMap<>();
   private final LongSupplier wallMs;
@@ -20,8 +20,9 @@ public final class FakeWatchers implements Watchers {
     this.wallMs = wallMs;
   }
 
-  @Override public void replace(String viewer, String device, List<PresenceWatch.Entry> valid, long expiresAtMs) {
-    byDevice.put(viewer + "/" + device, new Watch(List.copyOf(valid), expiresAtMs));
+  @Override public void replace(String viewer, String device, List<PresenceWatch.Entry> valid, Set<String> open,
+      long expiresAtMs) {
+    byDevice.put(viewer + "/" + device, new Watch(List.copyOf(valid), Set.copyOf(open), expiresAtMs));
   }
 
   @Override public List<String> watchersOf(String userId, long nowMs) {
@@ -34,7 +35,7 @@ public final class FakeWatchers implements Watchers {
   @Override public Set<String> devicesWithOpen(String convId) {
     long now = wallMs.getAsLong();
     return byDevice.entrySet().stream().filter(e -> e.getValue().until() > now)
-        .filter(e -> e.getValue().entries().stream().anyMatch(x -> x.getConversationId().equals(convId)))
+        .filter(e -> e.getValue().open().contains(convId))
         .map(Map.Entry::getKey).collect(Collectors.toSet());
   }
 }

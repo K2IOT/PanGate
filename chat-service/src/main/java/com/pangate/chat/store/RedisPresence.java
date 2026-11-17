@@ -74,13 +74,17 @@ public final class RedisPresence implements PresenceState, com.pangate.chat.core
   @Override
   public boolean add(String userId, String node, long epoch, String connId) {
     return call(r -> {
-      if (r.exists("presdead:" + node + ":" + epoch) > 0) {
-        return false;   // final review I7: the node was reported down; this connection is dead
-      }
       long added = r.sadd("pres:" + userId, node + "/" + connId);
       r.expire("pres:" + userId, SET_TTL);
       r.sadd("presnode:" + node + ":" + epoch, userId + "/" + connId);
       r.expire("presnode:" + node + ":" + epoch, SET_TTL);
+      // final review I7 + Codex review of PR #6: checked after the writes. dropNode writes its tombstone before its
+      // scan, so either the scan sees these entries or this check sees the tombstone and takes them back.
+      if (r.exists("presdead:" + node + ":" + epoch) > 0) {
+        r.srem("pres:" + userId, node + "/" + connId);
+        r.srem("presnode:" + node + ":" + epoch, userId + "/" + connId);
+        return false;
+      }
       return added == 1 && r.scard("pres:" + userId) == 1;
     });
   }
@@ -99,6 +103,7 @@ public final class RedisPresence implements PresenceState, com.pangate.chat.core
     return call(r -> {
       List<String> emptied = new ArrayList<>();
       String key = "presnode:" + node + ":" + epoch;
+      r.setex("presdead:" + node + ":" + epoch, SET_TTL.toSeconds(), "1");   // first: see add()
       for (String uc : r.smembers(key)) {
         int slash = uc.indexOf('/');
         String user = uc.substring(0, slash);
@@ -107,7 +112,6 @@ public final class RedisPresence implements PresenceState, com.pangate.chat.core
         }
       }
       r.del(key);
-      r.setex("presdead:" + node + ":" + epoch, SET_TTL.toSeconds(), "1");
       return emptied;
     });
   }
@@ -174,7 +178,7 @@ public final class RedisPresence implements PresenceState, com.pangate.chat.core
 
   @Override
   public void replace(String viewer, String device, List<com.pangate.contracts.v1.PresenceWatch.Entry> valid,
-      long expiresAtMs) {
+      java.util.Set<String> open, long expiresAtMs) {
     call(r -> {
       String dev = viewer + "/" + device;
       String list = "watching:" + dev;
@@ -183,20 +187,25 @@ public final class RedisPresence implements PresenceState, com.pangate.chat.core
         int bar = old.indexOf('|');
         String user = old.substring(0, bar);
         String conv = old.substring(bar + 1);
-        r.zrem("watchers:" + user, dev + "/" + conv);
+        if (!user.isEmpty()) {
+          r.zrem("watchers:" + user, dev + "/" + conv);
+        }
         r.zrem("watchconv:" + conv, dev);
       }
       r.del(list);
       for (com.pangate.contracts.v1.PresenceWatch.Entry e : valid) {
         String w = "watchers:" + e.getUserId();
-        String c = "watchconv:" + e.getConversationId();
         r.zadd(w, expiresAtMs, dev + "/" + e.getConversationId());
         r.pexpireat(w, expiresAtMs);
-        r.zadd(c, expiresAtMs, dev);
-        r.pexpireat(c, expiresAtMs);
         r.sadd(list, e.getUserId() + "|" + e.getConversationId());
       }
-      if (!valid.isEmpty()) {
+      for (String conv : open) {   // "|<conv>": open only, no presence entry
+        String c = "watchconv:" + conv;
+        r.zadd(c, expiresAtMs, dev);
+        r.pexpireat(c, expiresAtMs);
+        r.sadd(list, "|" + conv);
+      }
+      if (!valid.isEmpty() || !open.isEmpty()) {
         r.pexpireat(list, expiresAtMs);
       }
       return null;

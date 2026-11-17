@@ -202,8 +202,11 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
     return privacy.getOrDefault(userId, ChatStores.Privacy.OPEN);
   }
 
-  @Override public void putPrivacy(String userId, ChatStores.Privacy p, long atMs) {
-    privacy.put(userId, p);
+  @Override public synchronized void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead,
+      long atMs) {
+    ChatStores.Privacy cur = privacy(userId);
+    privacy.put(userId, new ChatStores.Privacy(hidePresence == null ? cur.hidePresence() : hidePresence,
+        hideRead == null ? cur.hideRead() : hideRead));
   }
 
   @Override public java.util.OptionalLong lastSeen(String userId) {

@@ -105,10 +105,8 @@ public class StateController {
       throw new ChatHttpException(400, "invalid_request", "a JSON object is required");
     }
     String user = AuthFilter.caller(req).userId();
-    var cur = settings.privacy(user);
-    settings.putPrivacy(user, new com.pangate.chat.core.ChatStores.Privacy(
-        body.hidePresence() == null ? cur.hidePresence() : body.hidePresence(),
-        body.hideRead() == null ? cur.hideRead() : body.hideRead()), System.currentTimeMillis());
+    // Codex review of PR #6: only the fields given are written, with no read first, so concurrent PUTs both stick
+    settings.updatePrivacy(user, body.hidePresence(), body.hideRead(), System.currentTimeMillis());
     privacy.forget(user);
     return ResponseEntity.noContent().build();
   }

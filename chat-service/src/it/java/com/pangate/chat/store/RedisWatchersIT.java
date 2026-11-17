@@ -79,4 +79,17 @@ class RedisWatchersIT {
       raw.shutdown();
     }
   }
+
+  /** Codex review of PR #6: a conversation is open on a device even with no presence entry in it. */
+  @Test
+  void openConversationWithoutEntriesIsTrackedAndReplaced() {
+    long now = System.currentTimeMillis();
+    w.replace("v7", "d1", List.of(e("t7", "C7")), java.util.Set.of("C7", "C8"), now + 60_000);
+    assertThat(w.devicesWithOpen("C8")).containsExactly("v7/d1");
+    assertThat(w.devicesWithOpen("C7")).containsExactly("v7/d1");
+    assertThat(w.watchersOf("t7", now)).containsExactly("v7/d1/C7");
+    w.replace("v7", "d1", List.of(), java.util.Set.of(), now + 60_000);
+    assertThat(w.devicesWithOpen("C8")).isEmpty();
+    assertThat(w.watchersOf("t7", now)).isEmpty();
+  }
 }

@@ -62,7 +62,8 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   private final PreparedStatement selectOwn;
   private final PreparedStatement selectStates;
   private final PreparedStatement selectPrivacy;
-  private final PreparedStatement upsertPrivacy;
+  private final PreparedStatement setHidePresence;
+  private final PreparedStatement setHideRead;
   private final PreparedStatement selectLastSeen;
   private final PreparedStatement upsertLastSeen;
 
@@ -107,8 +108,8 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     selectStates = s.prepare("SELECT conv_id, kind, last_seq, read_seq, delivered_seq, state_at, left FROM " + ks
         + ".user_convs WHERE user_id = ?");
     selectPrivacy = s.prepare("SELECT hide_presence, hide_read FROM " + ks + ".user_settings WHERE user_id = ?");
-    upsertPrivacy = s.prepare("INSERT INTO " + ks + ".user_settings (user_id, hide_presence, hide_read, updated_at) "
-        + "VALUES (?, ?, ?, ?)");
+    setHidePresence = s.prepare("UPDATE " + ks + ".user_settings SET hide_presence = ?, updated_at = ? WHERE user_id = ?");
+    setHideRead = s.prepare("UPDATE " + ks + ".user_settings SET hide_read = ?, updated_at = ? WHERE user_id = ?");
     selectLastSeen = s.prepare("SELECT last_seen_ms FROM " + ks + ".last_seen WHERE user_id = ?");
     upsertLastSeen = s.prepare("INSERT INTO " + ks + ".last_seen (user_id, last_seen_ms) VALUES (?, ?)");
     selectUserConvs = s.prepare("SELECT conv_id, kind, last_seq, read_seq, last_msg_at, left, delivered_seq FROM " + ks
@@ -383,8 +384,18 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   }
 
   @Override
-  public void putPrivacy(String userId, ChatStores.Privacy p, long atMs) {
-    exec(upsertPrivacy.bind(userId, p.hidePresence(), p.hideRead(), atMs));
+  public void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead, long atMs) {
+    var b = com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
+        com.datastax.oss.driver.api.core.cql.DefaultBatchType.UNLOGGED);
+    if (hidePresence != null) {
+      b.addStatement(setHidePresence.bind(hidePresence, atMs, userId));
+    }
+    if (hideRead != null) {
+      b.addStatement(setHideRead.bind(hideRead, atMs, userId));
+    }
+    if (hidePresence != null || hideRead != null) {
+      exec(b.build());
+    }
   }
 
   @Override

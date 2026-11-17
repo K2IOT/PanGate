@@ -47,6 +47,8 @@ public final class ReceiptWorkerLoop implements AutoCloseable {
   public static final String GROUP = "chat-receipts";
   static final int PUSH_TRIES = 3;
   static final Duration ROUND_DEADLINE = Duration.ofSeconds(3);
+  /** Codex review of PR #6: at most this long is waited for a Push API {@code retry_after_ms} between rounds. */
+  static final long MAX_RETRY_AFTER_MS = 2_000;
   static final long MAX_BACKOFF_MS = 5_000;
   static final int MAX_KINDS = 100_000;
 
@@ -242,12 +244,16 @@ public final class ReceiptWorkerLoop implements AutoCloseable {
       }
       long deadline = System.nanoTime() + ROUND_DEADLINE.toNanos();
       List<PushRequest> retry = new java.util.ArrayList<>();
+      long retryAfter = 0;
       for (int i = 0; i < pending.size(); i++) {
         boolean ok = false;
         try {
           PushResponse res = sent.get(i).get(Math.max(1, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
           String code = res.getCode().name();
           ok = !code.endsWith("UNAVAILABLE") && !code.endsWith("RATE_LIMITED");
+          if (!ok) {
+            retryAfter = Math.max(retryAfter, res.getRetryAfterMs());
+          }
         } catch (InterruptedException e) {
           Thread.currentThread().interrupt();
           return;
@@ -261,6 +267,14 @@ public final class ReceiptWorkerLoop implements AutoCloseable {
         }
       }
       pending = retry;
+      if (!pending.isEmpty() && retryAfter > 0 && round + 1 < PUSH_TRIES) {
+        try {
+          Thread.sleep(Math.min(MAX_RETRY_AFTER_MS, retryAfter));
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          return;
+        }
+      }
     }
     meters.counter("chat.receipts.pushes", "result", "dropped").increment(pending.size());
   }

@@ -242,4 +242,31 @@ class ReceiptWorkerIT {
       }
     }
   }
+
+  /** Codex review of PR #6: a rate-limited push is retried after the Push API's retry_after_ms, not at once. */
+  @Test
+  void rateLimitedPushWaitsRetryAfter() throws Exception {
+    String t = singlePartitionTopic();
+    FakeStores stores = new FakeStores();
+    List<Long> attempts = new CopyOnWriteArrayList<>();
+    ReceiptWorkerLoop loop = new ReceiptWorkerLoop(ReceiptWorkerLoop.consumer(kafka.getBootstrapServers(),
+        "rw-" + t), t, stores, new MemberLookup(stores, stores), stores, new PrivacyCache(stores,
+        System::currentTimeMillis), r -> {
+          if (!r.getPrincipalId().equals("chat:ra")) {
+            return CompletableFuture.completedFuture(PushResponse.getDefaultInstance());
+          }
+          attempts.add(System.nanoTime());
+          return CompletableFuture.completedFuture(attempts.size() == 1
+              ? PushResponse.newBuilder().setCode(PushResponse.Code.CODE_RATE_LIMITED).setRetryAfterMs(1_500).build()
+              : PushResponse.getDefaultInstance());
+        }, STATE, new SimpleMeterRegistry());
+    try (loop) {
+      String d = conv(stores, ConversationKind.CONVERSATION_KIND_DIRECT, "ra", "rb");
+      loop.start();
+      Thread.sleep(2_000);   // assigned
+      send(t, read(d, "rb", 2));
+      await().atMost(Duration.ofSeconds(15)).until(() -> attempts.size() >= 2);
+      assertThat((attempts.get(1) - attempts.get(0)) / 1_000_000).isGreaterThanOrEqualTo(1_400);
+    }
+  }
 }

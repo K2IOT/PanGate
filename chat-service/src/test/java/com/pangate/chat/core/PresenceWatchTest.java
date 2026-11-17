@@ -34,7 +34,8 @@ class PresenceWatchTest {
   final com.pangate.chat.core.PresenceWatch watch = new com.pangate.chat.core.PresenceWatch(stores,
       new MemberLookup(stores, stores), stores, watchers, presence, stores, privacy, pusher, now::get, Duration.ofMinutes(5),
       200);
-  final PresenceFanOut fanOut = new PresenceFanOut(watchers, presence, stores, privacy, pusher, now::get);
+  final PresenceFanOut fanOut = new PresenceFanOut(watchers, new MemberLookup(stores, stores), presence, stores, privacy,
+      pusher, now::get);
   final String g = conv(ConversationKind.CONVERSATION_KIND_GROUP, "me", "a", "b");
 
   {
@@ -220,5 +221,34 @@ class PresenceWatchTest {
     watch.watch("me", "d2", of(theirs, "x4", "x3"));
     assertThat(watchers.watchersOf("x4", now.get())).hasSize(1);
     assertThat(watchers.watchersOf("x3", now.get())).isEmpty();
+  }
+
+  /** Codex review of PR #6: a device that opened a group no one spoke in yet still counts as open for typing. */
+  @Test
+  void openConversationIsKnownWithoutPresenceEntries() {
+    String quiet = conv(ConversationKind.CONVERSATION_KIND_GROUP, "me", "z1", "z2");
+    watch.watch("me", "d1", of(quiet, "z1", "z2"));
+    assertThat(watchers.watchersOf("z1", now.get())).isEmpty();
+    assertThat(watchers.devicesWithOpen(quiet)).containsExactly("me/d1");
+    String foreign = conv(ConversationKind.CONVERSATION_KIND_GROUP, "z3", "z4");
+    watch.watch("me", "d1", of(foreign, "z3"));
+    assertThat(watchers.devicesWithOpen(foreign)).isEmpty();   // not a member
+    assertThat(watchers.devicesWithOpen(quiet)).isEmpty();     // the list was replaced
+  }
+
+  /** Codex review of PR #6: once the shared conversation no longer holds both, the watch tells nothing. */
+  @Test
+  void fanOutSkipsWatchesWhoseConversationNoLongerHoldsBoth() {
+    watch.watch("me", "d1", of(g, "a", "b"));
+    pushed.clear();
+    stores.remove(g, "me");
+    stores.evictMembers(g);
+    assertThat(fanOut.on(new PresenceTracker.Transition("a", true, now.get()))).isZero();
+    assertThat(pushed).isEmpty();
+    stores.add(g, new Member("me", Role.MEMBER));
+    stores.remove(g, "b");
+    stores.evictMembers(g);
+    assertThat(fanOut.on(new PresenceTracker.Transition("b", true, now.get()))).isZero();
+    assertThat(fanOut.on(new PresenceTracker.Transition("a", true, now.get()))).isEqualTo(1);
   }
 }

@@ -54,16 +54,22 @@ public final class PresenceWatch {
   /** Returns how many entries were kept. */
   public int watch(String viewer, String device, com.pangate.contracts.v1.PresenceWatch msg) {
     List<com.pangate.contracts.v1.PresenceWatch.Entry> valid = new ArrayList<>();
+    Set<String> open = new LinkedHashSet<>();
+    int seen = 0;
     for (com.pangate.contracts.v1.PresenceWatch.Entry e : msg.getEntriesList()) {
-      if (valid.size() >= max) {
+      if (seen++ >= max) {
         break;
       }
-      if (allowed(viewer, e.getUserId(), e.getConversationId())) {
+      // Codex review of PR #6: the conversation is open for typing even when no entry in it may show presence
+      if (!open.contains(e.getConversationId()) && openable(viewer, e.getConversationId())) {
+        open.add(e.getConversationId());
+      }
+      if (open.contains(e.getConversationId()) && allowed(viewer, e.getUserId(), e.getConversationId())) {
         valid.add(e);
       }
     }
     long now = wallMs.getAsLong();
-    watchers.replace(viewer, device, valid, now + ttlMs);
+    watchers.replace(viewer, device, valid, open, now + ttlMs);
     Set<String> users = new LinkedHashSet<>();
     valid.forEach(e -> users.add(e.getUserId()));
     if (!users.isEmpty()) {
@@ -87,16 +93,21 @@ public final class PresenceWatch {
     return out;
   }
 
-  boolean allowed(String viewer, String user, String convId) {
-    if (user.isEmpty() || user.equals(viewer) || !Ids.isUlid(convId)) {
+  /** A DM or group (not a channel) the viewer is a member of. */
+  private boolean openable(String viewer, String convId) {
+    if (!Ids.isUlid(convId)) {
       return false;
     }
     Optional<ChatStores.Conversation> c = conversations.get(convId);
-    if (c.isEmpty() || c.get().kind() == ConversationKind.CONVERSATION_KIND_CHANNEL) {
+    return c.isPresent() && c.get().kind() != ConversationKind.CONVERSATION_KIND_CHANNEL
+        && members.of(convId).stream().anyMatch(m -> m.userId().equals(viewer));
+  }
+
+  boolean allowed(String viewer, String user, String convId) {
+    if (user.isEmpty() || user.equals(viewer) || !openable(viewer, convId)) {
       return false;
     }
-    List<Member> ms = members.of(convId);
-    if (ms.stream().noneMatch(m -> m.userId().equals(viewer)) || ms.stream().noneMatch(m -> m.userId().equals(user))) {
+    if (members.of(convId).stream().noneMatch(m -> m.userId().equals(user))) {
       return false;
     }
     // owner decision 2026-11-17: a DM or group proves a relationship only once the watched user sent a message in it

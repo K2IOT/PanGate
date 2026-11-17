@@ -257,4 +257,14 @@ class ChatStoreIT {
     assertThat(store.own("sb2", c).deliveredSeq()).isEqualTo(5);
     assertThat(store.own("sb2", c).readSeq()).isEqualTo(5);
   }
+
+  /** Codex review of PR #6: a privacy update writes only the fields it names, so two concurrent PUTs both stick. */
+  @Test
+  void privacyUpdatesOnlyTheNamedFields() {
+    store.updatePrivacy("pv9", true, null, 1_000);
+    store.updatePrivacy("pv9", null, true, 2_000);
+    assertThat(store.privacy("pv9")).isEqualTo(new com.pangate.chat.core.ChatStores.Privacy(true, true));
+    store.updatePrivacy("pv9", false, null, 3_000);
+    assertThat(store.privacy("pv9")).isEqualTo(new com.pangate.chat.core.ChatStores.Privacy(false, true));
+  }
 }

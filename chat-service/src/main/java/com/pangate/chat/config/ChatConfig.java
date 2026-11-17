@@ -172,10 +172,10 @@ public class ChatConfig {
   /** CH3 spec §6.3: transitions to the devices watching; Redis down is counted, not thrown into the tracker. */
   @Bean
   java.util.function.Consumer<com.pangate.chat.core.PresenceTracker.Transition> presenceFanOut(
-      com.pangate.chat.store.RedisPresence presence, ScyllaChatStore store, com.pangate.chat.core.PrivacyCache privacy,
-      PushApiClient pusher, MeterRegistry meters) {
-    com.pangate.chat.core.PresenceFanOut f = new com.pangate.chat.core.PresenceFanOut(presence, presence, store,
-        privacy, pusher, System::currentTimeMillis);
+      com.pangate.chat.store.RedisPresence presence, ScyllaChatStore store, RedisChatCache cache,
+      com.pangate.chat.core.PrivacyCache privacy, PushApiClient pusher, MeterRegistry meters) {
+    com.pangate.chat.core.PresenceFanOut f = new com.pangate.chat.core.PresenceFanOut(presence,
+        new MemberLookup(store, cache), presence, store, privacy, pusher, System::currentTimeMillis);
     return t -> {
       try {
         meters.counter("chat.presence.pushes").increment(f.on(t));
