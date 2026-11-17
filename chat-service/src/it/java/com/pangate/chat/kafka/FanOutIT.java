@@ -141,7 +141,7 @@ class FanOutIT {
     PushApiClient client = new PushApiClient(InProcessChannelBuilder.forName(name).build(), Duration.ofSeconds(2));
     String group = "fanout-" + topic;
     FanOutLoop loop = new FanOutLoop(SequencerLoop.consumer(kafka.getBootstrapServers(), group), topic,
-        new MemberLookup(stores, stores), stores, client, new SimpleMeterRegistry());
+        new MemberLookup(stores, stores), stores, stores, client, new SimpleMeterRegistry());
     return new Rig(stores, api, server, client, loop, group);
   }
 
@@ -213,7 +213,7 @@ class FanOutIT {
     try (PushApiClient client = new PushApiClient(InProcessChannelBuilder.forName(name).build(),
         Duration.ofSeconds(1));
         FanOutLoop loop = new FanOutLoop(SequencerLoop.consumer(kafka.getBootstrapServers(), "fo-" + t), t,
-            new MemberLookup(stores, stores), stores, client, new SimpleMeterRegistry());
+            new MemberLookup(stores, stores), stores, stores, client, new SimpleMeterRegistry());
         EventProducer events = EventProducer.create(kafka.getBootstrapServers(), t, Duration.ofSeconds(5))) {
       String g = Ids.next();
       stores.create(new Conversation(g, ConversationKind.CONVERSATION_KIND_DIRECT, "", "u1", 0, false, 2),
@@ -264,7 +264,7 @@ class FanOutIT {
       convs.add(c);
     }
     try (FanOutLoop loop = new FanOutLoop(SequencerLoop.consumer(kafka.getBootstrapServers(), "par-" + t), t,
-        new MemberLookup(stores, stores), stores, slow, new SimpleMeterRegistry());
+        new MemberLookup(stores, stores), stores, stores, slow, new SimpleMeterRegistry());
         EventProducer events = EventProducer.create(kafka.getBootstrapServers(), t, Duration.ofSeconds(5))) {
       loop.start();
       // warm up: the group has joined once the first event is through
@@ -334,12 +334,36 @@ class FanOutIT {
       events.sendAll(batch);   // all in one partition, before the loop's first poll
     }
     try (FanOutLoop loop = new FanOutLoop(FanOutLoop.consumer(kafka.getBootstrapServers(), "budget-" + t), t,
-        new MemberLookup(stores, stores), stores, slow, meters, Duration.ofMillis(700))) {
+        new MemberLookup(stores, stores), stores, stores, slow, meters, Duration.ofMillis(700))) {
       loop.start();
       await().atMost(Duration.ofSeconds(30)).until(() -> perConv.size() == 8);
       Thread.sleep(1_000);
       assertThat(perConv.values()).allMatch(n -> n.get() == 1);
       assertThat(meters.counter("chat.fanout.budget").count()).isPositive();
+    }
+  }
+
+  /** CH3 spec §3.1: the sender has delivered and read their own message, in every kind of conversation. */
+  @Test
+  void senderMarksAdvanceWithEachMessage() throws Exception {
+    String t = topic();
+    try (Rig r = rig(t); EventProducer events = EventProducer.create(kafka.getBootstrapServers(), t,
+        Duration.ofSeconds(5))) {
+      String g = Ids.next();
+      r.stores().create(new Conversation(g, ConversationKind.CONVERSATION_KIND_GROUP, "g", "u1", 0, false, 2),
+          List.of(new Member("u1", Role.OWNER), new Member("u2", Role.MEMBER)));
+      String ch = Ids.next();
+      r.stores().create(new Conversation(ch, ConversationKind.CONVERSATION_KIND_CHANNEL, "c", "u1", 0, true, 1),
+          List.of(new Member("u1", Role.OWNER)));
+      r.loop().start();
+      StoredMessage m7 = msg(g, 7);
+      events.send(SequencerLoop.event(m7, ConversationKind.CONVERSATION_KIND_GROUP));
+      events.send(SequencerLoop.event(msg(ch, 3), ConversationKind.CONVERSATION_KIND_CHANNEL));
+      await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
+        assertThat(r.stores().own(m7.senderId(), g)).isEqualTo(new com.pangate.chat.core.ChatStores.Marks(7, 7));
+        assertThat(r.stores().own(m7.senderId(), ch)).isEqualTo(new com.pangate.chat.core.ChatStores.Marks(3, 3));
+        assertThat(r.stores().own("u2", g)).isEqualTo(new com.pangate.chat.core.ChatStores.Marks(0, 0));
+      });
     }
   }
 }

@@ -210,7 +210,7 @@ public class ChatConfig {
   FanOutLoop fanOutLoop(ChatProperties p, ScyllaChatStore store, RedisChatCache cache, PushApiClient pusher,
       MeterRegistry meters) {
     return new FanOutLoop(FanOutLoop.consumer(p.kafka().bootstrap(), FanOutLoop.GROUP), p.kafka().eventsTopic(),
-        new MemberLookup(store, cache), store, pusher, meters);
+        new MemberLookup(store, cache), store, store, pusher, meters);
   }
 
   @Bean(destroyMethod = "")

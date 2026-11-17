@@ -19,7 +19,63 @@ public final class ChatStores {
 
   public record Member(String userId, Role role) {}
 
-  public record UserConv(String convId, ConversationKind kind, long lastSeq, long readSeq, long lastMsgAtMs) {}
+  /** One row of a user's inbox; {@code deliveredSeq} / {@code readSeq} are the user's own marks (CH3 §3.2). */
+  public record UserConv(String convId, ConversationKind kind, long lastSeq, long readSeq, long lastMsgAtMs,
+      long deliveredSeq) {
+    public UserConv(String convId, ConversationKind kind, long lastSeq, long readSeq, long lastMsgAtMs) {
+      this(convId, kind, lastSeq, readSeq, lastMsgAtMs, 0);
+    }
+  }
+
+  /** A user's delivered / read marks in one conversation (CH3 §3.1); 0 = none. */
+  public record Marks(long deliveredSeq, long readSeq) {
+    public static final Marks NONE = new Marks(0, 0);
+  }
+
+  public record MemberMarks(String userId, long deliveredSeq, long readSeq) {}
+
+  /** An inbox row with its marks and the time its state last changed (CH3 §7.2). */
+  public record UserConvState(String convId, ConversationKind kind, long lastSeq, long readSeq, long deliveredSeq,
+      long stateAtMs) {}
+
+  /** CH3 §8: what a user hides from others (and, reciprocally, does not see of others). */
+  public record Privacy(boolean hidePresence, boolean hideRead) {
+    public static final Privacy OPEN = new Privacy(false, false);
+  }
+
+  /**
+   * Delivered / read marks (CH3 §3.2). Each mark column is only ever written with its own value as the cell
+   * timestamp, so a smaller, late or replayed mark never moves a mark back. 0 = leave that column.
+   */
+  public interface MarkStore {
+    /** Raises the user's marks in {@code conv_marks} and {@code user_convs}, and stamps the inbox row's state. */
+    void advance(String convId, String userId, long deliveredSeq, long readSeq, long atMs);
+
+    /** Stamps the inbox row's state time only (the other member of a DM saw a mark move). */
+    void touchState(String userId, String convId, long atMs);
+
+    /** Marks of everyone who ever marked this conversation; callers filter by the current members. */
+    List<MemberMarks> marks(String convId);
+
+    /** The user's own marks; {@link Marks#NONE} when none. */
+    Marks own(String userId, String convId);
+
+    /** Inbox rows (not left) whose state changed after {@code sinceMs}, newest first; cursor {@code <stateAt>:<convId>}. */
+    List<UserConvState> changedSince(String userId, long sinceMs, String cursor, int limit);
+  }
+
+  public interface SettingsStore {
+    /** {@link Privacy#OPEN} when the user never set anything. */
+    Privacy privacy(String userId);
+
+    void putPrivacy(String userId, Privacy p, long atMs);
+  }
+
+  public interface LastSeenStore {
+    java.util.OptionalLong lastSeen(String userId);
+
+    void putLastSeen(String userId, long atMs);
+  }
 
   public interface ConversationStore {
     Optional<Conversation> get(String id);
