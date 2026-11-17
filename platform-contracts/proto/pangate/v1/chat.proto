@@ -61,3 +61,56 @@ message ChatEvent {
   ChatMessage message = 1;
   ConversationKind kind = 2;
 }
+
+// --- Conversation state (CH3 spec 2026-11-17-conversation-state-design.md §2) ---
+
+// client → server, payload of UPSTREAM(type=cmd, headers.op=chat.delivered | chat.read)
+message ChatMark {
+  string conversation_id = 1;
+  uint64 up_to_seq = 2;               // delivered / read every message with conv_seq <= up_to_seq
+}
+message ChatTyping { string conversation_id = 1; }      // op=chat.typing; repeated every 3 s while typing
+message PresenceWatch {               // op=chat.presence.watch; replaces this device's whole list
+  message Entry {
+    string user_id = 1;
+    string conversation_id = 2;       // a conversation both share: the proof the viewer may see this user
+  }
+  repeated Entry entries = 1;         // at most 200; empty = stop watching
+}
+
+// server → client (PUSH, EPHEMERAL)
+message ReceiptUpdate {               // headers.type=chat.receipts
+  string conversation_id = 1;
+  message Mark {
+    string user_id = 1;
+    uint64 delivered_seq = 2;
+    uint64 read_seq = 3;
+  }
+  repeated Mark marks = 2;            // DM and groups <= 50: marks that changed
+  uint64 own_read_seq = 3;            // to the reader's other devices: unread sync
+}
+message TypingUpdate {                // headers.type=chat.typing
+  string conversation_id = 1;
+  string user_id = 2;
+  uint32 ttl_ms = 3;                  // the client clears "typing" after ttl_ms without a new update (6000)
+}
+message PresenceUpdate {              // headers.type=chat.presence
+  message State {
+    string user_id = 1;
+    bool online = 2;
+    int64 last_seen_ms = 3;           // rounded down to the minute; 0 when online, hidden or older than 7 days
+    bool recently = 4;                // true = "active recently" (older than 7 days)
+    bool hidden = 5;                  // either side turned presence off (reciprocal)
+  }
+  repeated State states = 1;
+}
+
+// chat.receipts, key conversation_id
+message ReceiptCommand {
+  string user_id = 1;
+  string device_id = 2;
+  string conversation_id = 3;
+  uint64 delivered_seq = 4;           // 0 = unchanged
+  uint64 read_seq = 5;                // 0 = unchanged
+  int64 received_at_ms = 6;
+}
