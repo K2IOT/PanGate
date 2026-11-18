@@ -38,14 +38,18 @@ class NotifyDispatcherTest {
   };
   final List<String> sent = new ArrayList<>();
   final Map<String, Deque<SendResult>> script = new HashMap<>();
+  final Set<String> throwing = new HashSet<>();
   final PushProvider provider = (t, r) -> {
     sent.add(t.token());
+    if (throwing.contains(t.token())) {
+      throw new IllegalStateException("signing failed");
+    }
     Deque<SendResult> q = script.get(t.token());
     return CompletableFuture.completedFuture(q == null || q.isEmpty() ? new SendResult.Ok() : q.poll());
   };
   final List<Long> waits = new ArrayList<>();
   final SimpleMeterRegistry meters = new SimpleMeterRegistry();
-  final Set<String> configured = new HashSet<>(Set.of("chat/APNS", "chat/FCM"));
+  final Set<String> configured = new HashSet<>(Set.of("chat/APNS", "chat/FCM", "acme/APNS"));
   final NotifyDispatcher d = new NotifyDispatcher(store, dedup,
       (tenant, platform) -> configured.contains(tenant + "/" + platform) ? provider : null,
       ms -> {
@@ -166,6 +170,35 @@ class NotifyDispatcherTest {
     assertThat(sent).containsExactly("t1", "t1");
     assertThat(waits).containsExactly(NotifyDispatcher.MAX_RETRY_AFTER_MS);
     assertThat(NotifyDispatcher.MAX_RETRY_AFTER_MS).isEqualTo(5_000L);
+  }
+
+  /** CH4 deferred minor: a provider that throws instead of answering must not lose the other tokens. */
+  @Test
+  void aProviderThatThrowsIsCountedAndTheOtherTokensStillGo() {
+    token("chat:b", "d1", Platform.APNS, "t1");
+    token("chat:b", "d2", Platform.APNS, "t2");
+    throwing.add("t1");
+    assertThat(handle(req("r1"))).isEqualTo("sent");
+    assertThat(sent).contains("t2");
+    assertThat(meters.counter("notify.sends", "platform", "apns", "result", "failed").count()).isEqualTo(1);
+  }
+
+  /** CH4 deferred minor: request ids are deduplicated per tenant. */
+  @Test
+  void sameRequestIdInAnotherTenantIsNotADuplicate() {
+    token("chat:b", "d1", Platform.APNS, "t1");
+    store.register(new PushToken("acme", "chat:b", "d1", Platform.APNS, "production", "t9", Instant.now()));
+    assertThat(handle(req("r1"))).isEqualTo("sent");
+    assertThat(handle(req("r1").toBuilder().setTenantId("acme").build())).isEqualTo("sent");
+  }
+
+  /** CH4 deferred minor: a payload whose tenant differs from the record's tenant header is refused. */
+  @Test
+  void tenantHeaderMismatchIsInvalid() {
+    token("chat:b", "d1", Platform.APNS, "t1");
+    assertThat(d.handle(req("r1"), "acme", NOW).join()).isEqualTo("invalid");
+    assertThat(sent).isEmpty();
+    assertThat(d.handle(req("r2"), "chat", NOW).join()).isEqualTo("sent");
   }
 
   @Test

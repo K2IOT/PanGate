@@ -52,7 +52,14 @@ public final class FcmProvider implements PushProvider {
         || (s == 400 && body.contains("INVALID_ARGUMENT") && body.contains("registration token"))) {
       return new SendResult.TokenDead();
     }
-    if (s == 401 || s == 403) {
+    if (s == 403 && body.contains("SENDER_ID_MISMATCH")) {
+      return new SendResult.TokenDead();   // CH4 deferred minor: the token belongs to another project, never ours
+    }
+    if (s == 401) {
+      auth.forget();
+      return new SendResult.Transient(0);   // CH4 deferred minor: an expired access token; the retry fetches a new one
+    }
+    if (s == 403) {
       auth.forget();
       return new SendResult.AuthFailed();
     }

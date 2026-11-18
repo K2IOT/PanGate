@@ -47,6 +47,17 @@ public final class NotifyDispatcher {
     this.attempts = attempts;
   }
 
+  /**
+   * As {@link #handle(NotifyRequest, long)}, for a record whose {@code tenant} header is {@code headerTenant}
+   * (null: none). CH4 deferred minor: a payload naming another tenant than its header is refused as invalid.
+   */
+  public CompletableFuture<String> handle(NotifyRequest r, String headerTenant, long nowMs) {
+    if (headerTenant != null && !headerTenant.equals(r.getTenantId())) {
+      return CompletableFuture.completedFuture(count("invalid"));
+    }
+    return handle(r, nowMs);
+  }
+
   /** Completes with the result for {@code notify.requests{result}}; exceptionally only when the store is down. */
   public CompletableFuture<String> handle(NotifyRequest r, long nowMs) {
     String result;
@@ -65,7 +76,7 @@ public final class NotifyDispatcher {
     if (tokens.isEmpty()) {
       return CompletableFuture.completedFuture(count("no_token"));
     }
-    if (!first(r.getRequestId())) {
+    if (!first(r.getTenantId() + ":" + r.getRequestId())) {   // CH4 deferred minor: ids are per tenant
       return CompletableFuture.completedFuture(count("duplicate"));
     }
     List<CompletableFuture<Void>> sends = new ArrayList<>();
@@ -103,7 +114,17 @@ public final class NotifyDispatcher {
 
   private CompletableFuture<Void> send(PushProvider p, PushToken t, NotifyRequest r, int attempt, long atMs) {
     long start = System.nanoTime();
-    return p.send(t, r).thenCompose(res -> {
+    CompletableFuture<SendResult> answer;
+    try {
+      answer = p.send(t, r);
+    } catch (RuntimeException e) {
+      // CH4 deferred minor: a provider that throws (signing, serialising) is a failed try, not a lost request
+      answer = CompletableFuture.failedFuture(e);
+    }
+    return answer.exceptionally(e -> {
+      log.warn("{} send to {} failed: {}", t.platform().wire(), t.deviceId(), e.toString());
+      return new SendResult.Transient(0);
+    }).thenCompose(res -> {
       meters.timer("notify.send.latency", "platform", t.platform().wire())
           .record(java.time.Duration.ofNanos(System.nanoTime() - start));
       switch (res) {
