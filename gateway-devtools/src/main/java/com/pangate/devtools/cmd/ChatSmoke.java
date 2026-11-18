@@ -324,8 +324,9 @@ final class ChatSmoke {
     // CH4 deferred minor: the success criterion (spec §0) in full: title = a's name, body = the text, badge = b's
     // unread messages across conversations
     @SuppressWarnings("unchecked")
-    Map<String, Object> aps = (Map<String, Object>) ((Map<String, Object>) ((List<Object>) JSONObjectUtils
-        .parse("{\"r\":" + got + "}").get("r")).getFirst()).get("aps");
+    Map<String, Object> aps = (Map<String, Object>) JSONObjectUtils.parse(String.valueOf(((Map<String, Object>)
+        ((List<Object>) JSONObjectUtils.parse("{\"r\":" + got + "}").get("r")).getFirst()).get("body")))
+        .get("aps");   // the fake APNs logs {headers, body}; body is the APNs JSON
     @SuppressWarnings("unchecked")
     Map<String, Object> alert = (Map<String, Object>) aps.get("alert");
     long unread = 0;
