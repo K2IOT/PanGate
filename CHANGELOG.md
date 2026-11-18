@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### CH4 follow-ups (deferred minors)
+- notify-service: concurrent registrations of one token no longer answer 500; a provider that throws is a failed
+  try, not a lost request; FCM `SENDER_ID_MISMATCH` removes the token and 401 retries with a new access token; the
+  `tenant` header must match the payload; dedup per tenant; `close()` waits for the batch in hand (30 s). Kept limits
+  are listed in `notify-service/README.md`.
+- chat-service: `onlineOf` pipelined (one round trip per page); a stale post leaves no cursor behind; a takeover
+  post reaches the members it mentions that the cursor passed; DM and group notifications read `hidePreview` fresh.
+- account-service: a rename emits the account's own status (LOCKED stays LOCKED).
+- `make smoke` `CHAT notify` checks the title (a's name) and the badge (b's unread).
+
 ### notify-service (CH4, offline notifications)
 - New module `notify-service` (spec `docs/superpowers/specs/2026-11-17-offline-notifications-design.md`): push tokens
   per device (`PUT|DELETE /v1/devices/self/push`, connect token, PostgreSQL schema `notify`, one token per device),

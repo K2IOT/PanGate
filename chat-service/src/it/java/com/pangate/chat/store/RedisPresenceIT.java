@@ -97,4 +97,20 @@ class RedisPresenceIT {
     presence.add("on2", "n9", 1, "k2");
     assertThat(presence.onlineOf(java.util.List.of("on1", "off1", "on2"))).containsExactlyInAnyOrder("on1", "on2");
   }
+
+  /** CH4 deferred minor: a whole page (1 000 followers) answered from one pipelined batch. */
+  @Test
+  void onlineOfAPageOfAThousand() {
+    java.util.List<String> page = new java.util.ArrayList<>();
+    java.util.Set<String> on = new java.util.HashSet<>();
+    for (int i = 0; i < 1_000; i++) {
+      String u = "pg" + i;
+      page.add(u);
+      if (i % 7 == 0) {
+        presence.add(u, "n9", 1, "c" + i);
+        on.add(u);
+      }
+    }
+    assertThat(presence.onlineOf(page)).isEqualTo(on);
+  }
 }

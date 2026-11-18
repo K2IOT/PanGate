@@ -52,6 +52,16 @@ class OfflineNotificationsTest {
     });
   }
 
+  /** CH4 deferred minor: hiding previews set on another pod applies at once, not after the 60 s cache. */
+  @Test
+  void hidePreviewChangedElsewhereAppliesToTheNextNotification() {
+    assertThat(n.handle(rec("chat", "chat.message", "u2", msg(NOW - 1_000)), NOW).request().get().getAlert()
+        .getBody()).isEqualTo("Lan: hi");   // cached: previews shown
+    stores.updatePrivacy("u2", false, false, true, NOW);   // another pod's PUT /v1/me/privacy
+    assertThat(n.handle(rec("chat", "chat.message", "u2", msg(NOW - 1_000)), NOW).request().get().getAlert()
+        .getBody()).isEmpty();
+  }
+
   @Test
   void otherTenantsAndTypesAreNotChat() {
     assertThat(n.handle(rec("other", "chat.message", "u2", msg(NOW)), NOW).outcome()).isEqualTo("not_chat");

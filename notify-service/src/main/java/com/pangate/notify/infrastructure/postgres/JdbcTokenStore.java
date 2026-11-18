@@ -32,6 +32,20 @@ public final class JdbcTokenStore implements TokenStore {
 
   @Override
   public int register(PushToken t) {
+    // CH4 deferred minor: two devices registering one token at once both pass the DELETE, and the second INSERT
+    // hits the unique (platform, token) index; trying again moves the token to the later one instead of a 500
+    for (int attempt = 1; ; attempt++) {
+      try {
+        return registerOnce(t);
+      } catch (org.springframework.dao.DuplicateKeyException e) {
+        if (attempt == 3) {
+          throw e;
+        }
+      }
+    }
+  }
+
+  private int registerOnce(PushToken t) {
     return Db.call(() -> tx.execute(s -> {
       int moved = jdbc.sql("DELETE FROM push_tokens WHERE platform = ? AND token = ? AND NOT (tenant_id = ? AND "
               + "principal_id = ? AND device_id = ?)")

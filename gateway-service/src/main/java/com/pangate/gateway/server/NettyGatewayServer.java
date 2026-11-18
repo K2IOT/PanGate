@@ -64,6 +64,9 @@ public final class NettyGatewayServer implements SmartLifecycle {
     this.tcpInitializer = tcpInitializer;
   }
 
+  /** The longest a listener bind may take before startup fails (spec §3.7). */
+  static final java.time.Duration BIND_LIMIT = java.time.Duration.ofSeconds(30);
+
   @Override
   public void start() {
     loops.all().forEach(LoopContext::startTicker);
@@ -112,11 +115,31 @@ public final class NettyGatewayServer implements SmartLifecycle {
     if (io.transport() == Transport.EPOLL) {
       b.option(EpollChannelOption.SO_REUSEPORT, true);
     }
+    io.netty.channel.ChannelFuture f;
     try {
-      return b.bind(new InetSocketAddress(port)).syncUninterruptibly().channel();
+      f = b.bind(new InetSocketAddress(port));
     } catch (Exception e) {
       throw new ListenerBindException(name, port, envVar, e);
     }
+    return awaitBound(f, BIND_LIMIT, name, port, envVar);
+  }
+
+  /**
+   * Waits for a bind at most {@code limit} (spec §3.7, fail fast): a bind the event loop never completes used to hold
+   * startup for good, with nothing logged after the gRPC listener. Past the limit the bind is cancelled and startup
+   * fails with a {@link ListenerBindException}, which {@link #start()} turns into a clean release.
+   */
+  static Channel awaitBound(io.netty.channel.ChannelFuture f, java.time.Duration limit, String name, int port,
+      String envVar) {
+    if (!f.awaitUninterruptibly(limit.toMillis())) {
+      f.cancel(false);
+      throw new ListenerBindException(name, port, envVar,
+          new java.util.concurrent.TimeoutException("bind not done within " + limit));
+    }
+    if (!f.isSuccess()) {
+      throw new ListenerBindException(name, port, envVar, f.cause());
+    }
+    return f.channel();
   }
 
   /** Starts the staged drain (spec §7.5) without stopping the process; idempotent. */

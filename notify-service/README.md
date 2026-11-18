@@ -34,6 +34,17 @@ Errors are `application/problem+json` with `code` `invalid_request`, `invalid_to
 - Group `notify-revocations` on `gw.control` removes the tokens of a revoked device or principal; a daily job removes
   tokens not registered again for 180 days.
 
+## Known limits (kept on purpose)
+
+- **A known token can be taken over.** Registering a push token another device holds moves it to the caller
+  (spec §5.2): that is how a reinstall or an account switch on one phone works, and notify-service cannot tell it
+  from a device that learnt someone else's token. Tokens are not public (only the app and Apple/Google see them).
+- **A request whose 3 tries all fail is gone.** It is marked in dedup before sending, so a replay would be dropped;
+  nothing retries it later (no retry topic). Counted as `notify.sends{result=failed}` (ADR 0040).
+- **`max-in-flight` counts requests, not HTTP calls**: a principal with N devices makes N calls per permit.
+- **The FCM access token is fetched on the sending thread**, under a lock, about once an hour per tenant; sends of
+  that tenant wait for it (a few hundred ms).
+
 ## Configuration (`notify.*`)
 
 `kafka.bootstrap`, `kafka.requests-topic` (`c1.notify.requests`), `kafka.control-topic` (`gw.control`), `redis.uri`,

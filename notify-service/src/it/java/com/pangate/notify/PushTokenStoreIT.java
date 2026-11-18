@@ -60,6 +60,33 @@ class PushTokenStoreIT {
     assertThat(store.byPrincipal("chat", b)).extracting(PushToken::deviceId).containsExactly("d2");
   }
 
+  /** CH4 deferred minor: two devices registering one token at once must not hit the unique index (500). */
+  @Test
+  void concurrentRegistrationsOfOneTokenBothSucceed() throws Exception {
+    java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+    try {
+      for (int i = 0; i < 30; i++) {
+        String phone = apns();
+        String a = "chat:" + id();
+        String b = "chat:" + id();
+        java.util.concurrent.CyclicBarrier go = new java.util.concurrent.CyclicBarrier(2);
+        java.util.concurrent.Future<?> fa = pool.submit(() -> {
+          go.await();
+          return store.register(t(a, "d1", phone, Instant.now()));
+        });
+        java.util.concurrent.Future<?> fb = pool.submit(() -> {
+          go.await();
+          return store.register(t(b, "d2", phone, Instant.now()));
+        });
+        fa.get();
+        fb.get();
+        assertThat(store.byPrincipal("chat", a).size() + store.byPrincipal("chat", b).size()).isEqualTo(1);
+      }
+    } finally {
+      pool.shutdownNow();
+    }
+  }
+
   @Test
   void removeIfTokenKeepsANewerToken() {
     String p = "chat:" + id();

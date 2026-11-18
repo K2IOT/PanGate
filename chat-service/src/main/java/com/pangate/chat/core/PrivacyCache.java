@@ -36,6 +36,16 @@ public final class PrivacyCache {
     return p;
   }
 
+  /**
+   * Read from the store, never the cache (and refresh it). CH4 deferred minor: a DM or group preview is private,
+   * so hiding previews on another pod must apply to the next notification, not up to 60 s later.
+   */
+  public Privacy fresh(String userId) {
+    Privacy p = store.privacy(userId);
+    byUser.put(userId, new Entry(p, monoMs.getAsLong() + TTL_MS));
+    return p;
+  }
+
   public void forget(String userId) {
     byUser.remove(userId);
   }

@@ -36,6 +36,11 @@ public final class NotifyRequestLoop implements AutoCloseable {
   private static final Logger log = LoggerFactory.getLogger(NotifyRequestLoop.class);
   public static final String GROUP = "notify";
   static final long MAX_BACKOFF_MS = 5_000;
+  /**
+   * CH4 deferred minor: how long close() waits for the batch in hand. A batch can wait up to two capped pauses (5 s
+   * each) plus the providers' timeouts, so 10 s let the loop run on after Spring closed Redis and the datasource.
+   */
+  static final long CLOSE_WAIT_MS = 30_000;
 
   private final Consumer<String, byte[]> consumer;
   private final String topic;
@@ -134,7 +139,7 @@ public final class NotifyRequestLoop implements AutoCloseable {
       inFlight.acquire();
       CompletableFuture<String> f;
       try {
-        f = dispatcher.handle(req, wallMs.getAsLong());
+        f = dispatcher.handle(req, tenantHeader(r), wallMs.getAsLong());
       } catch (RuntimeException e) {
         f = CompletableFuture.failedFuture(e);
       }
@@ -145,6 +150,12 @@ public final class NotifyRequestLoop implements AutoCloseable {
     } catch (java.util.concurrent.CompletionException e) {
       throw e.getCause() instanceof Exception ex ? ex : e;
     }
+  }
+
+  /** The record's {@code tenant} header (CH4 spec §2.1), or null when it carries none. */
+  static String tenantHeader(ConsumerRecord<String, byte[]> r) {
+    org.apache.kafka.common.header.Header h = r.headers().lastHeader("tenant");
+    return h == null || h.value() == null ? null : new String(h.value(), java.nio.charset.StandardCharsets.UTF_8);
   }
 
   private void rewind(Set<TopicPartition> rewound) {
@@ -170,7 +181,7 @@ public final class NotifyRequestLoop implements AutoCloseable {
     consumer.wakeup();
     if (thread != null) {
       try {
-        thread.join(10_000);
+        thread.join(CLOSE_WAIT_MS);
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
       }

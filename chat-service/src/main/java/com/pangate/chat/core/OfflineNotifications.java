@@ -69,7 +69,7 @@ public final class OfflineNotifications {
     if (!Mutes.shouldNotify(mutes.mutedUntil(m.getConversationId(), user), m.getMentionUserIdsList(), user, nowMs)) {
       return Result.of("muted");
     }
-    boolean hide = privacy.of(user).hidePreview();
+    boolean hide = privacy.fresh(user).hidePreview();
     NotifyRequest q = NotificationComposer.compose(m, c.get().kind(), c.get().title(), names.of(m.getSenderId(), nowMs),
         hide, badge.total(user), user, record.getTenantId());
     return new Result("sent", Optional.of(q));

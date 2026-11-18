@@ -84,9 +84,10 @@ class ChannelNotifierIT {
     return t;
   }
 
-  static ChatMessage post(String conv, long seq, long sentAt) {
+  static ChatMessage post(String conv, long seq, long sentAt, String... mentions) {
     return ChatMessage.newBuilder().setConversationId(conv).setMsgId("M" + seq + "-" + UUID.randomUUID())
-        .setConvSeq(seq).setSenderId("own").setText("bài " + seq).setSentAtMs(sentAt).build();
+        .setConvSeq(seq).setSenderId("own").setText("bài " + seq).setSentAtMs(sentAt)
+        .addAllMentionUserIds(List.of(mentions)).build();
   }
 
   static void produce(String topic, ChatMessage m, ConversationKind kind) throws Exception {
@@ -199,6 +200,40 @@ class ChannelNotifierIT {
       Thread.sleep(3_000);
       stores.fail = false;
       await().atMost(Duration.ofSeconds(30)).until(() -> sent.size() >= FOLLOWERS - 5);
+    }
+  }
+
+  /** CH4 deferred minor: an unfinished cursor of a post now too old must not be inherited by a later post. */
+  @Test
+  void aStaleUnfinishedCursorIsNotInherited() throws Exception {
+    String t = topic();
+    stores.saveChannelProgress(ch, 1, "f1500");   // post 1 stopped half way, then the notifier was down > 1 h
+    try (ChannelNotifierLoop l = loop(t, "g-" + UUID.randomUUID(), 50_000)) {
+      l.start();
+      produce(t, post(ch, 1, System.currentTimeMillis() - 3_600_001), ConversationKind.CONVERSATION_KIND_CHANNEL);
+      produce(t, post(ch, 2, System.currentTimeMillis()), ConversationKind.CONVERSATION_KIND_CHANNEL);
+      await().atMost(Duration.ofSeconds(30)).until(() -> sent.size() >= FOLLOWERS - 5);
+      Thread.sleep(1_000);
+      assertThat(perUser()).containsKey("chat:f0000").hasSize(FOLLOWERS - 5);
+    }
+  }
+
+  /** CH4 deferred minor: a mention in a post that takes over reaches a muted follower the cursor passed. */
+  @Test
+  void aMentionInATakeoverPostReachesAFollowerAlreadyPassed() throws Exception {
+    String t = topic();
+    try (ChannelNotifierLoop l = loop(t, "g-" + UUID.randomUUID(), 1_000)) {
+      l.start();
+      produce(t, post(ch, 1, System.currentTimeMillis()), ConversationKind.CONVERSATION_KIND_CHANNEL);
+      await().atMost(Duration.ofSeconds(10)).until(() -> stores.loadChannelProgress(ch)
+          .filter(p -> !p.lastUserId().isEmpty() && !p.done()).isPresent());
+      produce(t, post(ch, 2, System.currentTimeMillis(), "f0010", "outsider"),
+          ConversationKind.CONVERSATION_KIND_CHANNEL);
+      await().atMost(Duration.ofSeconds(30)).until(() -> perUser().containsKey("chat:f0010"));
+      Thread.sleep(1_000);
+      assertThat(sent).filteredOn(r -> r.getPrincipalId().equals("chat:f0010"))
+          .extracting(r -> r.getAlert().getBody()).containsExactly("bài 2");
+      assertThat(perUser()).doesNotContainKey("chat:outsider");
     }
   }
 }
