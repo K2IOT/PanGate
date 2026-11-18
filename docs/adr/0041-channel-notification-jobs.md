@@ -19,6 +19,9 @@ Bài kênh đi theo kiểu broadcast nên không bao giờ vào `push.offline`. 
 
 - Người theo dõi được báo trước khi bài mới tới thì thấy nội dung bài cũ cho tới khi mở app.
 - Đo trên máy dev 4 vCPU: kênh 100 000 người theo dõi offline, 100 000 yêu cầu được Kafka ack trong 20,0 s (5 002/s, đúng giới hạn tốc độ).
+  Đây chỉ là tốc độ phía producer (IT dùng store và presence trong bộ nhớ). Với Redis và Scylla thật, mỗi trang còn một
+  SCARD cho mỗi người theo dõi (`onlineOf` chưa pipeline) và một lần đọc privacy khi cache trượt; thời gian tới thiết
+  bị cuối cùng (spec §7) chưa được đo.
 - Không cần topic job riêng; notifier đọc mọi sự kiện chat và lọc bài kênh (rẻ).
 
 ## Nguồn

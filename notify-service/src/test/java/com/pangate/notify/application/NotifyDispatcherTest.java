@@ -159,6 +159,16 @@ class NotifyDispatcherTest {
   }
 
   @Test
+  void retryAfterIsCappedSoOneThrottleCannotStallTheBatch() {
+    token("chat:b", "d1", Platform.APNS, "t1");
+    script.put("t1", new ArrayDeque<>(List.of(new SendResult.Transient(300_000), new SendResult.Ok())));
+    handle(req("r1"));
+    assertThat(sent).containsExactly("t1", "t1");
+    assertThat(waits).containsExactly(NotifyDispatcher.MAX_RETRY_AFTER_MS);
+    assertThat(NotifyDispatcher.MAX_RETRY_AFTER_MS).isEqualTo(5_000L);
+  }
+
+  @Test
   void transientGivesUpAfterThreeAttempts() {
     token("chat:b", "d1", Platform.APNS, "t1");
     script.put("t1", new ArrayDeque<>(List.of(new SendResult.Transient(0), new SendResult.Transient(0),

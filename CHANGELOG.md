@@ -16,6 +16,8 @@
 - `PUT /v1/conversations/{id}/mute {until}` (a mention still notifies); `hidePreview` in `/v1/me/privacy`;
   `mutedUntil` in the conversation list. Schema V5.
 - account-service: `account.users` carries `display_name` (and is emitted on a rename).
+  Accounts created before this release carry no name in chat-service until their next account event (a rename,
+  lock, unlock); until then notifications show their user id as the sender. No backfill ships with CH4.
 - Contracts: `NotifyRequest`, `Alert`, `AccountState.display_name`; testkit `NotifyTopics`, `NotifyKeys`,
   `NotifyRules`, `NotifyCases`.
 - Devtools: `fake-apns`, `fake-fcm`, `notify register`; `make smoke` adds `CHAT notify`.

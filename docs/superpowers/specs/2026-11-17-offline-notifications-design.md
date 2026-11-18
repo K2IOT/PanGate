@@ -1,6 +1,6 @@
 # Thông báo đẩy khi offline (CH4): notify-service và thông báo của app chat — thiết kế
 
-- **Trạng thái:** đã hiện thực (plan `docs/superpowers/plans/2026-11-17-offline-notifications-ch4.md`). Đo trên máy dev 4 vCPU: kênh 100 000 người theo dõi offline → 100 000 yêu cầu trong 20,0 s (5 002/s, đúng giới hạn tốc độ)
+- **Trạng thái:** đã hiện thực (plan `docs/superpowers/plans/2026-11-17-offline-notifications-ch4.md`). Đo trên máy dev 4 vCPU: kênh 100 000 người theo dõi offline → 100 000 yêu cầu được Kafka ack trong 20,0 s (5 002/s, đúng giới hạn tốc độ; chỉ phía producer, store trong bộ nhớ — thời gian tới thiết bị cuối cùng theo §7 chưa đo)
 - **Ngày:** 2026-11-17
 - **Vị trí trong lộ trình app chat:** sub-project 4/4, cuối cùng. (CH1) Chat core, (CH2) Tài khoản, (CH3) Trạng thái hội thoại đã xong.
 - **Dựa trên:** spec chat core `2026-11-12-chat-core-design.md` ("CH1 §n"), spec tài khoản `2026-11-16-account-service-design.md` ("CH2 §n"), spec trạng thái hội thoại `2026-11-17-conversation-state-design.md` ("CH3 §n"), contracts push `2026-11-10-push-contracts-design.md` ("contracts §n"), ADR 0031 (fan-out của chat), ADR 0036 (thu hồi theo thiết bị).

@@ -128,7 +128,11 @@ A newer post takes over the running job's cursor; the cursor is saved per page (
 `chat.notify.offline{result}`, `chat.notify.channel.jobs{result}`, `chat.notify.channel.sent`.
 
 Measured (4 vCPU dev machine, `ChannelNotifyMeasureIT`, `-Dchat.notify.measure=true`): a post to a channel of 100 000
-offline followers → 100 000 requests acked by Kafka in 20.0 s (5 002/s, the configured rate).
+offline followers → 100 000 requests acked by Kafka in 20.0 s (5 002/s, the configured rate). This is the pacing of the
+producer side only: the IT uses in-memory stores and presence. With real Redis and Scylla each page also costs one
+SCARD per follower (`onlineOf`, not pipelined) and a privacy read per cache miss, and notify-service sends one request
+at a time per pod (a Postgres lookup and a Redis SET each), so the time to the last device is longer and is not yet
+measured (spec §7).
 
 ## Measurement (CH1, dev machine)
 

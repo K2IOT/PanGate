@@ -26,6 +26,8 @@ public final class NotifyDispatcher {
   private static final Logger log = LoggerFactory.getLogger(NotifyDispatcher.class);
   static final long FIRST_PAUSE_MS = 1_000;
   static final long SECOND_PAUSE_MS = 4_000;
+  /** Review of CH4: the longest provider Retry-After honoured; one throttle must not hold the whole batch. */
+  static final long MAX_RETRY_AFTER_MS = 5_000;
 
   private final TokenStore store;
   private final Dedup dedup;
@@ -117,7 +119,8 @@ public final class NotifyDispatcher {
           log.warn("{} rejected {} for {}: {}", t.platform().wire(), r.getRequestId(), t.deviceId(), rej.reason());
         }
         case SendResult.Transient tr -> {
-          long pause = tr.retryAfterMs() > 0 ? tr.retryAfterMs() : attempt == 0 ? FIRST_PAUSE_MS : SECOND_PAUSE_MS;
+          long pause = tr.retryAfterMs() > 0 ? Math.min(MAX_RETRY_AFTER_MS, tr.retryAfterMs())
+              : attempt == 0 ? FIRST_PAUSE_MS : SECOND_PAUSE_MS;
           if (attempt + 1 < attempts && atMs + pause < r.getExpiresAtMs()) {
             return delayer.after(pause).thenCompose(v -> send(p, t, r, attempt + 1, atMs + pause));
           }

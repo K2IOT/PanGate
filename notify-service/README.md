@@ -29,7 +29,7 @@ Errors are `application/problem+json` with `code` `invalid_request`, `invalid_to
 - APNs: HTTP/2, provider token ES256 (`.p8`, renewed every 50 min), `apns-topic` = bundle id, sandbox tokens to the
   sandbox host. FCM: HTTP v1 with an OAuth2 access token of the service account.
 - Dead tokens (APNs 410 / `BadDeviceToken`, FCM `UNREGISTERED`) are removed if the device still holds them; 429 / 5xx
-  / no answer are tried 3 times in all (1 s, 4 s or `Retry-After`), never past `expires_at_ms`; refused credentials
+  / no answer are tried 3 times in all (1 s, 4 s or `Retry-After`, at most 5 s so one throttle cannot hold a batch), never past `expires_at_ms`; refused credentials
   are logged and counted.
 - Group `notify-revocations` on `gw.control` removes the tokens of a revoked device or principal; a daily job removes
   tokens not registered again for 180 days.

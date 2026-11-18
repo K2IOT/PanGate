@@ -71,9 +71,25 @@ public final class NotifyRequestLoop implements AutoCloseable {
 
   private void run() {
     long backoff = 100;
+    Set<TopicPartition> toRewind = Set.of();
     try {
       consumer.subscribe(List.of(topic));
       while (running) {
+        if (!toRewind.isEmpty()) {
+          try {
+            rewind(toRewind);
+            toRewind = Set.of();
+          } catch (WakeupException e) {
+            throw e;
+          } catch (RuntimeException e) {
+            // review of CH4: a rewind that times out (coordinator gone) is tried again; it never ends the thread,
+            // and nothing is polled past the records still to redo
+            log.warn("notify requests rewind failed, trying again: {}", e.toString());
+            Thread.sleep(backoff);
+            backoff = Math.min(MAX_BACKOFF_MS, backoff * 2);
+            continue;
+          }
+        }
         ConsumerRecords<String, byte[]> batch = consumer.poll(Duration.ofMillis(500));
         if (batch.isEmpty()) {
           continue;
@@ -89,7 +105,7 @@ public final class NotifyRequestLoop implements AutoCloseable {
         } catch (Exception e) {
           meters.counter("notify.requests.retries").increment();
           log.warn("notify batch not done, rewinding: {}", e.toString());
-          rewind(batch.partitions());
+          toRewind = batch.partitions();   // rewound at the top of the loop, until it succeeds
           Thread.sleep(backoff);
           backoff = Math.min(MAX_BACKOFF_MS, backoff * 2);
         }
@@ -98,6 +114,8 @@ public final class NotifyRequestLoop implements AutoCloseable {
       // closing
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+    } catch (RuntimeException e) {
+      log.error("notify requests stopped", e);
     } finally {
       consumer.close(Duration.ofSeconds(2));
     }
@@ -129,7 +147,12 @@ public final class NotifyRequestLoop implements AutoCloseable {
     }
   }
 
-  private void rewind(Set<TopicPartition> parts) {
+  private void rewind(Set<TopicPartition> rewound) {
+    // a partition lost in a rebalance is not ours to seek; its new owner starts from the last commit
+    Set<TopicPartition> parts = Set.copyOf(rewound.stream().filter(consumer.assignment()::contains).toList());
+    if (parts.isEmpty()) {
+      return;
+    }
     Map<TopicPartition, OffsetAndMetadata> committed = consumer.committed(parts);
     for (TopicPartition tp : parts) {
       OffsetAndMetadata c = committed.get(tp);
