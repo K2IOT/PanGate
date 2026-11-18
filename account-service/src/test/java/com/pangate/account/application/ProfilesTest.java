@@ -119,4 +119,15 @@ class ProfilesTest {
         com.pangate.account.application.port.Outbox.OutboxRow::key).containsExactly(org.assertj.core.groups.Tuple
         .tuple("event", a.userId()));
   }
+
+  /** CH4 deferred minor: renaming a locked account must not announce it as active. */
+  @Test
+  void renameOfALockedAccountKeepsItsStatus() throws Exception {
+    NewSession a = user("renamer2");
+    f.accountStore.setStatus(a.userId(), AccountStatus.LOCKED);
+    f.outboxRows.clear();
+    profiles.update(caller(a), "Lan", null);
+    assertThat(com.pangate.contracts.v1.AccountState.parseFrom(f.outboxRows.getFirst().payload()).getStatus())
+        .isEqualTo(com.pangate.contracts.v1.AccountState.Status.STATUS_LOCKED);
+  }
 }

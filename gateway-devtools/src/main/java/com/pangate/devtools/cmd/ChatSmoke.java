@@ -321,8 +321,25 @@ final class ChatSmoke {
     }
     String got = http.send(HttpRequest.newBuilder(fakeApns.resolve("/received?token=" + token)).timeout(T).build(),
         HttpResponse.BodyHandlers.ofString()).body();
-    if (!got.contains("are you there?") || !got.contains("badge")) {
-      throw new IllegalStateException("unexpected notification " + got);
+    // CH4 deferred minor: the success criterion (spec §0) in full: title = a's name, body = the text, badge = b's
+    // unread messages across conversations
+    @SuppressWarnings("unchecked")
+    Map<String, Object> aps = (Map<String, Object>) ((Map<String, Object>) ((List<Object>) JSONObjectUtils
+        .parse("{\"r\":" + got + "}").get("r")).getFirst()).get("aps");
+    @SuppressWarnings("unchecked")
+    Map<String, Object> alert = (Map<String, Object>) aps.get("alert");
+    long unread = 0;
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> convs = (List<Map<String, Object>>) call("GET", "/v1/conversations", b, null, null)
+        .get("conversations");
+    for (Map<String, Object> c : convs) {
+      unread += ((Number) c.getOrDefault("unread", 0)).longValue();
+    }
+    String nameA = byUserId.get(a).username();
+    if (!"are you there?".equals(alert.get("body")) || !nameA.equalsIgnoreCase(String.valueOf(alert.get("title")))
+        || ((Number) aps.get("badge")).longValue() != unread) {
+      throw new IllegalStateException("unexpected notification " + got + " (expected title " + nameA + ", badge "
+          + unread + ")");
     }
     System.out.printf("CHAT notify: offline DM -> APNs in %.1f ms%n", (System.nanoTime() - t0) / 1e6);
     accounts.logout(connectB, deviceB);

@@ -83,7 +83,10 @@ public final class Profiles {
     // offline notifications spec §2.2: account.users carries the new name, written with it in one transaction
     tx.inTx(() -> {
       accounts.updateProfile(a.userId(), name, b, bio != null);
-      outbox.event(a.userId(), com.pangate.contracts.v1.AccountState.Status.STATUS_ACTIVE);
+      // CH4 deferred minor: the account's own status (a locked account renamed is still locked)
+      outbox.event(a.userId(), a.status() == com.pangate.account.domain.AccountStatus.LOCKED
+          ? com.pangate.contracts.v1.AccountState.Status.STATUS_LOCKED
+          : com.pangate.contracts.v1.AccountState.Status.STATUS_ACTIVE);
     });
   }
 
