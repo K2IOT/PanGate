@@ -115,7 +115,7 @@ can run ahead of what is written for a moment: use it to see that something is n
 
 A message no device of its recipient took arrives on `c1.push.offline` (router); `OfflineNotifierLoop` (group
 `chat-notify`) turns it into a `NotifyRequest` on `c1.notify.requests` for notify-service: title and preview as the
-spec's §3.5 table, the badge (every unread message), `thread_id` = conversation, `collapse_id` = message. Skipped:
+spec's §3.5 table, the badge (every unread message of the first 10 000 conversations not left; a user in more gets a lower number), `thread_id` = conversation, `collapse_id` = message. Skipped:
 other tenants and types, the recipient's own message, messages older than 1 h, muted conversations without a mention.
 
 Channel posts are read from `chat.events` by `ChannelNotifierLoop` (group `chat-channel-notify`, ADR 0041): one live

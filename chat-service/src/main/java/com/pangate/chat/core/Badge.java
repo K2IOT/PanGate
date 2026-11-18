@@ -1,6 +1,10 @@
 package com.pangate.chat.core;
 
-/** CH4 spec §3.1: the app icon's number, every unread message of the conversations not left (muted ones too). */
+/**
+ * CH4 spec §3.1: the app icon's number, every unread message of the conversations not left (muted ones too). Capped at
+ * the first {@link #MAX_CONVERSATIONS} conversations to bound the read per notification (review of PR #7: kept on
+ * purpose; a user in more gets a lower number).
+ */
 public final class Badge {
 
   static final int MAX_CONVERSATIONS = 10_000;

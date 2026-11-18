@@ -4,7 +4,10 @@ import com.pangate.notify.application.port.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** {@code INCR notifyreg:<key>} with a 60 s expiry set on the first hit; Redis down lets the request through. */
+/**
+ * {@code INCR notifyreg:<key>} with a 60 s expiry set on the first hit, or on any hit that finds none; Redis down lets
+ * the request through.
+ */
 public final class RedisRateLimiter implements RateLimiter {
 
   private static final Logger log = LoggerFactory.getLogger(RedisRateLimiter.class);
@@ -20,7 +23,9 @@ public final class RedisRateLimiter implements RateLimiter {
       String k = "notifyreg:" + key;
       var r = redis.sync();
       long n = r.incr(k);
-      if (n == 1) {
+      // review of PR #7: a counter left without a TTL (INCR went through, EXPIRE did not) gets one on the next hit,
+      // instead of rate-limiting its device for good
+      if (n == 1 || r.ttl(k) == -1) {
         r.expire(k, 60);
       }
       return n <= perMinute;
