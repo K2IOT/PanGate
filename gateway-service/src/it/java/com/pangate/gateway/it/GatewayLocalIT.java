@@ -326,8 +326,11 @@ class GatewayLocalIT {
       Files.writeString(keys.resolve("prev"), current);
       Files.writeString(keys.resolve("current"), next);
       Files.writeString(keys.resolve("next"), "99 " + java.util.Base64.getEncoder().encodeToString(fresh) + "\n");
-      ConfigurableApplicationContext second = start(p);
-      try (GatewayClient c = GatewayClient.connect(wss(p), tls(), T)) {
+      // fresh ports: what is under test is the ticket key, not the rebind (restartKeepsTicketsValid... covers
+      // that); reusing the closed ports raced anything else on the machine that grabbed one meanwhile
+      Ports p2 = Ports.free();
+      ConfigurableApplicationContext second = start(p2);
+      try (GatewayClient c = GatewayClient.connect(wss(p2), tls(), T)) {
         assertThat(c.hello(Hellos.ticket(connected.getResumeTicket(), "d1"), T).getConnId()).hasSize(26);
       } finally {
         second.close();
