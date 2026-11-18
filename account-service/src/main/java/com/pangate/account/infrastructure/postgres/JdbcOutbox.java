@@ -31,8 +31,12 @@ public final class JdbcOutbox implements Outbox {
   public void event(String userId, AccountState.Status status) {
     long at = Db.call(() -> jdbc.sql("SELECT (extract(epoch from clock_timestamp()) * 1000)::bigint")
         .query(Long.class).single());
-    add(EVENT, userId, AccountState.newBuilder().setUserId(userId).setStatus(status).setUpdatedAtMs(at).build()
-        .toByteArray());
+    // offline notifications spec §2.2: the name as of this transaction; none once deleted
+    String name = status == AccountState.Status.STATUS_DELETED ? null : Db.call(() -> jdbc.sql(
+            "SELECT display_name FROM accounts WHERE user_id = ?").param(userId).query(String.class).optional())
+        .orElse(null);
+    add(EVENT, userId, AccountState.newBuilder().setUserId(userId).setStatus(status).setUpdatedAtMs(at)
+        .setDisplayName(name == null ? "" : name).build().toByteArray());
   }
 
   @Override

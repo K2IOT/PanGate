@@ -36,13 +36,18 @@ public final class Profiles {
   private final Set<String> reserved;
   private final AttemptCounter counter;
   private final AccountProperties.Limits limits;
+  private final com.pangate.account.application.port.Outbox outbox;
+  private final com.pangate.account.application.port.Transactions tx;
 
   public Profiles(AccountStore accounts, Set<String> reserved, AttemptCounter counter,
-      AccountProperties.Limits limits) {
+      AccountProperties.Limits limits, com.pangate.account.application.port.Outbox outbox,
+      com.pangate.account.application.port.Transactions tx) {
     this.accounts = accounts;
     this.reserved = reserved;
     this.counter = counter;
     this.limits = limits;
+    this.outbox = outbox;
+    this.tx = tx;
   }
 
   static PublicProfile publicOf(Account a) {
@@ -71,7 +76,15 @@ public final class Profiles {
     Account a = mine(c);
     String name = displayName == null ? null : ProfileRules.displayName(displayName);
     String b = bio == null || bio.isBlank() ? null : ProfileRules.bio(bio);
-    accounts.updateProfile(a.userId(), name, b, bio != null);
+    if (name == null) {
+      accounts.updateProfile(a.userId(), null, b, bio != null);
+      return;
+    }
+    // offline notifications spec §2.2: account.users carries the new name, written with it in one transaction
+    tx.inTx(() -> {
+      accounts.updateProfile(a.userId(), name, b, bio != null);
+      outbox.event(a.userId(), com.pangate.contracts.v1.AccountState.Status.STATUS_ACTIVE);
+    });
   }
 
   /** The old username is free at once (spec §4.2). */

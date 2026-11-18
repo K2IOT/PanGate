@@ -61,4 +61,27 @@ class ProfileIT {
     assertThat(call(port, "POST", "/v1/sessions", null, com.pangate.account.support.Http.login(name, "secret-pw-2"))
         .status()).isEqualTo(201);
   }
+
+  /** Offline notifications spec §2.2: account.users carries the display name after a rename. */
+  @Test
+  void renameReachesAccountUsersWithTheName() throws Exception {
+    Device a = Accounts.register(port, unique("dn"));
+    String ta = a.connectToken(port);
+    assertThat(call(port, "PATCH", "/v1/me", ta, Map.of("displayName", "Lan Anh")).status()).isEqualTo(204);
+    var recs = com.pangate.account.support.ControlTopic.await("account.users", rs -> rs.stream()
+        .filter(r -> a.userId().equals(r.key())).anyMatch(r -> {
+          try {
+            return com.pangate.contracts.v1.AccountState.parseFrom(r.value()).getDisplayName().equals("Lan Anh");
+          } catch (Exception e) {
+            return false;
+          }
+        }), java.time.Duration.ofSeconds(20));
+    assertThat(recs.stream().filter(r -> a.userId().equals(r.key())).map(r -> {
+      try {
+        return com.pangate.contracts.v1.AccountState.parseFrom(r.value()).getDisplayName();
+      } catch (Exception e) {
+        return "";
+      }
+    })).contains("Lan Anh");
+  }
 }

@@ -267,4 +267,41 @@ class ChatStoreIT {
     store.updatePrivacy("pv9", false, null, 3_000);
     assertThat(store.privacy("pv9")).isEqualTo(new com.pangate.chat.core.ChatStores.Privacy(false, true));
   }
+
+  /** CH4 spec §3.3: mute is kept on members (channel paging) and user_convs (the list). */
+  @Test
+  void muteIsReadFromMembersAndUserConvs() {
+    String c = conv(ConversationKind.CONVERSATION_KIND_GROUP, "mu1", "mu2");
+    store.touchUserConv("mu2", c, 1, 1_000);
+    assertThat(store.mutedUntil(c, "mu2")).isZero();
+    store.setMute(c, "mu2", Long.MAX_VALUE);
+    assertThat(store.mutedUntil(c, "mu2")).isEqualTo(Long.MAX_VALUE);
+    assertThat(store.userConvs("mu2", null, 10)).filteredOn(u -> u.convId().equals(c))
+        .extracting(com.pangate.chat.core.ChatStores.UserConv::mutedUntil).containsExactly(Long.MAX_VALUE);
+    store.setMute(c, "mu2", 0);
+    assertThat(store.mutedUntil(c, "mu2")).isZero();
+  }
+
+  /** CH4 spec §4.2: the channel notifier pages members in user id order and resumes after the last one. */
+  @Test
+  void membersPageIsOrderedAndResumable() {
+    String c = conv(ConversationKind.CONVERSATION_KIND_CHANNEL, "pg3", "pg1", "pg2", "pg4");
+    store.setMute(c, "pg2", 5);
+    var first = store.membersPage(c, "", 2);
+    assertThat(first).extracting(com.pangate.chat.core.ChatStores.MemberMute::userId).containsExactly("pg1", "pg2");
+    assertThat(first.get(1).mutedUntil()).isEqualTo(5);
+    var next = store.membersPage(c, "pg2", 2);
+    assertThat(next).extracting(com.pangate.chat.core.ChatStores.MemberMute::userId).containsExactly("pg3", "pg4");
+    assertThat(store.membersPage(c, "pg4", 2)).isEmpty();
+  }
+
+  /** CH4 spec §3.4. */
+  @Test
+  void privacyHidePreviewRoundTrip() {
+    store.updatePrivacy("hp1", null, null, true, 1_000);
+    assertThat(store.privacy("hp1").hidePreview()).isTrue();
+    assertThat(store.privacy("hp1").hideRead()).isFalse();
+    store.updatePrivacy("hp1", null, true, null, 2_000);
+    assertThat(store.privacy("hp1")).isEqualTo(new com.pangate.chat.core.ChatStores.Privacy(false, true, true));
+  }
 }

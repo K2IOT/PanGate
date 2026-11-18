@@ -26,7 +26,7 @@ import java.util.Optional;
  */
 public final class ScyllaChatStore implements ChatStores.ConversationStore, ChatStores.MemberStore, ChatStores.UserStore,
     ChatStores.MarkStore, ChatStores.SettingsStore, ChatStores.LastSeenStore,
-    ChatStores.MessageStore, ChatStores.DedupStore {
+    ChatStores.MessageStore, ChatStores.DedupStore, ChatStores.MuteStore, ChatStores.ChannelProgressStore {
 
   public static final long BUCKET = 10_000;
 
@@ -64,6 +64,13 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   private final PreparedStatement selectPrivacy;
   private final PreparedStatement setHidePresence;
   private final PreparedStatement setHideRead;
+  private final PreparedStatement setHidePreview;
+  private final PreparedStatement muteMember;
+  private final PreparedStatement muteUserConv;
+  private final PreparedStatement selectMute;
+  private final PreparedStatement selectMembersPage;
+  private final PreparedStatement saveProgress;
+  private final PreparedStatement loadProgress;
   private final PreparedStatement selectLastSeen;
   private final PreparedStatement upsertLastSeen;
 
@@ -84,8 +91,8 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     deleteMember = s.prepare("DELETE FROM " + ks + ".members WHERE conv_id = ? AND user_id = ?");
     selectMembers = s.prepare("SELECT user_id, role FROM " + ks + ".members WHERE conv_id = ?");
     selectMembersByJoin = s.prepare("SELECT user_id, role, joined_at FROM " + ks + ".members WHERE conv_id = ?");
-    selectUser = s.prepare("SELECT user_id, status, updated_at FROM " + ks + ".users WHERE user_id = ?");
-    upsertUser = s.prepare("INSERT INTO " + ks + ".users (user_id, status, updated_at) VALUES (?, ?, ?)");
+    selectUser = s.prepare("SELECT user_id, status, updated_at, display_name FROM " + ks + ".users WHERE user_id = ?");
+    upsertUser = s.prepare("INSERT INTO " + ks + ".users (user_id, status, updated_at, display_name) VALUES (?, ?, ?, ?)");
     selectMember = s.prepare("SELECT user_id, role FROM " + ks + ".members WHERE conv_id = ? AND user_id = ?");
     joinUserConv = s.prepare("UPDATE " + ks + ".user_convs SET kind = ?, left = false WHERE user_id = ? AND conv_id = ?");
     leaveUserConv = s.prepare("UPDATE " + ks + ".user_convs SET left = true WHERE user_id = ? AND conv_id = ?");
@@ -107,12 +114,26 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     selectOwn = s.prepare("SELECT delivered_seq, read_seq FROM " + ks + ".user_convs WHERE user_id = ? AND conv_id = ?");
     selectStates = s.prepare("SELECT conv_id, kind, last_seq, read_seq, delivered_seq, state_at, left FROM " + ks
         + ".user_convs WHERE user_id = ?");
-    selectPrivacy = s.prepare("SELECT hide_presence, hide_read FROM " + ks + ".user_settings WHERE user_id = ?");
+    selectPrivacy = s.prepare("SELECT hide_presence, hide_read, hide_preview FROM " + ks
+        + ".user_settings WHERE user_id = ?");
     setHidePresence = s.prepare("UPDATE " + ks + ".user_settings SET hide_presence = ?, updated_at = ? WHERE user_id = ?");
     setHideRead = s.prepare("UPDATE " + ks + ".user_settings SET hide_read = ?, updated_at = ? WHERE user_id = ?");
+    setHidePreview = s.prepare("UPDATE " + ks + ".user_settings SET hide_preview = ?, updated_at = ? WHERE user_id = ?");
+    // IF EXISTS: an UPDATE of a row removed meanwhile (a member leaving) would create a row of only muted_until, and
+    // members() would then read a null role (the ghost row of review PR #6)
+    muteMember = s.prepare("UPDATE " + ks + ".members SET muted_until = ? WHERE conv_id = ? AND user_id = ? IF EXISTS");
+    muteUserConv = s.prepare("UPDATE " + ks + ".user_convs SET muted_until = ? WHERE user_id = ? AND conv_id = ? "
+        + "IF EXISTS");
+    saveProgress = s.prepare("INSERT INTO " + ks + ".channel_notify_progress (conv_id, conv_seq, last_user_id) "
+        + "VALUES (?, ?, ?)");
+    loadProgress = s.prepare("SELECT conv_seq, last_user_id FROM " + ks + ".channel_notify_progress WHERE conv_id = ?");
+    selectMute = s.prepare("SELECT muted_until FROM " + ks + ".members WHERE conv_id = ? AND user_id = ?");
+    selectMembersPage = s.prepare("SELECT user_id, muted_until FROM " + ks + ".members WHERE conv_id = ? AND user_id > ? "
+        + "LIMIT ?");
     selectLastSeen = s.prepare("SELECT last_seen_ms FROM " + ks + ".last_seen WHERE user_id = ?");
     upsertLastSeen = s.prepare("INSERT INTO " + ks + ".last_seen (user_id, last_seen_ms) VALUES (?, ?)");
-    selectUserConvs = s.prepare("SELECT conv_id, kind, last_seq, read_seq, last_msg_at, left, delivered_seq FROM " + ks
+    selectUserConvs = s.prepare("SELECT conv_id, kind, last_seq, read_seq, last_msg_at, left, delivered_seq, muted_until FROM "
+        + ks
         + ".user_convs WHERE user_id = ?");
     insertDm = s.prepare("INSERT INTO " + ks + ".dm_index (user_lo, user_hi, conv_id) VALUES (?, ?, ?) IF NOT EXISTS");
     selectDm = s.prepare("SELECT conv_id FROM " + ks + ".dm_index WHERE user_lo = ? AND user_hi = ?");
@@ -220,12 +241,12 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   public Optional<ChatStores.UserRecord> user(String userId) {
     Row r = exec(selectUser.bind(userId)).one();
     return r == null ? Optional.empty()
-        : Optional.of(new ChatStores.UserRecord(r.getString(0), r.getString(1), r.getLong(2)));
+        : Optional.of(new ChatStores.UserRecord(r.getString(0), r.getString(1), r.getString(3), r.getLong(2)));
   }
 
   @Override
-  public void put(String userId, String status, long updatedAtMs) {
-    exec(upsertUser.bind(userId, status, updatedAtMs));
+  public void put(String userId, String status, String displayName, long updatedAtMs) {
+    exec(upsertUser.bind(userId, status, updatedAtMs, displayName));
   }
 
   @Override
@@ -261,7 +282,7 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
         continue;
       }
       all.add(new UserConv(r.getString("conv_id"), ConversationKind.forNumber(r.getInt("kind")), r.getLong("last_seq"),
-          r.getLong("read_seq"), r.getLong("last_msg_at"), r.getLong("delivered_seq")));
+          r.getLong("read_seq"), r.getLong("last_msg_at"), r.getLong("delivered_seq"), r.getLong("muted_until")));
     }
     Comparator<UserConv> order = Comparator.comparingLong(UserConv::lastMsgAtMs).reversed()
         .thenComparing(UserConv::convId);
@@ -283,6 +304,40 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
         com.datastax.oss.driver.api.core.cql.DefaultBatchType.UNLOGGED,
         touchUserConv.bind(seq, seq, atMs, userId, convId),
         stamp(userId, convId, System.currentTimeMillis())));   // final review I5: state_at = when written
+  }
+
+  // --- CH4 mute per conversation (§3.3) ----------------------------------------------------------------------
+
+  @Override
+  public void setMute(String convId, String userId, long mutedUntil) {
+    exec(muteMember.bind(mutedUntil, convId, userId));
+    exec(muteUserConv.bind(mutedUntil, userId, convId));
+  }
+
+  @Override
+  public void saveChannelProgress(String convId, long convSeq, String lastUserId) {
+    exec(saveProgress.bind(convId, convSeq, lastUserId));
+  }
+
+  @Override
+  public Optional<ChatStores.ChannelProgress> loadChannelProgress(String convId) {
+    Row r = exec(loadProgress.bind(convId)).one();
+    return r == null ? Optional.empty() : Optional.of(new ChatStores.ChannelProgress(r.getLong(0), r.getString(1)));
+  }
+
+  @Override
+  public long mutedUntil(String convId, String userId) {
+    Row r = exec(selectMute.bind(convId, userId)).one();
+    return r == null ? 0 : r.getLong(0);
+  }
+
+  @Override
+  public List<ChatStores.MemberMute> membersPage(String convId, String afterUserId, int limit) {
+    List<ChatStores.MemberMute> out = new ArrayList<>();
+    for (Row r : exec(selectMembersPage.bind(convId, afterUserId == null ? "" : afterUserId, limit))) {
+      out.add(new ChatStores.MemberMute(r.getString(0), r.getLong(1)));
+    }
+    return out;
   }
 
   // --- CH3 marks, state, privacy, last seen -----------------------------------------------------------------------
@@ -380,11 +435,12 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   @Override
   public ChatStores.Privacy privacy(String userId) {
     Row r = exec(selectPrivacy.bind(userId)).one();
-    return r == null ? ChatStores.Privacy.OPEN : new ChatStores.Privacy(r.getBoolean(0), r.getBoolean(1));
+    return r == null ? ChatStores.Privacy.OPEN : new ChatStores.Privacy(r.getBoolean(0), r.getBoolean(1),
+        r.getBoolean(2));
   }
 
   @Override
-  public void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead, long atMs) {
+  public void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead, Boolean hidePreview, long atMs) {
     var b = com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
         com.datastax.oss.driver.api.core.cql.DefaultBatchType.UNLOGGED);
     if (hidePresence != null) {
@@ -393,7 +449,10 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     if (hideRead != null) {
       b.addStatement(setHideRead.bind(hideRead, atMs, userId));
     }
-    if (hidePresence != null || hideRead != null) {
+    if (hidePreview != null) {
+      b.addStatement(setHidePreview.bind(hidePreview, atMs, userId));
+    }
+    if (hidePresence != null || hideRead != null || hidePreview != null) {
       exec(b.build());
     }
   }

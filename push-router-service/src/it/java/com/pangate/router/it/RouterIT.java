@@ -267,9 +267,34 @@ class RouterIT {
       router = startRouter("2s");
       // The gateway still holds the pending entry for this msg_id: the restarted router's delivery replaces its
       // delivery_id (the client is not written to twice), and the late ACK completes the redelivered record.
-      Thread.sleep(2_000);
+      // The restarted router can take several seconds to join its group and fetch again, so a fixed sleep raced
+      // it (an ACK sent before the redelivery completed the old delivery_id): wait until a probe record sent
+      // after the restart has been delivered, which shows the new router is consuming and linked to the gateway.
+      String q = principal();
+      GatewayClient probeClient = client(q, "d1");
+      PushRecord probe = fresh(Fixtures.message(q));
+      scenario.produce(probe);
+      assertThat(probeClient.awaitPush(T).getMsgId()).isEqualTo(probe.getMsgId());
       c.ack(r.getMsgId());
-      assertThat(scenario.awaitDelivered(r.getMsgId()).getStatus()).isEqualTo(AckItem.Status.STATUS_ACKED);
+      // Should the ACK still beat the redelivery, the gateway writes the record again: acknowledge that copy too.
+      long end = System.nanoTime() + T.toNanos();
+      DeliveredRecord done = null;
+      while (done == null && System.nanoTime() < end) {
+        try {
+          done = scenario.awaitDelivered(r.getMsgId(), Duration.ofSeconds(1));
+        } catch (AssertionError notYet) {
+          try {
+            Frame again = c.awaitPush(Duration.ofMillis(200));
+            if (again.getMsgId().equals(r.getMsgId())) {
+              c.ack(r.getMsgId());
+            }
+          } catch (IllegalStateException none) {
+            // no second copy
+          }
+        }
+      }
+      assertThat(done).as("DeliveredRecord " + r.getMsgId()).isNotNull();
+      assertThat(done.getStatus()).isEqualTo(AckItem.Status.STATUS_ACKED);
     } finally {
       if (!router.isActive()) {
         router = startRouter("2s");

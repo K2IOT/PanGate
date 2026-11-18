@@ -57,6 +57,16 @@ class SmokeCommandTest {
     assertThat(err.toString()).contains("--push-api").contains("--auth-url");
   }
 
+  /** CH4 spec §7: CHAT notify needs the chat steps and the fake APNs to read from. */
+  @Test
+  void notifyNeedsChatAndFakeApns() {
+    StringWriter err = new StringWriter();
+    int code = run(err, "smoke", "--url", "wss://localhost:1/v1/ws", "--issuer", "http://localhost:1", "--insecure",
+        "--router", "r:1", "--notify", "http://localhost:4");
+    assertThat(code).isEqualTo(2);
+    assertThat(err.toString()).contains("--notify").contains("--fake-apns").contains("--chat");
+  }
+
   @Test
   void chatNeedsAuthUrl() {
     StringWriter err = new StringWriter();
@@ -98,7 +108,7 @@ class SmokeCommandTest {
   @Test
   void chatStepsIncludeConversationState() {
     assertThat(ChatSmoke.STEPS).containsExactly("CHAT 1-1", "CHAT group", "CHAT channel", "CHAT receipts",
-        "CHAT typing", "CHAT presence");
+        "CHAT typing", "CHAT presence", "CHAT notify");
   }
 
   @Test

@@ -18,4 +18,6 @@ message AccountState {
   Status status = 2;
   // lets a consumer skip a state older than the one it has
   int64 updated_at_ms = 3;
+  // offline notifications spec §2.2: the sender's name in chat notifications; empty when unknown or deleted
+  string display_name = 4;
 }

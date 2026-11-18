@@ -74,6 +74,12 @@ public final class SmokeCommand implements Callable<Integer> {
   @Option(names = "--account-admin", description = "account-service admin URL (lock/unlock), e.g. http://account:8081")
   URI accountAdmin;
 
+  @Option(names = "--notify", description = "notify-service public URL: CHAT notify step (needs --chat, --fake-apns)")
+  URI notify;
+
+  @Option(names = "--fake-apns", description = "fake APNs URL to read notifications from, e.g. http://fake-apns:9550")
+  URI fakeApns;
+
   @picocli.CommandLine.Spec
   picocli.CommandLine.Model.CommandSpec spec;
 
@@ -125,6 +131,10 @@ public final class SmokeCommand implements Callable<Integer> {
     if (pushApi != null && source.auth == null) {
       throw new picocli.CommandLine.ParameterException(spec.commandLine(),
           "--push-api needs an API token: use --auth-url and --client-file");
+    }
+    if ((notify == null) != (fakeApns == null) || (notify != null && chat == null)) {
+      throw new picocli.CommandLine.ParameterException(spec.commandLine(),
+          "--notify and --fake-apns go together, with --chat (CHAT notify step)");
     }
     if (chat != null && source.auth == null) {
       throw new picocli.CommandLine.ParameterException(spec.commandLine(),
@@ -246,7 +256,7 @@ public final class SmokeCommand implements Callable<Integer> {
       if (chat != null) {
         String[] chatStep = {""};
         try {
-          new ChatSmoke(chat, url, tls, accounts).run(s -> chatStep[0] = s);
+          new ChatSmoke(chat, url, tls, accounts, notify, fakeApns).run(s -> chatStep[0] = s);
         } finally {
           step = chatStep[0];
         }
@@ -275,6 +285,7 @@ public final class SmokeCommand implements Callable<Integer> {
         }
         System.out.println("SMOKE OK (connected, pong, upstream-ack, push-ack, " + (viaRouter() ? "offline, " : "")
             + (accounts != null ? "accounts, " : "") + (chat != null ? "chat 1-1, chat group, chat channel, chat receipts, chat typing, chat presence, " : "")
+            + (notify != null ? "chat notify, " : "")
             + "resume, revoke)");
         return 0;
       }

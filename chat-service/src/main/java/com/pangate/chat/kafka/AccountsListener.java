@@ -133,7 +133,8 @@ public final class AccountsListener implements AutoCloseable {
             e.getMessage());
       }
     }
-    users.put(s.getUserId(), status, s.getUpdatedAtMs());   // already compared with prior above
+    // already compared with prior above; CH4 spec §3.2: the name for notifications rides along
+    users.put(s.getUserId(), status, s.getDisplayName().isEmpty() ? null : s.getDisplayName(), s.getUpdatedAtMs());
     onApplied.accept(s.getUserId());
   }
 

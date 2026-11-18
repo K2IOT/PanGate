@@ -89,4 +89,12 @@ class RedisPresenceIT {
     presence.cancelGrace("gq2");
     assertThat(presence.dueGraces(10_000)).doesNotContain("gq2");
   }
+
+  /** CH4 spec §4.2: the online users of a page of followers. */
+  @Test
+  void onlineOfReturnsTheOnlineOnes() {
+    presence.add("on1", "n9", 1, "k1");
+    presence.add("on2", "n9", 1, "k2");
+    assertThat(presence.onlineOf(java.util.List.of("on1", "off1", "on2"))).containsExactlyInAnyOrder("on1", "on2");
+  }
 }

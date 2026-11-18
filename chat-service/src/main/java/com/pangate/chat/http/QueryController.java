@@ -122,6 +122,7 @@ public class QueryController {
       // CH3 spec §4: readSeq, deliveredSeq, unread, and the DM peer's marks
       Map<String, Object> m = state.conversationView(viewer, com.pangate.chat.core.StateService.of(u));
       m.put("lastMsgAt", u.lastMsgAtMs());
+      m.put("mutedUntil", u.mutedUntil());   // CH4 spec §3.3
       out.add(m);
     }
     Map<String, Object> body = new LinkedHashMap<>();

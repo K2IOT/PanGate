@@ -94,7 +94,8 @@ public final class ChatHarness implements AutoCloseable {
           new NewTopic(ChatTopics.EVENTS, 8, (short) 1), new NewTopic(ChatTopics.DLQ, 1, (short) 1),
           new NewTopic(com.pangate.contracts.testkit.AccountTopics.USERS, 2, (short) 1),
           new NewTopic("c1.gw.upstream.cmd", 4, (short) 1), new NewTopic("c1.push.requests", 8, (short) 1),
-          new NewTopic(ChatTopics.RECEIPTS, 8, (short) 1), new NewTopic("c1.gw.lifecycle", 4, (short) 1)))
+          new NewTopic(ChatTopics.RECEIPTS, 8, (short) 1), new NewTopic("c1.gw.lifecycle", 4, (short) 1),
+          new NewTopic("c1.push.offline", 4, (short) 1), new NewTopic("c1.notify.requests", 4, (short) 1)))
           .all().get();
     }
     String kafkaBs = kafka.getBootstrapServers();

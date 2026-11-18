@@ -1,0 +1,28 @@
+# Container in `make up` (platform-devenv/docker-compose.yml).
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/pangate
+    username: pangate
+    password: pangate
+notify:
+  auth:
+    issuer: http://auth:8090
+    jwks-uri: http://auth:8090/.well-known/jwks.json
+  kafka: { bootstrap: "kafka:29092" }
+  redis: { uri: "redis://redis:6379" }
+  # devenv only: the fake providers of gateway-devtools accept any key, so missing key files are generated
+  dev-credentials: true
+  tenants:
+    chat:
+      apns:
+        base-url: http://fake-apns:9550
+        sandbox-base-url: http://fake-apns:9550
+        key-file: /dev-secrets/notify/chat-apns.p8
+        key-id: DEVKEY0001
+        team-id: DEVTEAM001
+        bundle-id: com.pangate.chat
+      fcm:
+        base-url: http://fake-fcm:9551
+        token-uri: http://fake-fcm:9551/token
+        project-id: pangate-dev
+        service-account-file: /dev-secrets/notify/chat-fcm.json

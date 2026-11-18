@@ -22,7 +22,7 @@ class ProfilesTest {
   final InMemoryAttemptCounter counter = new InMemoryAttemptCounter(f.clock);
   final Register register = new Register(f.accountStore, f.sessionStore, f.outbox, f.hasher, new HashGate(2), counter,
       TestLimits.SPEC, Set.of(), f.tx, Metrics.NONE);
-  final Profiles profiles = new Profiles(f.accountStore, Set.of("admin"), counter, TestLimits.SPEC);
+  final Profiles profiles = new Profiles(f.accountStore, Set.of("admin"), counter, TestLimits.SPEC, f.outbox, f.tx);
 
   NewSession user(String name) {
     return register.register(name, "secret-pw".toCharArray(), name + "@x.vn", null, null, DeviceInfo.of("p", "ios"),
@@ -102,8 +102,21 @@ class ProfilesTest {
                 throw e.getCause();
               }
             });
-    new Profiles(staleReads, Set.of(), counter, TestLimits.SPEC).update(caller(a), null, "new bio");
+    new Profiles(staleReads, Set.of(), counter, TestLimits.SPEC, f.outbox, f.tx).update(caller(a), null, "new bio");
     assertThat(f.accounts.get(a.userId()).displayName()).isEqualTo("Renamed");
     assertThat(f.accounts.get(a.userId()).bio()).isEqualTo("new bio");
+  }
+
+  /** Offline notifications spec §2.2: chat-service learns the new name for its notifications. */
+  @Test
+  void renameEmitsAccountEvent() {
+    NewSession a = user("renamer1");
+    f.outboxRows.clear();
+    profiles.update(caller(a), null, "only the bio");
+    assertThat(f.outboxRows).isEmpty();
+    profiles.update(caller(a), "Lan", null);
+    assertThat(f.outboxRows).extracting(com.pangate.account.application.port.Outbox.OutboxRow::kind,
+        com.pangate.account.application.port.Outbox.OutboxRow::key).containsExactly(org.assertj.core.groups.Tuple
+        .tuple("event", a.userId()));
   }
 }

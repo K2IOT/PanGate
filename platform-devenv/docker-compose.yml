@@ -59,6 +59,7 @@ services:
         $$t --bootstrap-server $$b --create --if-not-exists --topic chat.events --partitions 64
         $$t --bootstrap-server $$b --create --if-not-exists --topic chat.commands.dlq --partitions 8
         $$t --bootstrap-server $$b --create --if-not-exists --topic chat.receipts --partitions 64 --config retention.ms=86400000
+        $$t --bootstrap-server $$b --create --if-not-exists --topic c1.notify.requests --partitions 32 --config retention.ms=86400000
         # app chat accounts (docs/superpowers/specs/2026-11-16-account-service-design.md §6)
         $$t --bootstrap-server $$b --create --if-not-exists --topic account.users --partitions 12 --config cleanup.policy=compact
         echo topics ready
@@ -197,6 +198,52 @@ services:
     healthcheck:
       <<: *hc
       test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.account.tools.HealthCheck",
+             "http://127.0.0.1:8081/ready"]
+
+  # APNs and FCM stand-ins for notify-service (offline notifications spec §7); GET /received?token=<t>.
+  fake-apns:
+    profiles: ["app"]
+    image: pangate/gateway-devtools:dev
+    command: ["fake-apns", "--port", "9550"]
+    ports:
+      - "9550:9550"
+  fake-fcm:
+    profiles: ["app"]
+    image: pangate/gateway-devtools:dev
+    command: ["fake-fcm", "--port", "9551"]
+    ports:
+      - "9551:9551"
+
+  # Push tokens and APNs / FCM for every tenant (offline notifications spec §5); in dev it sends to fake-apns /
+  # fake-fcm (gateway-devtools).
+  notify:
+    profiles: ["app"]
+    image: pangate/notify-service:dev
+    user: "0"
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      JAVA_TOOL_OPTIONS: "-Xmx256m"
+    volumes:
+      - dev-secrets:/dev-secrets
+    ports:
+      - "8094:8080"
+      - "8095:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      auth:
+        condition: service_healthy
+      fake-apns:
+        condition: service_started
+      fake-fcm:
+        condition: service_started
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "java", "-cp", "@/app/jib-classpath-file", "com.pangate.notify.tools.HealthCheck",
              "http://127.0.0.1:8081/ready"]
 
   # Push API stand-in, kept as a dev tool (profile tools): KICK → PushRecord CONTROL on Kafka.
