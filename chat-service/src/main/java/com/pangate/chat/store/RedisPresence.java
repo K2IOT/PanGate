@@ -121,6 +121,36 @@ public final class RedisPresence implements PresenceState, com.pangate.chat.core
     return call(r -> r.scard("pres:" + userId) > 0);
   }
 
+  /**
+   * CH4 deferred minor: one SCARD per follower, all written before any answer is awaited (Lettuce pipelines
+   * commands on one connection), so a page of 1 000 costs about one round trip instead of 1 000.
+   */
+  @Override
+  public java.util.Set<String> onlineOf(java.util.Collection<String> userIds) {
+    return call(r -> {
+      var async = conn.async();
+      List<String> ids = List.copyOf(userIds);
+      List<io.lettuce.core.RedisFuture<Long>> counts = new java.util.ArrayList<>(ids.size());
+      for (String u : ids) {
+        counts.add(async.scard("pres:" + u));
+      }
+      java.util.Set<String> out = new java.util.HashSet<>();
+      for (int i = 0; i < ids.size(); i++) {
+        try {
+          if (counts.get(i).get(5, java.util.concurrent.TimeUnit.SECONDS) > 0) {
+            out.add(ids.get(i));
+          }
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          throw new StoreUnavailableException("redis: interrupted", e);
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
+          throw new StoreUnavailableException("redis: " + e, e);
+        }
+      }
+      return out;
+    });
+  }
+
   @Override
   public boolean seen(String eventId) {
     return call(r -> r.set("presev:" + eventId, "1", SetArgs.Builder.nx().ex(EVENT_TTL)) == null);

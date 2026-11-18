@@ -76,6 +76,7 @@ public final class ChannelNotifierLoop implements AutoCloseable {
   private final Consumer<String, byte[]> consumer;
   private final String topic;
   private final ChatStores.MuteStore members;
+  private final ChatStores.MemberStore membership;
   private final PresenceState presence;
   private final ChatStores.ChannelProgressStore progress;
   private final ChatStores.ConversationStore conversations;
@@ -94,13 +95,15 @@ public final class ChannelNotifierLoop implements AutoCloseable {
   private volatile boolean running = true;
   private Thread thread;
 
-  public ChannelNotifierLoop(Consumer<String, byte[]> consumer, String topic, ChatStores.MuteStore members,
+  public <S extends ChatStores.MuteStore & ChatStores.MemberStore> ChannelNotifierLoop(Consumer<String, byte[]> consumer,
+      String topic, S members,
       PresenceState presence, ChatStores.ChannelProgressStore progress, ChatStores.ConversationStore conversations,
       PrivacyCache privacy, ChatStores.UserStore users, NotifySink sink, int pageSize, int ratePerSec,
       Duration maxAge, MeterRegistry meters, LongSupplier wallMs) {
     this.consumer = consumer;
     this.topic = topic;
     this.members = members;
+    this.membership = members;
     this.presence = presence;
     this.progress = progress;
     this.conversations = conversations;
@@ -202,14 +205,21 @@ public final class ChannelNotifierLoop implements AutoCloseable {
       return;
     }
     ChatMessage post = e.getMessage();
+    String conv = post.getConversationId();
     if (wallMs.getAsLong() - post.getSentAtMs() > maxAgeMs) {
+      // CH4 deferred minor: a post read again after a long outage leaves no unfinished cursor behind for a
+      // later post to take over (its followers before the cursor would never hear of the later one)
+      Optional<ChatStores.ChannelProgress> saved = progress.loadChannelProgress(conv);
+      if (saved.isPresent() && saved.get().convSeq() == post.getConvSeq() && !saved.get().done()) {
+        progress.saveChannelProgress(conv, post.getConvSeq(), ChatStores.ChannelProgress.DONE);
+      }
       meters.counter("chat.notify.channel.jobs", "result", "stale").increment();
       return;
     }
-    String conv = post.getConversationId();
     Job running = live.get(conv);
     if (running != null) {
       if (running.post.getConvSeq() < post.getConvSeq()) {
+        notifyPassedMentions(post, running.title, running.after);
         running.post = post;   // takes over the cursor (class doc)
         progress.saveChannelProgress(conv, post.getConvSeq(), running.after);
         meters.counter("chat.notify.channel.jobs", "result", "replaced").increment();
@@ -230,6 +240,9 @@ public final class ChannelNotifierLoop implements AutoCloseable {
     Optional<ChatStores.Conversation> c = conversations.get(conv);
     if (c.isEmpty()) {
       return;
+    }
+    if (!after.isEmpty() && saved.get().convSeq() < post.getConvSeq()) {
+      notifyPassedMentions(post, c.get().title(), after);   // took over an older post's cursor
     }
     live.put(conv, new Job(post, c.get().title(), after, tp, r.offset()));
     meters.counter("chat.notify.channel.jobs", "result", "started").increment();
@@ -262,6 +275,38 @@ public final class ChannelNotifierLoop implements AutoCloseable {
     meters.counter("chat.notify.channel.sent").increment(to.size());
     j.after = page.getLast().userId();
     progress.saveChannelProgress(conv, j.post.getConvSeq(), j.after);
+  }
+
+  /**
+   * CH4 deferred minor: a post that takes over a cursor reaches only the followers after it; those it mentions
+   * before it (members, not the sender, offline) get it now, mentions breaking through mute (spec §3.3).
+   */
+  private void notifyPassedMentions(ChatMessage post, String title, String cursor) {
+    if (cursor.isEmpty() || cursor.equals(ChatStores.ChannelProgress.DONE)) {
+      return;
+    }
+    String conv = post.getConversationId();
+    List<String> passed = new ArrayList<>();
+    for (String u : new java.util.LinkedHashSet<>(post.getMentionUserIdsList())) {
+      if (u.compareTo(cursor) <= 0 && !u.equals(post.getSenderId()) && membership.member(conv, u).isPresent()) {
+        passed.add(u);
+      }
+    }
+    if (passed.isEmpty()) {
+      return;
+    }
+    java.util.Set<String> online = presence.onlineOf(passed);
+    long now = wallMs.getAsLong();
+    String sender = names.of(post.getSenderId(), now);
+    List<CompletableFuture<Void>> sent = new ArrayList<>();
+    for (String user : passed) {
+      if (!online.contains(user)) {
+        sent.add(sink.send(NotificationComposer.compose(post, ConversationKind.CONVERSATION_KIND_CHANNEL, title,
+            sender, privacy.of(user).hidePreview(), -1, user, ChatTopics.TENANT)));
+      }
+    }
+    CompletableFuture.allOf(sent.toArray(CompletableFuture[]::new)).join();
+    meters.counter("chat.notify.channel.sent").increment(sent.size());
   }
 
   private void finish(Job j, String result) {
