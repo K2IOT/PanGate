@@ -57,13 +57,16 @@ message twice, never as two messages.
 | `POST /v1/sync` | `{conversations:[{id, lastSeq}], limitPerConversation?}` → messages after each cursor, or `tooMany` |
 | `POST /v1/conversations` | `{kind: group\|channel, title, memberIds?, public?}`; the caller is owner |
 | `POST /v1/dm/{userId}` | the pair's DM, created once |
-| `POST /v1/conversations/{id}/members` · `DELETE …/members/{userId}` | owner or admin; anyone may leave |
+| `POST /v1/conversations` | group or channel; at most 200 `memberIds`; `notAdded` lists those whose `whoCanAdd` is `nobody` |
+| `POST /v1/conversations/{id}/members` · `DELETE …/members/{userId}` | owner or admin (403 `add_refused` when the user's `whoCanAdd` is `nobody`); anyone may leave, an owner leaving hands ownership to the earliest admin, else the earliest member |
+| `PUT /v1/conversations/{id}/members/{userId}/role` | owner only: `{"role":"admin"\|"member"}` |
+| `POST /v1/conversations/{id}/owner` | owner only: `{"userId":...}`; the old owner stays on as an admin |
 | `POST /v1/conversations/{id}/join` | public channels |
 | `POST /v1/conversations/{id}/read` · `…/delivered` | `{upToSeq}` → `204` (CH3) |
 | `GET /v1/state?since=&cursor=` | conversations whose state changed after `since` (all without it): `lastSeq`, `readSeq`, `deliveredSeq`, `unread`, DM `peer`; `now` |
 | `GET /v1/conversations/{id}/receipts?seq=` | DM / group ≤ 50: `marks`; larger groups: `readCount`; channels `404 not_supported`; 1/s |
 | `GET /v1/presence?ids=&conversationId=` | ≤ 100 ids sharing that conversation |
-| `GET` · `PUT /v1/me/privacy` | `{hidePresence, hideRead, hidePreview}`; the first two reciprocal, `hidePreview` hides sender and text in notifications (CH4) |
+| `GET` · `PUT /v1/me/privacy` | `{hidePresence, hideRead, hidePreview, whoCanAdd}`; the first two reciprocal, `hidePreview` hides sender and text in notifications (CH4), `whoCanAdd` is `everyone` (default) or `nobody` |
 | `PUT /v1/conversations/{id}/mute` | `{until: <epoch ms> \| null}`: `null` = for ever, a past time unmutes; members only; a mention still notifies (CH4) |
 
 A client's sync cursor is the highest `convSeq` it has received. `lastSeq` from `/v1/sync` (without `tooMany`) is

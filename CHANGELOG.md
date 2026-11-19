@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Review 2026-11-19, batch 1 (business logic and privacy)
+Design: `docs/superpowers/specs/2026-11-19-review-batch1-design.md`.
+- chat-service: a member added later or a follower joining starts with nothing unread (was the whole history).
+- chat-service: an owner leaving hands ownership on; `PUT …/members/{userId}/role` and `POST …/owner` (owner only).
+- chat-service: with reads hidden, a read no longer shows as "delivered" (`conv_marks.shown_delivered_seq`, V6) nor
+  timestamps the other side's `/v1/state`.
+- chat-service: an offline notification's badge counts the message it announces.
+- chat-service: a lifecycle event whose Redis write failed is read again (a lost disconnect kept users online).
+- chat-service: an online follower without the channel open gets the post notification (`chanopen:<user>`).
+- chat-service: `whoCanAdd` (`everyone` | `nobody`, V7); at most 200 people per create.
+- account-service: a connect-token exchange auth-service did not answer gives its hourly slot back.
+
 ### CH4 follow-ups (deferred minors)
 - notify-service: concurrent registrations of one token no longer answer 500; a provider that throws is a failed
   try, not a lost request; FCM `SENDER_ID_MISMATCH` removes the token and 401 retries with a new access token; the
