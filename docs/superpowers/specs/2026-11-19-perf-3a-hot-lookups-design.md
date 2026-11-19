@@ -1,6 +1,6 @@
 # Đợt 3a: tra cứu nóng (thành viên, giới hạn tần suất, badge)
 
-- **Trạng thái:** Bản thảo (2026-11-19), chờ duyệt. Đã đọc lại một lượt (§7 ghi những gì đã sửa).
+- **Trạng thái:** Đã duyệt (2026-11-19). Đã đọc lại một lượt (§7 ghi những gì đã sửa).
 - **Nguồn:** review toàn bộ chat 2026-11-19 (CH1 I5/I6/I8, CH3 I3/I5/I7, CH4 I2/I6, cross I2/I6). Đợt 3 có ba phần: **3a** (tài liệu này), 3b client Push API, 3c vòng Kafka. Thứ tự và cách chia do chủ dự án duyệt ngày 2026-11-19.
 
 ## 1. Mục tiêu và vì sao
