@@ -69,6 +69,10 @@ class ReceiptWorkerIT {
   }
 
   static Rig rig(String topic) {
+    return rig(topic, com.pangate.chat.core.BadgeUpdates.NONE);
+  }
+
+  static Rig rig(String topic, com.pangate.chat.core.BadgeUpdates badges) {
     FakeStores stores = new FakeStores();
     List<PushRequest> pushed = new CopyOnWriteArrayList<>();
     ReceiptWorkerLoop loop = new ReceiptWorkerLoop(ReceiptWorkerLoop.consumer(kafka.getBootstrapServers(),
@@ -76,7 +80,7 @@ class ReceiptWorkerIT {
         System::currentTimeMillis), r -> {
           pushed.add(r);
           return CompletableFuture.completedFuture(PushResponse.getDefaultInstance());
-        }, STATE, new SimpleMeterRegistry());
+        }, STATE, new SimpleMeterRegistry(), badges);
     return new Rig(stores, pushed, loop);
   }
 
@@ -267,6 +271,35 @@ class ReceiptWorkerIT {
       send(t, read(d, "rb", 2));
       await().atMost(Duration.ofSeconds(15)).until(() -> attempts.size() >= 2);
       assertThat((attempts.get(1) - attempts.get(0)) / 1_000_000).isGreaterThanOrEqualTo(1_400);
+    }
+  }
+
+  /** Perf 3a (spec §3.3): a read mark of a DM or group raises the reader's counter after the mark is written. */
+  @Test
+  void readRaisesBadge() throws Exception {
+    String t = topic();
+    com.pangate.chat.core.RecordingBadges b = new com.pangate.chat.core.RecordingBadges();
+    try (Rig r = rig(t, b)) {
+      String g = conv(r.stores(), ConversationKind.CONVERSATION_KIND_GROUP, "a", "b", "c");
+      b.onCall = call -> assertThat(r.stores().own("b", g).readSeq()).isEqualTo(4);
+      r.loop().start();
+      send(t, read(g, "b", 4));
+      await().atMost(Duration.ofSeconds(20)).until(() -> !b.calls.isEmpty());
+      assertThat(b.calls).containsExactly("raise b " + g + " 0 4");
+    }
+  }
+
+  @Test
+  void channelReadRaisesNothing() throws Exception {
+    String t = topic();
+    com.pangate.chat.core.RecordingBadges b = new com.pangate.chat.core.RecordingBadges();
+    try (Rig r = rig(t, b)) {
+      String ch = conv(r.stores(), ConversationKind.CONVERSATION_KIND_CHANNEL, "o", "f");
+      r.loop().start();
+      send(t, read(ch, "f", 3));
+      await().atMost(Duration.ofSeconds(20)).until(() -> r.stores().own("f", ch).readSeq() == 3);
+      Thread.sleep(500);
+      assertThat(b.calls).isEmpty();
     }
   }
 }
