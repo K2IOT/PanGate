@@ -22,4 +22,18 @@ class BadgeTest {
     assertThat(new Badge(stores).total("u")).isEqualTo(3 + 4);
     assertThat(new Badge(stores).total("nobody")).isZero();
   }
+
+  /** Review 2026-11-19 (F4): fan-out may raise the inbox row after the notification is built; the message counts. */
+  @Test
+  void theMessageBeingNotifiedAlwaysCounts() {
+    FakeStores stores = new FakeStores();
+    Map<String, UserConv> mine = new ConcurrentHashMap<>();
+    mine.put("c1", new UserConv("c1", null, 5, 5, 1));      // everything read; seq 6 not touched in yet
+    mine.put("c2", new UserConv("c2", null, 4, 2, 2));
+    stores.userConvs.put("u", mine);
+    Badge b = new Badge(stores);
+    assertThat(b.total("u", "c1", 6)).isEqualTo(1 + 2);
+    assertThat(b.total("u", "c2", 3)).as("an older seq changes nothing").isEqualTo(2);
+    assertThat(b.total("u", "c9", 7)).as("no inbox row yet: the message alone").isEqualTo(1 + 2);
+  }
 }

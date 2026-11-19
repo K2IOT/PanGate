@@ -16,9 +16,27 @@ public final class Badge {
   }
 
   public int total(String userId) {
+    return total(userId, null, 0);
+  }
+
+  /**
+   * Review 2026-11-19 (F4): the badge of a notification for message {@code convSeq} of {@code convId}. Fan-out raises
+   * the inbox rows only after its pushes, so the row may not hold this message yet: it counts as at least that seq
+   * (and alone when the row is not there).
+   */
+  public int total(String userId, String convId, long convSeq) {
     long sum = 0;
+    boolean seen = false;
     for (ChatStores.UserConv u : inbox.userConvs(userId, null, MAX_CONVERSATIONS)) {
-      sum += Math.max(0, u.lastSeq() - u.readSeq());
+      long last = u.lastSeq();
+      if (u.convId().equals(convId)) {
+        seen = true;
+        last = Math.max(last, convSeq);
+      }
+      sum += Math.max(0, last - u.readSeq());
+    }
+    if (!seen && convId != null && convSeq > 0) {
+      sum += 1;
     }
     return (int) Math.min(Integer.MAX_VALUE, sum);
   }
