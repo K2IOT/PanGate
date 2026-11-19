@@ -263,7 +263,7 @@ public final class ChannelNotifierLoop implements AutoCloseable {
     }
     List<String> ids = new ArrayList<>(page.size());
     page.forEach(m -> ids.add(m.userId()));
-    List<String> to = ChannelNotifyPlan.recipients(page, presence.onlineOf(ids), j.post, now);
+    List<String> to = ChannelNotifyPlan.recipients(page, received(conv, ids), j.post, now);
     String sender = names.of(j.post.getSenderId(), now);
     List<CompletableFuture<Void>> sent = new ArrayList<>(to.size());
     for (String user : to) {
@@ -295,7 +295,7 @@ public final class ChannelNotifierLoop implements AutoCloseable {
     if (passed.isEmpty()) {
       return;
     }
-    java.util.Set<String> online = presence.onlineOf(passed);
+    java.util.Set<String> online = received(conv, passed);
     long now = wallMs.getAsLong();
     String sender = names.of(post.getSenderId(), now);
     List<CompletableFuture<Void>> sent = new ArrayList<>();
@@ -359,5 +359,14 @@ public final class ChannelNotifierLoop implements AutoCloseable {
         Thread.currentThread().interrupt();
       }
     }
+  }
+
+  /**
+   * Review 2026-11-19 (F6): who got the post live: online and with the channel open. An online follower without it
+   * open gets the notification like an offline one (CH4 §4.2 treated any online follower as having received it).
+   */
+  private java.util.Set<String> received(String conv, List<String> ids) {
+    java.util.Set<String> online = presence.onlineOf(ids);
+    return online.isEmpty() ? online : presence.haveOpen(conv, online);
   }
 }

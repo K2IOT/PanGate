@@ -321,9 +321,10 @@ public class ChatConfig {
   }
 
   @Bean
-  ChannelSubscriptions channelSubscriptions(ScyllaChatStore store, PushApiClient pusher, MeterRegistry meters) {
+  ChannelSubscriptions channelSubscriptions(ScyllaChatStore store, PushApiClient pusher, MeterRegistry meters,
+      com.pangate.chat.store.RedisPresence presence) {
     return new ChannelSubscriptions(store, store, pusher,
-        result -> meters.counter("chat.channel.control", "result", result).increment());
+        result -> meters.counter("chat.channel.control", "result", result).increment(), presence);
   }
 
   @Bean

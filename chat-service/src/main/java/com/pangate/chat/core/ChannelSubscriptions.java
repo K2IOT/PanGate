@@ -33,6 +33,7 @@ public final class ChannelSubscriptions {
   private final ChatStores.MemberStore members;
   private final Pusher pusher;
   private final Consumer<String> onResult;
+  private final PresenceState opens;
 
   public ChannelSubscriptions(ChatStores.ConversationStore conversations, ChatStores.MemberStore members,
       Pusher pusher) {
@@ -42,6 +43,13 @@ public final class ChannelSubscriptions {
   /** {@code onResult}: ok, or the failing code / {@code unavailable} (metric). */
   public ChannelSubscriptions(ChatStores.ConversationStore conversations, ChatStores.MemberStore members,
       Pusher pusher, Consumer<String> onResult) {
+    this(conversations, members, pusher, onResult, null);
+  }
+
+  /** {@code opens}: review 2026-11-19 (F6), where each user's open channels are recorded; null = not recorded. */
+  public ChannelSubscriptions(ChatStores.ConversationStore conversations, ChatStores.MemberStore members,
+      Pusher pusher, Consumer<String> onResult, PresenceState opens) {
+    this.opens = opens;
     this.conversations = conversations;
     this.members = members;
     this.pusher = pusher;
@@ -63,7 +71,23 @@ public final class ChannelSubscriptions {
       return Optional.of(new Rejection(Rejection.NOT_MEMBER, "a private channel needs membership"));
     }
     send(userId, ControlOp.newBuilder().setSubscribe(topic(convId)).build());
+    record(() -> opens.channelOpened(userId, convId));
     return Optional.empty();
+  }
+
+  /**
+   * F6: best effort. A record that failed only means a notification the user did not need (an open channel taken for
+   * closed), or none for a channel they closed until they go offline.
+   */
+  private void record(Runnable r) {
+    if (opens == null) {
+      return;
+    }
+    try {
+      r.run();
+    } catch (RuntimeException e) {
+      log.debug("open channels not recorded: {}", e.toString());
+    }
   }
 
   public Optional<Rejection> close(String userId, String convId) {
@@ -71,6 +95,7 @@ public final class ChannelSubscriptions {
       return Optional.of(new Rejection(Rejection.INVALID, "conversation_id must be a ULID"));
     }
     send(userId, ControlOp.newBuilder().setUnsubscribe(topic(convId)).build());
+    record(() -> opens.channelClosed(userId, convId));
     return Optional.empty();
   }
 
@@ -80,6 +105,7 @@ public final class ChannelSubscriptions {
    * UNAVAILABLE, RATE_LIMITED or no answer, for at most {@link #REVOKE_FOR}; true once Push API accepted it.
    */
   public CompletableFuture<Boolean> revoke(String userId, String convId) {
+    record(() -> opens.channelClosed(userId, convId));
     return revoke(userId, convId, INITIAL_BACKOFF_MS, System.nanoTime() + REVOKE_FOR.toNanos());
   }
 

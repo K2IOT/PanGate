@@ -111,6 +111,7 @@ public final class PresenceTracker {
         state.putLastSeen(user, goneAt.getAsLong());
         durable.putLastSeen(user, goneAt.getAsLong());
         state.clearGone(user);
+        state.clearOpenChannels(user);   // F6: their subscriptions ended with their connections
         onTransition.accept(new Transition(user, false, goneAt.getAsLong()));
       } catch (RuntimeException ex) {
         log.debug("presence grace of {} failed, retried: {}", user, ex.toString());

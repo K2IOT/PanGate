@@ -93,4 +93,24 @@ class ChannelSubscriptionsTest {
     assertThat(sent).hasSize(3).allSatisfy(r ->
         assertThat(r.getControl().getUnsubscribe().getTopicsList()).containsExactly("chat:chan:" + c));
   }
+
+  /** Review 2026-11-19 (F6): the channels a user has open are recorded for the channel notifier. */
+  @Test
+  void openChannelsAreRecorded() throws Exception {
+    FakePresence opens = new FakePresence();
+    ChannelSubscriptions tracked = new ChannelSubscriptions(stores, stores, r -> CompletableFuture.completedFuture(
+        PushResponse.newBuilder().setRequestId(r.getRequestId()).setCode(PushResponse.Code.CODE_OK).setOk(true)
+            .build()), x -> { }, opens);
+    String c = conv(ConversationKind.CONVERSATION_KIND_CHANNEL, true);
+    String priv = conv(ConversationKind.CONVERSATION_KIND_CHANNEL, false);
+    assertThat(tracked.open("fan", c)).isEmpty();
+    assertThat(tracked.open("fan", priv)).isPresent();
+    assertThat(opens.haveOpen(c, List.of("fan"))).containsExactly("fan");
+    assertThat(opens.haveOpen(priv, List.of("fan"))).as("a refused open records nothing").isEmpty();
+    tracked.close("fan", c);
+    assertThat(opens.haveOpen(c, List.of("fan"))).isEmpty();
+    assertThat(tracked.open("fan", c)).isEmpty();
+    tracked.revoke("fan", c).get();
+    assertThat(opens.haveOpen(c, List.of("fan"))).as("left the channel").isEmpty();
+  }
 }

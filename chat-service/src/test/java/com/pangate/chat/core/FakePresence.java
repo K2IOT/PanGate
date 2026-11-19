@@ -113,4 +113,31 @@ public final class FakePresence implements PresenceState {
   @Override public void cancelGrace(String userId) {
     graces.remove(userId);
   }
+
+  public final Map<String, Set<String>> open = new ConcurrentHashMap<>();
+
+  @Override public void channelOpened(String userId, String convId) {
+    open.computeIfAbsent(userId, k -> ConcurrentHashMap.newKeySet()).add(convId);
+  }
+
+  @Override public void channelClosed(String userId, String convId) {
+    open.computeIfPresent(userId, (k, v) -> {
+      v.remove(convId);
+      return v;
+    });
+  }
+
+  @Override public void clearOpenChannels(String userId) {
+    open.remove(userId);
+  }
+
+  @Override public Set<String> haveOpen(String convId, java.util.Collection<String> userIds) {
+    Set<String> out = new HashSet<>();
+    for (String u : userIds) {
+      if (open.getOrDefault(u, Set.of()).contains(convId)) {
+        out.add(u);
+      }
+    }
+    return out;
+  }
 }

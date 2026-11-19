@@ -203,6 +203,56 @@ public final class RedisPresence implements PresenceState, com.pangate.chat.core
     return call(r -> r.zrem("presgrace", userId) == 1);
   }
 
+  // --- review 2026-11-19 (F6): open channels, chanopen:<user> = conv ids, kept a day after the last open ---------
+
+  @Override
+  public void channelOpened(String userId, String convId) {
+    call(r -> {
+      r.sadd("chanopen:" + userId, convId);
+      return r.expire("chanopen:" + userId, SET_TTL);
+    });
+  }
+
+  @Override
+  public void channelClosed(String userId, String convId) {
+    call(r -> r.srem("chanopen:" + userId, convId));
+  }
+
+  @Override
+  public void clearOpenChannels(String userId) {
+    call(r -> r.del("chanopen:" + userId));
+  }
+
+  /** One SISMEMBER per user, all written before any answer is awaited (pipelined like {@link #onlineOf}). */
+  @Override
+  public java.util.Set<String> haveOpen(String convId, java.util.Collection<String> userIds) {
+    if (userIds.isEmpty()) {
+      return java.util.Set.of();
+    }
+    return call(r -> {
+      var async = conn.async();
+      List<String> ids = List.copyOf(userIds);
+      List<io.lettuce.core.RedisFuture<Boolean>> answers = new java.util.ArrayList<>(ids.size());
+      for (String u : ids) {
+        answers.add(async.sismember("chanopen:" + u, convId));
+      }
+      java.util.Set<String> out = new java.util.HashSet<>();
+      for (int i = 0; i < ids.size(); i++) {
+        try {
+          if (Boolean.TRUE.equals(answers.get(i).get(5, java.util.concurrent.TimeUnit.SECONDS))) {
+            out.add(ids.get(i));
+          }
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          throw new StoreUnavailableException("redis: interrupted", e);
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
+          throw new StoreUnavailableException("redis: " + e, e);
+        }
+      }
+      return out;
+    });
+  }
+
   @Override
   public void cancelGrace(String userId) {
     call(r -> r.zrem("presgrace", userId));

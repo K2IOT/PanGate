@@ -179,4 +179,16 @@ class PresenceTrackerTest {
     assertThat(state.online("a")).isFalse();
     assertThat(out).extracting(PresenceTracker.Transition::online).containsExactly(true, false);
   }
+
+  /** Review 2026-11-19 (F6): going offline ends every channel subscription, so none stays recorded as open. */
+  @Test
+  void goingOfflineForgetsOpenChannels() {
+    tracker.on(ev(EventType.EVENT_TYPE_CONNECTED, "a", "n1", "c1"));
+    state.channelOpened("a", "ch1");
+    tracker.on(ev(EventType.EVENT_TYPE_DISCONNECTED, "a", "n1", "c1"));
+    at(1_002_000);
+    assertThat(state.haveOpen("ch1", List.of("a"))).as("inside the grace: kept").containsExactly("a");
+    at(1_005_000);
+    assertThat(state.haveOpen("ch1", List.of("a"))).isEmpty();
+  }
 }

@@ -64,4 +64,18 @@ public interface PresenceState {
   boolean claimGrace(String userId);
 
   void cancelGrace(String userId);
+
+  // --- review 2026-11-19 (F6): channels a user has open ----------------------------------------------------------
+
+  /** {@code chat.channel.open}: the user's connections get this channel's posts live. */
+  void channelOpened(String userId, String convId);
+
+  /** {@code chat.channel.close}, or the server ended the subscription (left the channel). */
+  void channelClosed(String userId, String convId);
+
+  /** The user went offline: every subscription ended with their connections. */
+  void clearOpenChannels(String userId);
+
+  /** Of {@code userIds}, those with {@code convId} open. */
+  java.util.Set<String> haveOpen(String convId, java.util.Collection<String> userIds);
 }

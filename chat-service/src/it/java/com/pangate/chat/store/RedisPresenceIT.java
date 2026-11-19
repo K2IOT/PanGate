@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.pangate.chat.config.ChatProperties;
 import io.lettuce.core.RedisClient;
 import java.time.Duration;
+import java.util.List;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -113,5 +114,19 @@ class RedisPresenceIT {
       }
     }
     assertThat(presence.onlineOf(page)).isEqualTo(on);
+  }
+
+  /** Review 2026-11-19 (F6): open channels per user, read for a page of users in one pipelined round. */
+  @Test
+  void openChannels() {
+    presence.channelOpened("o1", "chA");
+    presence.channelOpened("o1", "chB");
+    presence.channelOpened("o2", "chA");
+    assertThat(presence.haveOpen("chA", List.of("o1", "o2", "o3"))).containsExactlyInAnyOrder("o1", "o2");
+    presence.channelClosed("o1", "chA");
+    assertThat(presence.haveOpen("chA", List.of("o1", "o2"))).containsExactly("o2");
+    presence.clearOpenChannels("o1");
+    assertThat(presence.haveOpen("chB", List.of("o1"))).isEmpty();
+    assertThat(presence.haveOpen("chA", List.of())).isEmpty();
   }
 }
