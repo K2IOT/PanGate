@@ -162,4 +162,21 @@ class PresenceTrackerTest {
     assertThat(state.online("a")).isFalse();
     assertThat(out).isEmpty();
   }
+
+  /**
+   * Review 2026-11-19 (F5): a disconnect whose store write failed is not marked handled, so its retry applies it
+   * instead of leaving a ghost connection that keeps the user online.
+   */
+  @Test
+  void aDisconnectThatFailedIsAppliedWhenRetried() {
+    tracker.on(ev(EventType.EVENT_TYPE_CONNECTED, "a", "n1", "c1"));
+    ConnectionEvent bye = ev(EventType.EVENT_TYPE_DISCONNECTED, "a", "n1", "c1");
+    state.failRemoves = 1;
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> tracker.on(bye))
+        .isInstanceOf(StoreUnavailableException.class);
+    tracker.on(bye);
+    at(1_005_000);
+    assertThat(state.online("a")).isFalse();
+    assertThat(out).extracting(PresenceTracker.Transition::online).containsExactly(true, false);
+  }
 }

@@ -5,7 +5,6 @@ import com.pangate.chat.core.PresenceState;
 import com.pangate.chat.core.StoreUnavailableException;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
-import io.lettuce.core.SetArgs;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.sync.RedisCommands;
 import java.time.Duration;
@@ -152,8 +151,13 @@ public final class RedisPresence implements PresenceState, com.pangate.chat.core
   }
 
   @Override
-  public boolean seen(String eventId) {
-    return call(r -> r.set("presev:" + eventId, "1", SetArgs.Builder.nx().ex(EVENT_TTL)) == null);
+  public boolean handled(String eventId) {
+    return call(r -> r.exists("presev:" + eventId) > 0);
+  }
+
+  @Override
+  public void markHandled(String eventId) {
+    call(r -> r.setex("presev:" + eventId, EVENT_TTL.toSeconds(), "1"));
   }
 
   @Override

@@ -34,8 +34,14 @@ public interface PresenceState {
     return out;
   }
 
-  /** True when this event id was handled before (dedup, kept 1 h); marks it handled otherwise. */
-  boolean seen(String eventId);
+  /** True when this event id was handled before (dedup, kept 1 h). */
+  boolean handled(String eventId);
+
+  /**
+   * Review 2026-11-19 (F5): marks the event handled; called only after it was applied, so an event whose write
+   * failed is applied again when it is read again.
+   */
+  void markHandled(String eventId);
 
   /** The user's last connection closed at {@code atMs}; offline once the grace ends. */
   void markGone(String userId, long atMs);

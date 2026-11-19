@@ -37,10 +37,18 @@ public final class PresenceTracker {
     this.graceMs = grace.toMillis();
   }
 
+  /** Applies the event, then marks it handled; a store failure throws and the event is to be applied again. */
   public void on(ConnectionEvent e) {
-    if (!e.getEventId().isEmpty() && state.seen(e.getEventId())) {
+    if (!e.getEventId().isEmpty() && state.handled(e.getEventId())) {
       return;
     }
+    apply(e);
+    if (!e.getEventId().isEmpty()) {
+      state.markHandled(e.getEventId());
+    }
+  }
+
+  private void apply(ConnectionEvent e) {
     long at = e.getAtMs() > 0 ? e.getAtMs() : wallMs.getAsLong();
     if (e.getType() == EventType.EVENT_TYPE_NODE_DOWN) {
       for (String user : state.dropNode(e.getNodeId(), e.getEpoch())) {

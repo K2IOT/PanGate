@@ -20,6 +20,8 @@ public final class FakePresence implements PresenceState {
   public final Set<String> deadNodes = ConcurrentHashMap.newKeySet();
   /** Fail this many putLastSeen calls. */
   public volatile int failLastSeenWrites;
+  /** Fail this many remove calls (a Redis timeout on a disconnect). */
+  public volatile int failRemoves;
 
   @Override public synchronized boolean add(String userId, String node, long epoch, String connId) {
     if (deadNodes.contains(node + ":" + epoch)) {
@@ -33,6 +35,10 @@ public final class FakePresence implements PresenceState {
   }
 
   @Override public synchronized boolean remove(String userId, String node, long epoch, String connId) {
+    if (failRemoves > 0) {
+      failRemoves--;
+      throw new StoreUnavailableException("redis: timeout", null);
+    }
     Set<String> s = conns.getOrDefault(userId, new HashSet<>());
     boolean removed = s.remove(node + "/" + connId);
     byNode.getOrDefault(node + ":" + epoch, new HashSet<>()).remove(userId + "/" + connId);
@@ -58,8 +64,12 @@ public final class FakePresence implements PresenceState {
     return !conns.getOrDefault(userId, Set.of()).isEmpty();
   }
 
-  @Override public boolean seen(String eventId) {
-    return !events.add(eventId);
+  @Override public boolean handled(String eventId) {
+    return events.contains(eventId);
+  }
+
+  @Override public void markHandled(String eventId) {
+    events.add(eventId);
   }
 
   @Override public void markGone(String userId, long atMs) {

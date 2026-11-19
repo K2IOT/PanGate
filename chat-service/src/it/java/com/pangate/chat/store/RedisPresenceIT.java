@@ -59,8 +59,9 @@ class RedisPresenceIT {
 
   @Test
   void eventsGraceAndLastSeen() {
-    assertThat(presence.seen("e1")).isFalse();
-    assertThat(presence.seen("e1")).isTrue();
+    assertThat(presence.handled("e1")).isFalse();
+    presence.markHandled("e1");
+    assertThat(presence.handled("e1")).isTrue();
     presence.markGone("z1", 42);
     assertThat(presence.gone("z1")).hasValue(42);
     presence.clearGone("z1");
