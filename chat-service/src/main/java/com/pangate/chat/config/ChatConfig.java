@@ -128,10 +128,13 @@ public class ChatConfig {
         }, watch, r -> {
           if (r.equals("unavailable")) {
             meters.counter("chat.presence.unavailable").increment();
+          } else if (r.equals("rate_limited")) {
+            meters.counter("chat.presence.rate_limited").increment();
           } else {
             watchers.add(r);
           }
-        });
+        }, new com.pangate.chat.core.TokenBucketLimiter(p.state().watchRate(), p.state().watchBurst(),
+            System::nanoTime));
   }
 
   /** chat.presence.watchers: watch calls this pod took in the last watch TTL (an estimate, spec §9). */

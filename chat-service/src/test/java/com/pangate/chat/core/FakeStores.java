@@ -336,7 +336,9 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
   }
 
   static String dk(String c, String s, String k) { return c + "|" + s + "|" + k; }
+  public final java.util.concurrent.atomic.AtomicInteger findCalls = new java.util.concurrent.atomic.AtomicInteger();
   @Override public Optional<StoredMessage> find(String c, String s, String k) {
+    findCalls.incrementAndGet();
     check();
     return Optional.ofNullable(dedup.get(dk(c, s, k)));
   }

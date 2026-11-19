@@ -79,6 +79,7 @@ class RedisBadgesIT {
     assertThat(badges.totalWith("s1", null, 0, NOW)).isEqualTo(3);
     assertThat(badges.totalWith("s1", "C", 6, NOW)).as("the notified message counts").isEqualTo(5);
     assertThat(badges.totalWith("s1", "D", 1, NOW)).as("a conversation not seen yet").isEqualTo(6);
+    assertThat(hget("s1", "D")).as("counted, not kept").isNull();
   }
 
   @Test
@@ -86,7 +87,7 @@ class RedisBadgesIT {
     badges.rebuild("g1", List.of(new BadgeRow("A", 10, 2), new BadgeRow("B", 5, 5)), NOW);
     badges.rebuild("g1", List.of(new BadgeRow("A", 8, 4), new BadgeRow("C", 3, 0)), NOW + 5);
     assertThat(hget("g1", "A")).isEqualTo("10:4");
-    assertThat(hget("g1", "B")).isNull();
+    assertThat(hget("g1", "B")).as("not in the inbox: left").isEqualTo("L");
     assertThat(hget("g1", "C")).isEqualTo("3:0");
     assertThat(hget("g1", "_total")).isEqualTo("9");
     assertThat(hget("g1", "_built_at")).isEqualTo(Long.toString(NOW + 5));
@@ -99,6 +100,25 @@ class RedisBadgesIT {
     assertThat(badges.totalWith("d1", null, 0, NOW)).isEqualTo(4);
     badges.drop("d1", "A");
     assertThat(badges.totalWith("d1", null, 0, NOW)).isEqualTo(4);
+  }
+
+  /** Final review I1: a left conversation keeps a mark that raises ignore until the user joins again. */
+  @Test
+  void leftConversationIgnoresRaisesUntilJoin() {
+    badges.rebuild("j1", List.of(new BadgeRow("A", 10, 10)), NOW);
+    badges.drop("j1", "A");
+    assertThat(hget("j1", "A")).isEqualTo("L");
+    badges.raise("j1", "A", 5000, 0);
+    badges.raiseAll(List.of("j1"), "A", 5001);
+    assertThat(badges.totalWith("j1", "A", 5002, NOW)).isZero();
+    badges.join("j1", "A", 6000);
+    assertThat(hget("j1", "A")).isEqualTo("6000:6000");
+    badges.raiseAll(List.of("j1"), "A", 6001);
+    assertThat(badges.totalWith("j1", null, 0, NOW)).isEqualTo(1);
+    badges.rebuild("j1", List.of(new BadgeRow("A", 6001, 6000)), NOW);
+    assertThat(badges.totalWith("j1", null, 0, NOW)).isEqualTo(1);
+    badges.join("missing", "A", 1);
+    assertThat(exists("missing")).isZero();
   }
 
   @Test

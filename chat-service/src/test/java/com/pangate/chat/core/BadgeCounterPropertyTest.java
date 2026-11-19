@@ -47,12 +47,14 @@ class BadgeCounterPropertyTest {
       convs.add(id);
     }
     List<Sent> history = new ArrayList<>();
+    // user|conv left while their counters existed: a fan-out holding the old member list may still raise them
+    java.util.Set<String> justLeft = new java.util.HashSet<>();
     for (int step = 0; step < 300; step++) {
       String conv = convs.get(rnd.nextInt(convs.size()));
       boolean channel = conv.equals(convs.get(0));
       Map<String, Member> ms = s.members.getOrDefault(conv, Map.of());
       String user = USERS.get(rnd.nextInt(USERS.size()));
-      switch (rnd.nextInt(7)) {
+      switch (rnd.nextInt(9)) {
         case 0, 1 -> {   // a new message
           if (!ms.isEmpty()) {
             String sender = new ArrayList<>(ms.keySet()).get(rnd.nextInt(ms.size()));
@@ -81,8 +83,9 @@ class BadgeCounterPropertyTest {
           if (!ms.containsKey(user) && !conv.equals(convs.get(1))) {
             long last = s.lastSeq.getOrDefault(conv, 0L);
             s.add(conv, new Member(user, Role.MEMBER));
-            if (!channel && last > 0) {
-              b.raise(user, conv, last, last);
+            justLeft.remove(user + "|" + conv);
+            if (!channel) {
+              b.join(user, conv, last);
             }
           }
         }
@@ -90,9 +93,23 @@ class BadgeCounterPropertyTest {
           if (ms.containsKey(user) && !conv.equals(convs.get(1))) {
             s.remove(conv, user);
             b.drop(user, conv);
+            justLeft.add(user + "|" + conv);
           }
         }
-        default -> c.lose(user);   // Redis lost the hash
+        case 6 -> {   // Redis lost the hash (and with it what the user left)
+          c.lose(user);
+          justLeft.removeIf(k -> k.startsWith(user + "|"));
+        }
+        case 7 -> {   // final review I1: a fan-out that loaded the members before this user left
+          if (justLeft.contains(user + "|" + conv) && s.lastSeq.getOrDefault(conv, 0L) > 0) {
+            b.raiseAll(List.of(user), conv, s.lastSeq.get(conv));
+          }
+        }
+        default -> {   // final review I1: a notification of a conversation the user is no longer in
+          if (!ms.containsKey(user) && !channel && s.lastSeq.getOrDefault(conv, 0L) > 0) {
+            b.total(user, conv, s.lastSeq.get(conv));
+          }
+        }
       }
       for (String u : USERS) {
         assertThat(b.total(u, null, 0)).as("step %d user %s", step, u).isEqualTo(expected(s, u));

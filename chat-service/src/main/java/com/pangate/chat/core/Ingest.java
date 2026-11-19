@@ -55,7 +55,28 @@ public final class Ingest {
   }
 
   public Optional<Rejection> accept(SendInput in) {
-    Optional<Rejection> r = check(in);
+    return accept(in, false);
+  }
+
+  /**
+   * Final review I3 (perf 3a §3.2): takes one of the user's send tokens, for a caller that must read a store before
+   * {@link #acceptAdmitted} (the HTTP send's prior-send lookup). False is counted as {@code rate_limited}.
+   */
+  public boolean admit(String senderId) {
+    if (perUser.tryAcquire(senderId)) {
+      return true;
+    }
+    onRejected.accept(Rejection.RATE_LIMITED);
+    return false;
+  }
+
+  /** {@link #accept} for a send whose user token {@link #admit} already took. */
+  public Optional<Rejection> acceptAdmitted(SendInput in) {
+    return accept(in, true);
+  }
+
+  private Optional<Rejection> accept(SendInput in, boolean admitted) {
+    Optional<Rejection> r = check(in, admitted);
     if (r.isPresent()) {
       onRejected.accept(r.get().reason());
       return r;
@@ -66,7 +87,7 @@ public final class Ingest {
     return Optional.empty();
   }
 
-  private Optional<Rejection> check(SendInput in) {
+  private Optional<Rejection> check(SendInput in, boolean admitted) {
     if (in.senderId() == null || in.senderId().isEmpty()) {
       return Optional.of(new Rejection(Rejection.INVALID, "sender is not a chat user"));
     }
@@ -75,7 +96,7 @@ public final class Ingest {
       return invalid;
     }
     // perf 3a (spec §3.2): the user's limit before any lookup, so a stranger's sends cost no store reads
-    if (!perUser.tryAcquire(in.senderId())) {
+    if (!admitted && !perUser.tryAcquire(in.senderId())) {
       return Optional.of(new Rejection(Rejection.RATE_LIMITED, "too many messages from this user"));
     }
     String convId = in.send().getConversationId();

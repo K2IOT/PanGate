@@ -14,6 +14,9 @@ public interface BadgeUpdates {
   /** A new message {@code last} for each of {@code users} (the sender is raised on their own). */
   void raiseAll(List<String> users, String convId, long last);
 
+  /** The user joined at {@code last} (perf 3a final review I1: also after leaving it before). */
+  void join(String user, String convId, long last);
+
   /** The user left the conversation. */
   void drop(String user, String convId);
 
@@ -23,6 +26,9 @@ public interface BadgeUpdates {
 
     @Override
     public void raiseAll(List<String> users, String convId, long last) {}
+
+    @Override
+    public void join(String user, String convId, long last) {}
 
     @Override
     public void drop(String user, String convId) {}

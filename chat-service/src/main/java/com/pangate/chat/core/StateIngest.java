@@ -17,6 +17,8 @@ public final class StateIngest implements StateCommands {
   private final PresenceWatch watch;
   private final java.util.function.Consumer<String> onWatch;
 
+  private final TokenBucketLimiter watchLimit;
+
   public StateIngest(MarkValidator marks, MarkSink sink) {
     this(marks, sink, System::currentTimeMillis, null, r -> { });
   }
@@ -30,6 +32,14 @@ public final class StateIngest implements StateCommands {
   /** {@code watch} may be null; {@code onWatch} counts {@code kept} entries or {@code unavailable}. */
   public StateIngest(MarkValidator marks, MarkSink sink, LongSupplier wallMs, TypingRelay typing,
       java.util.function.Consumer<String> onTyping, PresenceWatch watch, java.util.function.Consumer<String> onWatch) {
+    this(marks, sink, wallMs, typing, onTyping, watch, onWatch, new TokenBucketLimiter(1, 5, System::nanoTime));
+  }
+
+  /** Final review I4 (perf 3a): {@code watchLimit} per user before a watch reads any store ({@code rate_limited}). */
+  public StateIngest(MarkValidator marks, MarkSink sink, LongSupplier wallMs, TypingRelay typing,
+      java.util.function.Consumer<String> onTyping, PresenceWatch watch, java.util.function.Consumer<String> onWatch,
+      TokenBucketLimiter watchLimit) {
+    this.watchLimit = watchLimit;
     this.watch = watch;
     this.onWatch = onWatch;
     this.marks = marks;
@@ -79,6 +89,10 @@ public final class StateIngest implements StateCommands {
   public String watch(String userId, String deviceId, com.pangate.contracts.v1.PresenceWatch w) {
     if (watch == null) {
       return "ignored";
+    }
+    if (!watchLimit.tryAcquire(userId)) {
+      onWatch.accept("rate_limited");
+      return "rejected";
     }
     try {
       watch.watch(userId, deviceId, w);

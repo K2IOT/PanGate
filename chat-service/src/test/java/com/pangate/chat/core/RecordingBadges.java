@@ -27,6 +27,11 @@ public final class RecordingBadges implements BadgeUpdates {
   }
 
   @Override
+  public void join(String user, String convId, long last) {
+    add("join " + user + " " + convId + " " + last);
+  }
+
+  @Override
   public void drop(String user, String convId) {
     add("drop " + user + " " + convId);
   }

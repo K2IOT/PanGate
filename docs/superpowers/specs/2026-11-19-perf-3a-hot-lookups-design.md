@@ -116,3 +116,14 @@ Tên lớp và phương thức; vị trí script Lua (resource); cách tiêm cá
 - `PresenceWatch` / `PresenceFanOut` đã không bao giờ tải danh sách kênh (kiểm loại trước); đổi sang đọc ScyllaDB từng người sẽ *tốn hơn* danh sách có cache. Giữ danh sách, chỉ bỏ tra trùng trong một lệnh watch.
 - Worker biên nhận với kênh: tra từng người trong mỗi lần flush (hàng nghìn lần đọc mỗi 2 s, một luồng) tệ hơn bỏ hẳn việc tra lại; thành viên đã được kiểm lúc nhận lệnh.
 - Thêm ước lượng bộ nhớ Redis của badge và ghi rõ giới hạn tần suất là theo pod.
+
+## 8. Sau review cuối (2026-11-19)
+
+Reviewer độc lập đọc toàn bộ nhánh: 0 Critical, 4 Important (đã sửa, mỗi sửa có test fail trước), 5 Minor (để lại).
+- **I1:** `raise` lên một field chưa có ghi cả lịch sử (`seq:0`). Một người vừa bị xoá mà thông báo offline hay fan-out trễ tới sau `drop` sẽ có badge tăng thêm cả lịch sử hội thoại, kéo dài tới 24 giờ. Nay `drop` để lại dấu `L` (đã rời): `raise` bỏ qua, chỉ `join` (thêm vào nhóm) xoá dấu; dựng lại đánh dấu `L` cho hội thoại không còn trong inbox. Lần đọc thông báo với hội thoại chưa có field chỉ tính tạm +1, không ghi (fan-out tạo field). Còn lại: người rời khi hash đang mất, rồi hash được dựng lại, rồi một fan-out trễ tới: field được tạo lại tới lần dựng lại sau.
+- **I2:** Redis sập làm mỗi tin chờ tới 5 s (và mỗi người đọc 400 ms) trong vòng fan-out / biên nhận. Nay chờ pipeline tối đa `chat.redis.timeout`; sau một lỗi, badge không gọi Redis trong 5 s (đọc thì quét inbox), nhớ những người lỡ ghi (tối đa 100 000) và xoá hash của họ khi Redis trả lời lại.
+- **I3:** gửi tin qua HTTP đọc kết quả gửi trước (Redis, rồi ScyllaDB) trước giới hạn: nay lấy lượt của người dùng trước.
+- **I4:** lệnh theo dõi online không có giới hạn: nay 1/s, burst 5 mỗi người (`chat.state.watch-rate`, `watch-burst`), trước mọi lần tra.
+
+Để lại: dựng lại có thể bỏ lỡ một lần ghi chen giữa lúc đọc ảnh chụp (M1); `join` dùng `lastSeq` đọc trước khi chèn thành viên (M2); `EVAL` gửi cả script mỗi lần, nên dùng `EVALSHA` (M3); mặc định `chat.limits.api` lặp hai nơi, chưa có test bind (M4); một lỗi `raiseAll` quên hash của mọi người nhận (M5).
+

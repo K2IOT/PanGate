@@ -27,17 +27,21 @@ public final class RedisBadges implements ChatStores.BadgeStore, AutoCloseable {
 
   static final Duration TTL = Duration.ofDays(30);
   static final long RECONNECT_MS = 1_000;
-  static final long WAIT_SECONDS = 5;
 
-  /** Shared Lua: parse a field, and raise one conversation (KEYS[1]) by the max of each part, adjusting the total. */
+  /**
+   * Shared Lua: parse a field, and raise one conversation (KEYS[1]) by the max of each part, adjusting the total. A
+   * field {@code L} is a conversation the user left (final review I1): raises leave it alone, only a join clears it.
+   */
   private static final String LIB = """
       local function parse(v)
-        if not v then return 0, 0 end
+        if not v or v == 'L' then return 0, 0 end
         local i = string.find(v, ':', 1, true)
         return tonumber(string.sub(v, 1, i - 1)), tonumber(string.sub(v, i + 1))
       end
       local function raise(key, conv, last, read)
-        local l, r = parse(redis.call('HGET', key, conv))
+        local cur = redis.call('HGET', key, conv)
+        if cur == 'L' then return end
+        local l, r = parse(cur)
         local nl = math.max(l, last)
         local nr = math.max(r, read)
         if nl ~= l or nr ~= r or l == 0 then
@@ -62,27 +66,42 @@ public final class RedisBadges implements ChatStores.BadgeStore, AutoCloseable {
   static final String TOTAL = LIB + """
       local b = redis.call('HGET', KEYS[1], '_built_at')
       if not b or tonumber(b) < tonumber(ARGV[3]) then return -1 end
-      if ARGV[1] ~= '' then
-        raise(KEYS[1], ARGV[1], tonumber(ARGV[2]), 0)
-        redis.call('PEXPIRE', KEYS[1], ARGV[4])
+      local total = tonumber(redis.call('HGET', KEYS[1], '_total') or '0')
+      if ARGV[1] == '' then return total end
+      local cur = redis.call('HGET', KEYS[1], ARGV[1])
+      if cur == 'L' then return total end
+      if not cur then
+        if tonumber(ARGV[2]) > 0 then return total + 1 end
+        return total
       end
+      raise(KEYS[1], ARGV[1], tonumber(ARGV[2]), 0)
+      redis.call('PEXPIRE', KEYS[1], ARGV[4])
       return tonumber(redis.call('HGET', KEYS[1], '_total') or '0')
       """;
 
-  /** ARGV: conv, ttlMs. */
+  /** ARGV: conv, last, ttlMs. Nothing when the hash is missing; a left mark is cleared first. */
+  static final String JOIN = LIB + """
+      if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+      if redis.call('HGET', KEYS[1], ARGV[1]) == 'L' then redis.call('HDEL', KEYS[1], ARGV[1]) end
+      raise(KEYS[1], ARGV[1], tonumber(ARGV[2]), tonumber(ARGV[2]))
+      redis.call('PEXPIRE', KEYS[1], ARGV[3])
+      return 0
+      """;
+
+  /** ARGV: conv, ttlMs. The field becomes a left mark (final review I1). */
   static final String DROP = LIB + """
-      local v = redis.call('HGET', KEYS[1], ARGV[1])
-      if not v then return 0 end
-      local l, r = parse(v)
-      redis.call('HDEL', KEYS[1], ARGV[1])
+      if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+      local l, r = parse(redis.call('HGET', KEYS[1], ARGV[1]))
+      redis.call('HSET', KEYS[1], ARGV[1], 'L')
       redis.call('HINCRBY', KEYS[1], '_total', string.format('%d', -math.max(0, l - r)))
       redis.call('PEXPIRE', KEYS[1], ARGV[2])
       return 0
       """;
 
   /**
-   * ARGV: nowMs, ttlMs, then (conv, last, read) per inbox row. Each row is merged by max, fields of conversations no
-   * longer in the inbox are removed, the total is counted again. ARGV is walked, never unpacked (10 000 rows).
+   * ARGV: nowMs, ttlMs, then (conv, last, read) per inbox row. Each row is merged by max (a left mark counts as
+   * nothing), fields of conversations no longer in the inbox become left marks, the total is counted again. ARGV is
+   * walked, never unpacked (10 000 rows).
    */
   static final String REBUILD = LIB + """
       local keep = {}
@@ -100,8 +119,8 @@ public final class RedisBadges implements ChatStores.BadgeStore, AutoCloseable {
           if keep[f] then
             local l, r = parse(all[i + 1])
             total = total + math.max(0, l - r)
-          else
-            redis.call('HDEL', KEYS[1], f)
+          elseif all[i + 1] ~= 'L' then
+            redis.call('HSET', KEYS[1], f, 'L')
           end
         end
       end
@@ -111,6 +130,7 @@ public final class RedisBadges implements ChatStores.BadgeStore, AutoCloseable {
       """;
 
   private final RedisClient client;
+  private final Duration timeout;
   private volatile StatefulRedisConnection<String, String> conn;
   private volatile long nextConnectAt;
 
@@ -118,6 +138,7 @@ public final class RedisBadges implements ChatStores.BadgeStore, AutoCloseable {
     RedisURI uri = RedisURI.create(cfg.uri());
     uri.setTimeout(cfg.timeout());
     this.client = RedisClient.create(uri);
+    this.timeout = cfg.timeout();
   }
 
   /** Lazily connected; a failed connect is retried at most once a second. */
@@ -200,7 +221,12 @@ public final class RedisBadges implements ChatStores.BadgeStore, AutoCloseable {
     } catch (RuntimeException e) {
       throw new StoreUnavailableException("redis: " + e.getMessage(), e);
     }
-    awaitAll(sent);
+    awaitAll(sent, timeout);
+  }
+
+  @Override
+  public void join(String user, String convId, long last) {
+    eval(JOIN, user, convId, Long.toString(last), ttl());
   }
 
   @Override
@@ -222,8 +248,9 @@ public final class RedisBadges implements ChatStores.BadgeStore, AutoCloseable {
     }
   }
 
-  private static void awaitAll(List<RedisFuture<Long>> sent) {
-    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(WAIT_SECONDS);
+  /** Final review I2: one Redis timeout for the whole pipeline, however many commands. */
+  private static void awaitAll(List<RedisFuture<Long>> sent, Duration timeout) {
+    long deadline = System.nanoTime() + timeout.toNanos();
     for (RedisFuture<Long> f : sent) {
       try {
         f.get(Math.max(1, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);

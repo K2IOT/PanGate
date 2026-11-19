@@ -280,21 +280,26 @@ public final class ChatStores {
   public interface BadgeStore {
     /**
      * -1 when the user has no counters or they were built before {@code builtAfterMs}; else counts message {@code seq}
-     * of {@code convId} (none when null) and answers the total, in one step.
+     * of {@code convId} (none when null) and answers the total, in one step. A conversation left is not counted; one
+     * not known yet counts the message alone and is not kept (fan-out creates it).
      */
     long totalWith(String user, String convId, long seq, long builtAfterMs);
 
     /**
      * Merges an inbox snapshot: each conversation's values become the max of both, conversations not in it are
-     * removed, the total is counted again and the build time set.
+     * marked left, the total is counted again and the build time set.
      */
     void rebuild(String user, List<BadgeRow> snapshot, long nowMs);
+
+    /** Joined at {@code last}: nothing before it is unread; clears a left mark. */
+    void join(String user, String convId, long last);
 
     void raise(String user, String convId, long last, long read);
 
     /** {@code raise(u, convId, last, 0)} for each user, all sent before any answer is awaited. */
     void raiseAll(List<String> users, String convId, long last);
 
+    /** Left: its unread leave the total and later raises of it are ignored until a join. */
     void drop(String user, String convId);
 
     /** Deletes these users' counters: the next read rebuilds them. */

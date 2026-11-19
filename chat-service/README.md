@@ -87,7 +87,7 @@ can run ahead of what is written for a moment: use it to see that something is n
 | `limits.api.*` | per user: `GET /v1/conversations` 5/s burst 20; `GET /v1/state`, `POST /v1/sync`, `GET /v1/presence` 2/s burst 10 each; history 20/s burst 50; management (create, DM, add / remove / leave, role, owner, join) one shared bucket 5/s burst 20; the rest (`GET /v1/conversations/{id}`, mute, privacy, receipts) one shared bucket 10/s burst 30 | perf 3a; per pod, so behind N pods a user may get up to N times these; `429 rate_limited`, checked before any store read |
 | `http.send-wait` | `3s` | |
 | `kafka.receipts-topic` | `chat.receipts` | |
-| `state.*` | marks 50/s burst 100, windows DM 500 ms / group 2 s, listed receipts ≤ 50, offline grace 5 s, watch TTL 5 m, ≤ 200 watch entries, typing every 2 s, typing 5/s burst 10 per user (`typing-rate`, `typing-burst`) | CH3; perf 3a |
+| `state.*` | marks 50/s burst 100, windows DM 500 ms / group 2 s, listed receipts ≤ 50, offline grace 5 s, watch TTL 5 m, ≤ 200 watch entries, typing every 2 s, typing 5/s burst 10 per user (`typing-rate`, `typing-burst`), presence watch 1/s burst 5 per user (`watch-rate`, `watch-burst`) | CH3; perf 3a |
 
 ## Metrics
 
@@ -124,8 +124,9 @@ spec's §3.5 table, the badge (every unread message of the DMs and groups not le
 
 The badge (perf 3a) is a counter per user in Redis, `badge:{user}`: one field `<last>:<read>` per DM / group, `_total`,
 `_built_at`; TTL 30 days. Fan-out, the receipt worker and joins / leaves raise it (each part only ever grows, so a
-redelivery changes nothing) after their ScyllaDB write; a write to a missing hash does nothing and a failed write
-deletes the hash. A notification reads it in one script; missing or older than 24 h, it is rebuilt by merging the
+redelivery changes nothing) after their ScyllaDB write; a write to a missing hash does nothing. Leaving marks the
+field `L` (raises ignore it until a join). After a Redis failure the counters are left alone for 5 s (badges are
+summed from the inbox) and the hashes that missed a write are deleted once Redis answers. A notification reads it in one script; missing or older than 24 h, it is rebuilt by merging the
 first 10 000 inbox rows (a user in more gets a lower number), and when Redis fails the inbox is summed as before. About
 30 bytes per conversation: 15 KB for a user in 500 conversations, about 15 GB for a million such users notified in
 30 days. Skipped:

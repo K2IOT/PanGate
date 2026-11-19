@@ -11,6 +11,9 @@ Design: `docs/superpowers/specs/2026-11-19-perf-3a-hot-lookups-design.md`.
   management API has one (`chat.limits.api.*`, `429 rate_limited`).
 - chat-service: the offline notification badge is a counter per user in Redis (`badge:{user}`), O(1) per
   notification, rebuilt from the inbox when missing or older than 24 h; Redis down → summed as before.
+- chat-service (final review): a conversation left keeps a mark so late raises do not count its history; a Redis
+  failure pauses the counters 5 s instead of slowing every message; HTTP sends and presence watches are limited
+  before any lookup.
 
 ### account-service
 - Registration limits per IP raised to 200 attempts and 50 accounts per hour (were 20 / 5): many users share one

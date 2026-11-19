@@ -55,11 +55,15 @@ public class SendController {
     }
     Caller caller = AuthFilter.caller(req);
     ChatSend send = toSend(conversationId, key, body);
+    // final review I3 (perf 3a §3.2): the user's limit before the prior-send lookup reads Redis / ScyllaDB
+    if (!ingest.admit(caller.userId())) {
+      throw new ChatHttpException(429, "rate_limited", "too many messages from this user");
+    }
     Optional<StoredMessage> done = prior.find(conversationId, caller.userId(), key);
     if (done.isPresent()) {
       return created(done.get());
     }
-    Optional<Rejection> r = ingest.accept(new SendInput(caller.userId(), caller.deviceId(), send, replyTo));
+    Optional<Rejection> r = ingest.acceptAdmitted(new SendInput(caller.userId(), caller.deviceId(), send, replyTo));
     if (r.isPresent()) {
       throw toHttp(r.get());
     }

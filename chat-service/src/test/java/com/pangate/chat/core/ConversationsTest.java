@@ -297,7 +297,7 @@ class ConversationsTest {
     stores.lastSeq.put(g.id(), 100L);
     b.onCall = call -> assertThat(stores.members.get(g.id())).containsKey("u3");
     c.addMember("u1", g.id(), "u3");
-    assertThat(b.calls).containsExactly("raise u3 " + g.id() + " 100 100");
+    assertThat(b.calls).containsExactly("join u3 " + g.id() + " 100");
   }
 
   @Test

@@ -72,18 +72,34 @@ class BadgeTest {
     badge.total("u", null, 0);
     assertThat(badge.total("u", "dm", 8)).isEqualTo(4);
     assertThat(badge.total("u", "new-dm", 1)).as("a DM created after the hash").isEqualTo(5);
+    assertThat(counters.hashes.get("u")).as("counted, not kept: fan-out creates the field").doesNotContainKey("new-dm");
   }
 
   @Test
   void joinAfterMessageCountsOne() {
     badge.total("u", null, 0);
     badge.raiseAll(java.util.List.of("u"), "g", 101);
-    badge.raise("u", "g", 100, 100);
+    badge.join("u", "g", 100);
     assertThat(badge.total("u", null, 0)).isEqualTo(1);
     badge.total("v", null, 0);
-    badge.raise("v", "g", 100, 100);
+    badge.join("v", "g", 100);
     badge.raiseAll(java.util.List.of("v"), "g", 101);
     assertThat(badge.total("v", null, 0)).isEqualTo(1);
+  }
+
+  /** Final review I1: after leaving, a late fan-out or notification of that conversation counts nothing. */
+  @Test
+  void leftConversationNeverCountsAgain() {
+    row("u", "dm", com.pangate.contracts.v1.ConversationKind.CONVERSATION_KIND_DIRECT, 7, 4);
+    row("u", "g", com.pangate.contracts.v1.ConversationKind.CONVERSATION_KIND_GROUP, 4999, 4999);
+    assertThat(badge.total("u", null, 0)).isEqualTo(3);
+    inbox.userConvs.get("u").remove("g");
+    badge.drop("u", "g");
+    badge.raiseAll(java.util.List.of("u"), "g", 5000);   // a fan-out that loaded the members before the removal
+    assertThat(badge.total("u", "g", 5000)).as("a notification handled after the removal").isEqualTo(3);
+    badge.join("u", "g", 6000);   // back in: counts again from the join
+    badge.raiseAll(java.util.List.of("u"), "g", 6001);
+    assertThat(badge.total("u", null, 0)).isEqualTo(4);
   }
 
   @Test
@@ -93,18 +109,34 @@ class BadgeTest {
     assertThat(badge.total("u", "dm", 9)).isEqualTo(5);
   }
 
+  /** Final review I2: a Redis failure pauses the counters for a while; the hashes written meanwhile are forgotten. */
   @Test
-  void failedWriteForgetsHash() {
+  void failedWriteForgetsHashOnceRedisAnswers() {
     badge.total("u", null, 0);
     counters.failNext = 1;
     badge.raise("u", "dm", 3, 0);
+    int calls = counters.calls.get();
+    badge.raise("v", "dm", 3, 0);
+    badge.raiseAll(java.util.List.of("w"), "dm", 4);
+    badge.drop("x", "dm");
+    assertThat(badge.total("u", "dm", 5)).as("paused: summed from the inbox").isEqualTo(1);
+    assertThat(counters.calls.get()).as("no Redis call while paused").isEqualTo(calls);
+    wall.addAndGet(Badge.PAUSE_MS + 1);
+    badge.raise("y", "dm", 1, 0);
+    assertThat(counters.forgotten).containsExactlyInAnyOrder("u", "v", "w", "x");
     assertThat(counters.hashes).doesNotContainKey("u");
-    assertThat(counters.forgotten).containsExactly("u");
+  }
+
+  @Test
+  void writesNeverThrowEvenWhenRedisIsDown() {
     badge.total("v", null, 0);
     counters.down = true;
-    badge.raise("v", "dm", 3, 0);   // the forget fails too: still nothing thrown
+    badge.raise("v", "dm", 3, 0);
     badge.drop("v", "dm");
+    badge.join("v", "dm", 3);
     badge.raiseAll(java.util.List.of("v"), "dm", 4);
+    wall.addAndGet(Badge.PAUSE_MS + 1);
+    badge.raise("v", "dm", 5, 0);
   }
 
   @Test
@@ -126,6 +158,6 @@ class BadgeTest {
     inbox.userConvs.get("u").remove("g");   // left; the drop was lost
     wall.addAndGet(24 * H + 1);
     assertThat(badge.total("u", null, 0)).isEqualTo(3);
-    assertThat(counters.hashes.get("u")).doesNotContainKey("g");
+    assertThat(counters.hashes.get("u")).containsEntry("g", "L");   // final review I1: left, raises ignored
   }
 }

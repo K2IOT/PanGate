@@ -18,10 +18,15 @@ public final class Badge implements BadgeUpdates {
   static final int MAX_CONVERSATIONS = 10_000;
   /** Spec §3.3: a write lost while the counters survived is repaired within a day. */
   static final long REBUILD_AFTER_MS = 24L * 3_600_000L;
+  /** Final review I2: after a Redis failure, how long the counters are left alone. */
+  static final long PAUSE_MS = 5_000;
+  static final int MAX_DIRTY = 100_000;
 
   private final ChatStores.MemberStore inbox;
   private final ChatStores.BadgeStore counters;
   private final LongSupplier wallMs;
+  private final java.util.Set<String> dirty = java.util.concurrent.ConcurrentHashMap.newKeySet();
+  private volatile long pausedUntil;
 
   /** Without counters: every badge sums the inbox. */
   public Badge(ChatStores.MemberStore inbox) {
@@ -43,7 +48,7 @@ public final class Badge implements BadgeUpdates {
    * the inbox rows only after its pushes, so the row may not hold this message yet: it counts as at least that seq.
    */
   public int total(String userId, String convId, long convSeq) {
-    if (counters != null) {
+    if (counters != null && usable()) {
       try {
         long now = wallMs.getAsLong();
         long t = counters.totalWith(userId, convId, convSeq, now - REBUILD_AFTER_MS);
@@ -54,8 +59,8 @@ public final class Badge implements BadgeUpdates {
         if (t >= 0) {
           return (int) Math.min(Integer.MAX_VALUE, t);
         }
-      } catch (StoreUnavailableException e) {
-        // the badge is secondary: sum the inbox
+      } catch (RuntimeException e) {
+        pause();   // the badge is secondary: sum the inbox
       }
     }
     return scan(userId, convId, convSeq);
@@ -94,46 +99,74 @@ public final class Badge implements BadgeUpdates {
 
   @Override
   public void raise(String user, String convId, long last, long read) {
-    if (counters == null) {
-      return;
-    }
-    try {
-      counters.raise(user, convId, last, read);
-    } catch (RuntimeException e) {
-      forget(List.of(user));
-    }
+    write(List.of(user), () -> counters.raise(user, convId, last, read));
   }
 
   @Override
   public void raiseAll(List<String> users, String convId, long last) {
-    if (counters == null || users.isEmpty()) {
-      return;
-    }
-    try {
-      counters.raiseAll(users, convId, last);
-    } catch (RuntimeException e) {
-      forget(users);
+    if (!users.isEmpty()) {
+      write(users, () -> counters.raiseAll(users, convId, last));
     }
   }
 
   @Override
+  public void join(String user, String convId, long last) {
+    write(List.of(user), () -> counters.join(user, convId, last));
+  }
+
+  @Override
   public void drop(String user, String convId) {
+    write(List.of(user), () -> counters.drop(user, convId));
+  }
+
+  /**
+   * Final review I2: the badge is secondary, so a Redis failure costs the hot loops one bounded wait, not one per
+   * call. After a failure nothing is sent to Redis for {@link #PAUSE_MS}: badges are summed from the inbox, and the
+   * users whose writes were lost are remembered (at most {@link #MAX_DIRTY}) and their counters deleted once Redis
+   * answers (spec §3.3: never trust a counter that missed a write).
+   */
+  private void write(List<String> users, Runnable op) {
     if (counters == null) {
       return;
     }
+    if (!usable()) {
+      lost(users);
+      return;
+    }
     try {
-      counters.drop(user, convId);
+      op.run();
     } catch (RuntimeException e) {
-      forget(List.of(user));
+      pause();
+      lost(users);
     }
   }
 
-  /** Spec §3.3: a failed write drops the counters, so the next read rebuilds them instead of trusting a wrong total. */
-  private void forget(Collection<String> users) {
-    try {
-      counters.forget(users);
-    } catch (RuntimeException e) {
-      // best effort: the 24 h rebuild repairs what survives
+  /** Whether Redis may be called now; first deletes the counters that missed writes while paused. */
+  private boolean usable() {
+    if (wallMs.getAsLong() < pausedUntil) {
+      return false;
     }
+    if (!dirty.isEmpty()) {
+      List<String> forget = List.copyOf(dirty);
+      try {
+        counters.forget(forget);
+        forget.forEach(dirty::remove);
+      } catch (RuntimeException e) {
+        pause();
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private void pause() {
+    pausedUntil = wallMs.getAsLong() + PAUSE_MS;
+  }
+
+  private void lost(Collection<String> users) {
+    if (dirty.size() + users.size() <= MAX_DIRTY) {
+      dirty.addAll(users);
+    }
+    // past the bound the 24 h rebuild repairs what is left (spec §3.3)
   }
 }

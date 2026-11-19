@@ -205,9 +205,9 @@ public final class Conversations {
       throw ChatRefusal.invalid("a group has at most " + limits.maxGroupMembers() + " members");
     }
     changeMembers(convId, () -> members.add(convId, new Member(userId, Role.MEMBER)));
-    if (c.kind() != ConversationKind.CONVERSATION_KIND_CHANNEL && c.lastSeq() > 0) {
+    if (c.kind() != ConversationKind.CONVERSATION_KIND_CHANNEL) {
       // perf 3a: the history before the join is not unread (F1), whichever of this and a new message lands first
-      badges.raise(userId, convId, c.lastSeq(), c.lastSeq());
+      badges.join(userId, convId, c.lastSeq());
     }
   }
 
