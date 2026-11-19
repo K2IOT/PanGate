@@ -133,7 +133,15 @@ public final class ChatStack implements AutoCloseable {
         "--chat.kafka.bootstrap=" + kafka.getBootstrapServers(), "--chat.scylla.contact-points=" + cp,
         "--chat.redis.uri=" + redisUri(), "--chat.auth.issuer=" + ISS,
         "--chat.auth.jwks-uri=http://127.0.0.1:" + jwks.getAddress().getPort() + "/jwks",
-        "--chat.push-api.target=127.0.0.1:" + pushGrpc, "--chat.push-api.plaintext=true"));
+        "--chat.push-api.target=127.0.0.1:" + pushGrpc, "--chat.push-api.plaintext=true",
+        // perf 3a: tests poll the API far faster than a client may; the limits have their own tests
+        "--chat.limits.api.list-rate=10000", "--chat.limits.api.list-burst=10000",
+        "--chat.limits.api.state-rate=10000", "--chat.limits.api.state-burst=10000",
+        "--chat.limits.api.sync-rate=10000", "--chat.limits.api.sync-burst=10000",
+        "--chat.limits.api.presence-rate=10000", "--chat.limits.api.presence-burst=10000",
+        "--chat.limits.api.history-rate=10000", "--chat.limits.api.history-burst=10000",
+        "--chat.limits.api.manage-rate=10000", "--chat.limits.api.manage-burst=10000",
+        "--chat.limits.api.other-rate=10000", "--chat.limits.api.other-burst=10000"));
     args.addAll(List.of(chatArgs));
     chat = new SpringApplicationBuilder(ChatApplication.class).properties(ChatApplication.CONFIG_NAME)
         .run(args.toArray(String[]::new));
