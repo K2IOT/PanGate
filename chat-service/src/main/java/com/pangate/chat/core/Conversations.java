@@ -21,6 +21,11 @@ import java.util.Set;
 public final class Conversations {
 
   static final int MAX_TITLE = 256;
+  /** Review 2026-11-19 (F7): others put in by one create. */
+  static final int MAX_CREATE_MEMBERS = 200;
+
+  /** A created group or channel and who was left out because their whoCanAdd is nobody. */
+  public record Created(Conversation conversation, List<String> notAdded) {}
   static final int MAX_USER_ID = 128;
 
   private final ChatStores.ConversationStore conversations;
@@ -29,6 +34,7 @@ public final class Conversations {
   private final ChatProperties.Limits limits;
   private final java.util.function.BiConsumer<String, String> leftChannel;
   private final UserDirectory users;
+  private final java.util.function.Function<String, ChatStores.Privacy> privacy;
 
   public Conversations(ChatStores.ConversationStore conversations, ChatStores.MemberStore members,
       MemberLookup lookup, ChatProperties.Limits limits) {
@@ -45,6 +51,14 @@ public final class Conversations {
   public Conversations(ChatStores.ConversationStore conversations, ChatStores.MemberStore members,
       MemberLookup lookup, ChatProperties.Limits limits, java.util.function.BiConsumer<String, String> leftChannel,
       UserDirectory users) {
+    this(conversations, members, lookup, limits, leftChannel, users, u -> ChatStores.Privacy.OPEN);
+  }
+
+  /** {@code privacy}: each user's settings read from the store, not a cache (F7: whoCanAdd). */
+  public Conversations(ChatStores.ConversationStore conversations, ChatStores.MemberStore members,
+      MemberLookup lookup, ChatProperties.Limits limits, java.util.function.BiConsumer<String, String> leftChannel,
+      UserDirectory users, java.util.function.Function<String, ChatStores.Privacy> privacy) {
+    this.privacy = privacy;
     this.users = users;
     this.conversations = conversations;
     this.members = members;
@@ -61,6 +75,12 @@ public final class Conversations {
 
   public Conversation create(String userId, ConversationKind kind, String title, List<String> memberIds,
       boolean isPublic) {
+    return createReporting(userId, kind, title, memberIds, isPublic).conversation();
+  }
+
+  /** Review 2026-11-19 (F7): at most 200 others; those whose whoCanAdd is nobody are left out and reported. */
+  public Created createReporting(String userId, ConversationKind kind, String title, List<String> memberIds,
+      boolean isPublic) {
     if (kind != ConversationKind.CONVERSATION_KIND_GROUP && kind != ConversationKind.CONVERSATION_KIND_CHANNEL) {
       throw ChatRefusal.invalid("kind must be group or channel");
     }
@@ -75,17 +95,22 @@ public final class Conversations {
         others.add(m);
       }
     }
+    if (others.size() > MAX_CREATE_MEMBERS) {
+      throw ChatRefusal.invalid("at most " + MAX_CREATE_MEMBERS + " members are added when creating");
+    }
     if (kind == ConversationKind.CONVERSATION_KIND_GROUP && others.size() + 1 > limits.maxGroupMembers()) {
       throw ChatRefusal.invalid("a group has at most " + limits.maxGroupMembers() + " members");
     }
     others.forEach(users::requireActive);
+    List<String> notAdded = others.stream().filter(m -> privacy.apply(m).refuseAdds()).toList();
+    notAdded.forEach(others::remove);
     List<Member> ms = new ArrayList<>();
     ms.add(new Member(userId, Role.OWNER));
     others.forEach(m -> ms.add(new Member(m, Role.MEMBER)));
     Conversation c = new Conversation(Ids.next(), kind, t, userId, 0,
         kind == ConversationKind.CONVERSATION_KIND_CHANNEL && isPublic, ms.size());
     conversations.create(c, ms);
-    return c;
+    return new Created(c, notAdded);
   }
 
   /** The pair's DM, created on first use; a dm_index entry left without its conversation is completed. */
@@ -141,6 +166,9 @@ public final class Conversations {
       return;
     }
     users.requireActive(userId);
+    if (privacy.apply(userId).refuseAdds()) {
+      throw new ChatRefusal(ChatRefusal.ADD_REFUSED, "this user does not let others add them");
+    }
     if (c.kind() == ConversationKind.CONVERSATION_KIND_GROUP
         && members.members(convId).size() + 1 > limits.maxGroupMembers()) {
       throw ChatRefusal.invalid("a group has at most " + limits.maxGroupMembers() + " members");

@@ -202,9 +202,11 @@ public class QueryController {
     }
     @SuppressWarnings("unchecked")
     List<String> memberIds = ids == null ? List.of() : (List<String>) ids;
-    Conversation c = conversations.create(userId(req), kind(body.get("kind")), (String) title, memberIds,
-        Boolean.TRUE.equals(pub));
-    return ResponseEntity.status(201).body(conversation(c));
+    com.pangate.chat.core.Conversations.Created made = conversations.createReporting(userId(req),
+        kind(body.get("kind")), (String) title, memberIds, Boolean.TRUE.equals(pub));
+    Map<String, Object> out = new java.util.LinkedHashMap<>(conversation(made.conversation()));
+    out.put("notAdded", made.notAdded());   // review 2026-11-19 (F7): their whoCanAdd is nobody
+    return ResponseEntity.status(201).body(out);
   }
 
   @PostMapping("/v1/dm/{userId}")

@@ -46,11 +46,11 @@ class ConversationsTest {
 
   @Test
   void groupOver500IsRejected() {
-    assertThat(code(() -> convs.create("u1", ConversationKind.CONVERSATION_KIND_GROUP, "g", users(499), false)))
-        .isEmpty();
-    assertThat(code(() -> convs.create("u1", ConversationKind.CONVERSATION_KIND_GROUP, "g", users(500), false)))
-        .isEqualTo(ChatRefusal.INVALID);
-    Conversation full = convs.create("u1", ConversationKind.CONVERSATION_KIND_GROUP, "g", users(499), false);
+    Conversation full = convs.create("u1", ConversationKind.CONVERSATION_KIND_GROUP, "g", users(199), false);
+    for (int i = 199; i < 499; i++) {
+      convs.addMember("u1", full.id(), "m" + i);
+    }
+    assertThat(stores.members(full.id())).hasSize(500);
     assertThat(code(() -> convs.addMember("u1", full.id(), "late"))).isEqualTo(ChatRefusal.INVALID);
     assertThat(code(() -> convs.create("u1", ConversationKind.CONVERSATION_KIND_DIRECT, "g", List.of("u2"), false)))
         .as("DMs are opened, not created").isEqualTo(ChatRefusal.INVALID);
@@ -228,5 +228,33 @@ class ConversationsTest {
     assertThat(stores.member(c.id(), "m1")).get().extracting(Member::role).isEqualTo(Role.OWNER);
     assertThat(stores.member(c.id(), "own")).get().extracting(Member::role).isEqualTo(Role.ADMIN);
     assertThat(stores.members(c.id()).stream().filter(m -> m.role() == Role.OWNER)).hasSize(1);
+  }
+
+  /** Review 2026-11-19 (F7): one create puts at most 200 others in. */
+  @Test
+  void createTakesAtMost200Others() {
+    assertThat(code(() -> convs.create("u1", ConversationKind.CONVERSATION_KIND_CHANNEL, "c", users(200), true)))
+        .isEmpty();
+    assertThat(code(() -> convs.create("u1", ConversationKind.CONVERSATION_KIND_CHANNEL, "c", users(201), true)))
+        .isEqualTo(ChatRefusal.INVALID);
+  }
+
+  /** Review 2026-11-19 (F7): someone whose whoCanAdd is nobody is never put into a group or channel by others. */
+  @Test
+  void whoRefusesAddsIsNotAdded() {
+    Conversations checked = new Conversations(stores, stores, new MemberLookup(stores, stores), FakeStores.LIMITS,
+        (user, conv) -> { }, UserDirectory.ANY, stores::privacy);
+    stores.updatePrivacy("shy", null, null, null, true, 1);
+    Conversations.Created c = checked.createReporting("own", ConversationKind.CONVERSATION_KIND_GROUP, "g",
+        List.of("ok", "shy"), false);
+    assertThat(c.notAdded()).containsExactly("shy");
+    assertThat(stores.member(c.conversation().id(), "shy")).isEmpty();
+    assertThat(stores.member(c.conversation().id(), "ok")).isPresent();
+    assertThat(code(() -> checked.addMember("own", c.conversation().id(), "shy"))).isEqualTo(ChatRefusal.ADD_REFUSED);
+    Conversation pub = checked.create("own", ConversationKind.CONVERSATION_KIND_CHANNEL, "c", List.of(), true);
+    assertThat(code(() -> checked.join("shy", pub.id()))).as("they still follow public channels themselves")
+        .isEmpty();
+    stores.updatePrivacy("shy", null, null, null, false, 2);
+    assertThat(code(() -> checked.addMember("own", c.conversation().id(), "shy"))).isEmpty();
   }
 }

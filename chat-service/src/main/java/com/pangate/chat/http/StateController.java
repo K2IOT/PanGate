@@ -25,7 +25,8 @@ public class StateController {
 
   /** {@code PUT /v1/me/privacy} body; a missing field keeps its value. */
   /** {@code hidePreview}: CH4 spec §3.4, notifications without the sender or the text. */
-  public record PrivacyBody(Boolean hidePresence, Boolean hideRead, Boolean hidePreview) {}
+  /** {@code whoCanAdd}: review 2026-11-19 (F7), {@code everyone} or {@code nobody}; null = unchanged. */
+  public record PrivacyBody(Boolean hidePresence, Boolean hideRead, Boolean hidePreview, String whoCanAdd) {}
 
   private final StateIngest state;
   private final com.pangate.chat.core.StateService views;
@@ -97,7 +98,8 @@ public class StateController {
   @GetMapping("/v1/me/privacy")
   public Map<String, Object> getPrivacy(HttpServletRequest req) {
     var p = settings.privacy(AuthFilter.caller(req).userId());
-    return Map.of("hidePresence", p.hidePresence(), "hideRead", p.hideRead(), "hidePreview", p.hidePreview());
+    return Map.of("hidePresence", p.hidePresence(), "hideRead", p.hideRead(), "hidePreview", p.hidePreview(),
+        "whoCanAdd", p.refuseAdds() ? "nobody" : "everyone");
   }
 
   @PutMapping(path = "/v1/me/privacy", consumes = "application/json")
@@ -105,9 +107,16 @@ public class StateController {
     if (body == null) {
       throw new ChatHttpException(400, "invalid_request", "a JSON object is required");
     }
+    Boolean refuseAdds = switch (body.whoCanAdd() == null ? "" : body.whoCanAdd()) {
+      case "" -> null;
+      case "everyone" -> false;
+      case "nobody" -> true;
+      default -> throw new ChatHttpException(400, "invalid_request", "whoCanAdd is everyone or nobody");
+    };
     String user = AuthFilter.caller(req).userId();
     // Codex review of PR #6: only the fields given are written, with no read first, so concurrent PUTs both stick
-    settings.updatePrivacy(user, body.hidePresence(), body.hideRead(), body.hidePreview(), System.currentTimeMillis());
+    settings.updatePrivacy(user, body.hidePresence(), body.hideRead(), body.hidePreview(), refuseAdds,
+        System.currentTimeMillis());
     privacy.forget(user);
     return ResponseEntity.noContent().build();
   }

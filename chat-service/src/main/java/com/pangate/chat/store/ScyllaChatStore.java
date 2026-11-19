@@ -68,6 +68,7 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   private final PreparedStatement setHidePresence;
   private final PreparedStatement setHideRead;
   private final PreparedStatement setHidePreview;
+  private final PreparedStatement setRefuseAdds;
   private final PreparedStatement muteMember;
   private final PreparedStatement muteUserConv;
   private final PreparedStatement selectMute;
@@ -124,11 +125,12 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     selectOwn = s.prepare("SELECT delivered_seq, read_seq FROM " + ks + ".user_convs WHERE user_id = ? AND conv_id = ?");
     selectStates = s.prepare("SELECT conv_id, kind, last_seq, read_seq, delivered_seq, state_at, left FROM " + ks
         + ".user_convs WHERE user_id = ?");
-    selectPrivacy = s.prepare("SELECT hide_presence, hide_read, hide_preview FROM " + ks
+    selectPrivacy = s.prepare("SELECT hide_presence, hide_read, hide_preview, refuse_adds FROM " + ks
         + ".user_settings WHERE user_id = ?");
     setHidePresence = s.prepare("UPDATE " + ks + ".user_settings SET hide_presence = ?, updated_at = ? WHERE user_id = ?");
     setHideRead = s.prepare("UPDATE " + ks + ".user_settings SET hide_read = ?, updated_at = ? WHERE user_id = ?");
     setHidePreview = s.prepare("UPDATE " + ks + ".user_settings SET hide_preview = ?, updated_at = ? WHERE user_id = ?");
+    setRefuseAdds = s.prepare("UPDATE " + ks + ".user_settings SET refuse_adds = ?, updated_at = ? WHERE user_id = ?");
     // IF EXISTS: an UPDATE of a row removed meanwhile (a member leaving) would create a row of only muted_until, and
     // members() would then read a null role (the ghost row of review PR #6)
     muteMember = s.prepare("UPDATE " + ks + ".members SET muted_until = ? WHERE conv_id = ? AND user_id = ? IF EXISTS");
@@ -461,11 +463,12 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   public ChatStores.Privacy privacy(String userId) {
     Row r = exec(selectPrivacy.bind(userId)).one();
     return r == null ? ChatStores.Privacy.OPEN : new ChatStores.Privacy(r.getBoolean(0), r.getBoolean(1),
-        r.getBoolean(2));
+        r.getBoolean(2), r.getBoolean(3));
   }
 
   @Override
-  public void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead, Boolean hidePreview, long atMs) {
+  public void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead, Boolean hidePreview,
+      Boolean refuseAdds, long atMs) {
     var b = com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
         com.datastax.oss.driver.api.core.cql.DefaultBatchType.UNLOGGED);
     if (hidePresence != null) {
@@ -477,7 +480,10 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     if (hidePreview != null) {
       b.addStatement(setHidePreview.bind(hidePreview, atMs, userId));
     }
-    if (hidePresence != null || hideRead != null || hidePreview != null) {
+    if (refuseAdds != null) {
+      b.addStatement(setRefuseAdds.bind(refuseAdds, atMs, userId));
+    }
+    if (hidePresence != null || hideRead != null || hidePreview != null || refuseAdds != null) {
       exec(b.build());
     }
   }

@@ -210,10 +210,11 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
   }
 
   @Override public synchronized void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead,
-      Boolean hidePreview, long atMs) {
+      Boolean hidePreview, Boolean refuseAdds, long atMs) {
     ChatStores.Privacy cur = privacy(userId);
     privacy.put(userId, new ChatStores.Privacy(hidePresence == null ? cur.hidePresence() : hidePresence,
-        hideRead == null ? cur.hideRead() : hideRead, hidePreview == null ? cur.hidePreview() : hidePreview));
+        hideRead == null ? cur.hideRead() : hideRead, hidePreview == null ? cur.hidePreview() : hidePreview,
+        refuseAdds == null ? cur.refuseAdds() : refuseAdds));
   }
 
   public final Map<String, ChatStores.ChannelProgress> channelProgress = new ConcurrentHashMap<>();

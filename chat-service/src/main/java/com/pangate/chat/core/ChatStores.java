@@ -88,13 +88,20 @@ public final class ChatStores {
   public record UserConvState(String convId, ConversationKind kind, long lastSeq, long readSeq, long deliveredSeq,
       long stateAtMs) {}
 
-  /** CH3 §8: what a user hides from others (and, reciprocally, does not see of others). */
-  public record Privacy(boolean hidePresence, boolean hideRead, boolean hidePreview) {
-    public static final Privacy OPEN = new Privacy(false, false, false);
+  /**
+   * CH3 §8: what a user hides from others (and, reciprocally, does not see of others). {@code refuseAdds}: review
+   * 2026-11-19 (F7), whoCanAdd = nobody: nobody else puts them into a group or channel.
+   */
+  public record Privacy(boolean hidePresence, boolean hideRead, boolean hidePreview, boolean refuseAdds) {
+    public static final Privacy OPEN = new Privacy(false, false, false, false);
+
+    public Privacy(boolean hidePresence, boolean hideRead, boolean hidePreview) {
+      this(hidePresence, hideRead, hidePreview, false);
+    }
 
     /** CH3 settings only; the preview shows (CH4 §3.4). */
     public Privacy(boolean hidePresence, boolean hideRead) {
-      this(hidePresence, hideRead, false);
+      this(hidePresence, hideRead, false, false);
     }
   }
 
@@ -141,14 +148,20 @@ public final class ChatStores {
      * Writes only the fields given (null = unchanged), so concurrent updates of different fields both stick (Codex
      * review of PR #6).
      */
-    void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead, Boolean hidePreview, long atMs);
+    void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead, Boolean hidePreview,
+        Boolean refuseAdds, long atMs);
+
+    default void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead, Boolean hidePreview,
+        long atMs) {
+      updatePrivacy(userId, hidePresence, hideRead, hidePreview, null, atMs);
+    }
 
     default void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead, long atMs) {
       updatePrivacy(userId, hidePresence, hideRead, null, atMs);
     }
 
     default void putPrivacy(String userId, Privacy p, long atMs) {
-      updatePrivacy(userId, p.hidePresence(), p.hideRead(), p.hidePreview(), atMs);
+      updatePrivacy(userId, p.hidePresence(), p.hideRead(), p.hidePreview(), p.refuseAdds(), atMs);
     }
   }
 
