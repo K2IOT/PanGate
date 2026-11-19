@@ -82,7 +82,7 @@ can run ahead of what is written for a moment: use it to see that something is n
 | `scylla.{contact-points,local-dc,keyspace,timeout,replication-factor}` | `scylla:9042`, `datacenter1`, `chat`, `1s`, `1` | `LOCAL_QUORUM` / `LOCAL_SERIAL`; schema statements get 30 s |
 | `redis.{uri,timeout,member-cache-ttl}` | `redis://redis:6379`, `200ms`, `60s` | |
 | `auth.{jwks-uri,issuer,audience}` | `…`, `https://auth.pangate`, `pangate-gw` | |
-| `push-api.{target,plaintext,timeout}` | `dns:///push-api:9443`, `false`, `2s` | mTLS client certificates are not wired in CH1 |
+| `push-api.{target,plaintext,timeout}` | `dns:///push-api:9443`, `false`, `2s` | mTLS client certificates are not wired in CH1. **TODO before production** (review 2026-11-19): with `plaintext=false` and no client certificate every push is refused; only local and dev (plaintext) run today |
 | `limits.*` | user 20/s burst 40, conversation 50/s burst 100, 500 members, 4096 bytes, 50 mentions | per pod |
 | `http.send-wait` | `3s` | |
 | `kafka.receipts-topic` | `chat.receipts` | |

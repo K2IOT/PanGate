@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### account-service
+- Registration limits per IP raised to 200 attempts and 50 accounts per hour (were 20 / 5): many users share one
+  carrier-grade NAT address. Review 2026-11-19.
+
 ### Review 2026-11-19, batch 1 (business logic and privacy)
 Design: `docs/superpowers/specs/2026-11-19-review-batch1-design.md`.
 - chat-service: a member added later or a follower joining starts with nothing unread (was the whole history).

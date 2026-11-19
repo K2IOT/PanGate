@@ -44,16 +44,16 @@ class RegisterTest {
   }
 
   @Test
-  void sixthRegistrationFromOneIpInAnHourIs429() {
-    for (int i = 0; i < 5; i++) {
+  void oneRegistrationOverTheLimitFromOneIpInAnHourIs429() {
+    for (int i = 0; i < TestLimits.SPEC.registrationsPerIpPerHour(); i++) {
       register.register("user" + i + "abc", "secret-pw".toCharArray(), "u" + i + "@x.vn", null, null, phone,
           "10.0.0.9");
     }
-    assertThatThrownBy(() -> register.register("user9abc", "secret-pw".toCharArray(), "u9@x.vn", null, null, phone,
-        "10.0.0.9")).isInstanceOfSatisfying(DomainException.class, e -> assertThat(e.code())
+    assertThatThrownBy(() -> register.register("overlimit", "secret-pw".toCharArray(), "over@x.vn", null, null,
+        phone, "10.0.0.9")).isInstanceOfSatisfying(DomainException.class, e -> assertThat(e.code())
         .isEqualTo("rate_limited"));
-    assertThat(register.register("user9abc", "secret-pw".toCharArray(), "u9@x.vn", null, null, phone, "10.0.0.10")
-        .userId()).isNotNull();
+    assertThat(register.register("overlimit", "secret-pw".toCharArray(), "over@x.vn", null, null, phone,
+        "10.0.0.10").userId()).isNotNull();
   }
 
   @Test
@@ -61,7 +61,7 @@ class RegisterTest {
     assertThatThrownBy(() -> DeviceInfo.of("x", "toaster")).isInstanceOf(DomainException.class);
     assertThatThrownBy(() -> DeviceInfo.of(" ", "ios")).isInstanceOf(DomainException.class);
   }
-  /** Final review I8 (ruling 31 reversed): only registrations that succeed count toward 5 per IP per hour. */
+  /** Final review I8 (ruling 31 reversed): only registrations that succeed count toward the per-IP hourly limit. */
   @Test
   void failedRegistrationsDoNotCountTowardTheLimit() {
     register.register("taken1x", "secret-pw".toCharArray(), "t@x.vn", null, null, phone, "10.0.0.7");
@@ -87,10 +87,10 @@ class RegisterTest {
         .isEqualTo("rate_limited"));
   }
 
-  /** Review round 2, Important 1: a burst that passes the cheap check together still creates at most 5. */
+  /** Review round 2, Important 1: a burst that passes the cheap check together still creates at most the limit. */
   @Test
-  void parallelRegistrationsFromOneIpCreateAtMostFive() throws Exception {
-    int n = 10;
+  void parallelRegistrationsFromOneIpCreateAtMostTheLimit() throws Exception {
+    int n = TestLimits.SPEC.registrationsPerIpPerHour() + 5;
     java.util.concurrent.CyclicBarrier together = new java.util.concurrent.CyclicBarrier(n);
     com.pangate.account.application.port.PasswordHasher slow = new com.pangate.account.application.port
         .PasswordHasher() {
@@ -133,6 +133,6 @@ class RegisterTest {
         x.get();
       }
     }
-    assertThat(created.get()).isEqualTo(5);
+    assertThat(created.get()).isEqualTo(TestLimits.SPEC.registrationsPerIpPerHour());
   }
 }
