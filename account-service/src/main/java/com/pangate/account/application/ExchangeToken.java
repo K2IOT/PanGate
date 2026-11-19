@@ -68,9 +68,12 @@ public final class ExchangeToken {
     try {
       t = auth.mint(s.userId(), s.deviceId());
     } catch (AuthApi.AuthUnavailableException | AuthApi.AuthRejectedException e) {
-      // review 2026-11-19 (F8): no token was handed out, so a client retrying through an auth-service blip keeps its
-      // hourly budget instead of being locked out for up to an hour
-      counter.decrement(budget);
+      // review 2026-11-19 (F8): auth-service did not answer, so a client retrying through the blip keeps its hourly
+      // budget instead of being locked out for up to an hour. Batch 1 review M8: a refusal is an answer and keeps
+      // counting, so a session auth-service always refuses cannot call it without limit.
+      if (e instanceof AuthApi.AuthUnavailableException) {
+        counter.decrement(budget);
+      }
       metrics.count("account.tokens", "result", "unavailable");
       throw new DomainException("unavailable", "try again shortly");
     }

@@ -52,8 +52,11 @@ public final class PresenceTracker {
     long at = e.getAtMs() > 0 ? e.getAtMs() : wallMs.getAsLong();
     if (e.getType() == EventType.EVENT_TYPE_NODE_DOWN) {
       for (String user : state.dropNode(e.getNodeId(), e.getEpoch())) {
-        gone(user, at);
+        if (unsettled(user, at)) {
+          gone(user, at);
+        }
       }
+      state.forgetNode(e.getNodeId(), e.getEpoch());
       return;
     }
     Optional<String> user = UserIds.fromPrincipal(e.getPrincipalId());
@@ -63,7 +66,9 @@ public final class PresenceTracker {
     switch (e.getType()) {
       case EVENT_TYPE_CONNECTED -> connected(user.get(), e, at);
       case EVENT_TYPE_DISCONNECTED, EVENT_TYPE_HEARTBEAT_TIMEOUT, EVENT_TYPE_KICKED -> {
-        if (state.remove(user.get(), e.getNodeId(), e.getEpoch(), e.getConnId())) {
+        // batch 1 review I2: a retry after the connection was removed but before the gone mark landed finds nothing
+        // to remove; the user still has to go offline
+        if (state.remove(user.get(), e.getNodeId(), e.getEpoch(), e.getConnId()) || unsettled(user.get(), at)) {
           gone(user.get(), at);
         }
       }
@@ -91,6 +96,14 @@ public final class PresenceTracker {
     onTransition.accept(new Transition(user, true, at));
   }
 
+  /**
+   * No connection, no grace running and no offline recorded at or after {@code at}: the user's going offline at
+   * {@code at} is still to be handled. False for a stray or replayed event once the user's offline was recorded.
+   */
+  private boolean unsettled(String user, long at) {
+    return !state.online(user) && state.gone(user).isEmpty() && state.lastSeen(user).orElse(Long.MIN_VALUE) < at;
+  }
+
   private void gone(String user, long at) {
     state.markGone(user, at);
     state.scheduleGrace(user, wallMs.getAsLong() + graceMs);
@@ -111,8 +124,13 @@ public final class PresenceTracker {
         state.putLastSeen(user, goneAt.getAsLong());
         durable.putLastSeen(user, goneAt.getAsLong());
         state.clearGone(user);
-        state.clearOpenChannels(user);   // F6: their subscriptions ended with their connections
         onTransition.accept(new Transition(user, false, goneAt.getAsLong()));
+        try {
+          state.clearOpenChannels(user);   // F6: their subscriptions ended with their connections
+        } catch (RuntimeException ex) {
+          // batch 1 review M1: after the transition, so a failure here never loses the offline; the entry expires
+          log.debug("open channels of {} not cleared: {}", user, ex.toString());
+        }
       } catch (RuntimeException ex) {
         log.debug("presence grace of {} failed, retried: {}", user, ex.toString());
         try {

@@ -65,8 +65,23 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
     return c == null ? Optional.empty() : Optional.of(new Conversation(c.id(), c.kind(), c.title(), c.createdBy(),
         lastSeq.getOrDefault(id, 0L), c.isPublic(), c.memberCount()));
   }
+  public final Map<String, String> owners = new ConcurrentHashMap<>();
+
+  @Override public Optional<String> owner(String convId) {
+    return Optional.ofNullable(owners.get(convId));
+  }
+
+  @Override public synchronized boolean claimOwner(String convId, String expected, String next) {
+    if (!java.util.Objects.equals(owners.get(convId), expected)) {
+      return false;
+    }
+    owners.put(convId, next);
+    return true;
+  }
+
   @Override public void create(Conversation c, List<Member> ms) {
     check();
+    ms.stream().filter(m -> m.role() == ChatStores.Role.OWNER).findFirst().ifPresent(o -> owners.put(c.id(), o.userId()));
     convs.put(c.id(), c);
     lastSeq.put(c.id(), 0L);
     ms.forEach(m -> add(c.id(), m));
@@ -102,6 +117,21 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
         .putIfAbsent(convId, new UserConv(convId, c == null ? null : c.kind(), lastSeq.getOrDefault(convId, 0L),
             lastSeq.getOrDefault(convId, 0L), 0, lastSeq.getOrDefault(convId, 0L)));
   }
+  /** Runs once, before the next setRole: a racing request in between. */
+  public volatile java.util.function.BiConsumer<String, String> beforeSetRole;
+
+  @Override public void setRole(String convId, String userId, ChatStores.Role role) {
+    java.util.function.BiConsumer<String, String> hook = beforeSetRole;
+    beforeSetRole = null;
+    if (hook != null) {
+      hook.accept(convId, userId);
+    }
+    Member m = members.getOrDefault(convId, Map.of()).get(userId);
+    if (m != null) {   // IF EXISTS
+      members.get(convId).put(userId, new Member(userId, role));
+    }
+  }
+
   @Override public void remove(String convId, String userId) {
     check();
     members.getOrDefault(convId, Map.of()).remove(userId);

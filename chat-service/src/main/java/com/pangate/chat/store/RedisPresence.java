@@ -106,13 +106,19 @@ public final class RedisPresence implements PresenceState, com.pangate.chat.core
       for (String uc : r.smembers(key)) {
         int slash = uc.indexOf('/');
         String user = uc.substring(0, slash);
-        if (r.srem("pres:" + user, node + "/" + uc.substring(slash + 1)) == 1 && r.scard("pres:" + user) == 0) {
+        // batch 1 review I2: a retry finds the entry gone already; the user still counts as emptied
+        r.srem("pres:" + user, node + "/" + uc.substring(slash + 1));
+        if (r.scard("pres:" + user) == 0) {
           emptied.add(user);
         }
       }
-      r.del(key);
       return emptied;
     });
+  }
+
+  @Override
+  public void forgetNode(String node, long epoch) {
+    call(r -> r.del("presnode:" + node + ":" + epoch));
   }
 
   @Override

@@ -74,4 +74,29 @@ class LifecycleListenerTest {
       Thread.sleep(20);
     }
   }
+
+  /** Batch 1 review I3: only a store failure is retried; any other failure is counted and the record skipped. */
+  @Test
+  void aRecordFailingForAnotherReasonIsSkipped() throws Exception {
+    MockConsumer<String, byte[]> c = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
+    c.schedulePollTask(() -> {
+      c.rebalance(List.of(TP));
+      c.updateBeginningOffsets(Map.of(TP, 0L));
+      c.addRecord(rec(0, EventType.EVENT_TYPE_CONNECTED, "p0"));
+      c.addRecord(rec(1, EventType.EVENT_TYPE_DISCONNECTED, "p1"));
+    });
+    FakePresence state = new FakePresence();
+    PresenceTracker tracker = new PresenceTracker(state, new FakeStores(), t -> {
+      throw new IllegalStateException("a bug in the fan-out");
+    }, System::currentTimeMillis, Duration.ofMillis(50));
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    LifecycleListener l = new LifecycleListener(c, TP.topic(), tracker, meters);
+    l.start();
+    try {
+      await(() -> committed(c) == 2);
+      assertThat(meters.counter("chat.presence.errors").count()).isPositive();
+    } finally {
+      l.close();
+    }
+  }
 }

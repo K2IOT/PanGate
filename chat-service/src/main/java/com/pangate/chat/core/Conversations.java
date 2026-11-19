@@ -151,8 +151,30 @@ public final class Conversations {
     return c;
   }
 
+  /**
+   * Batch 1 review I1: {@code owner_id} decides who owns (its member row may lag behind a transfer); a member row
+   * still saying OWNER for someone else is an admin. A conversation without {@code owner_id} (created before V8)
+   * keeps the member rows' word.
+   */
   private Role roleOf(String convId, String userId) {
-    return members.member(convId, userId).map(Member::role).orElse(null);
+    Optional<Member> m = members.member(convId, userId);
+    if (m.isEmpty()) {
+      return null;
+    }
+    Optional<String> owner = conversations.owner(convId);
+    if (owner.isEmpty()) {
+      return m.get().role();
+    }
+    if (owner.get().equals(userId)) {
+      return Role.OWNER;
+    }
+    return m.get().role() == Role.OWNER ? Role.ADMIN : m.get().role();
+  }
+
+  /** The owner as {@code owner_id} says, else (rows before V8) the member row saying OWNER. */
+  private Optional<String> ownerOf(String convId) {
+    return conversations.owner(convId).or(() -> members.membersByJoin(convId).stream()
+        .filter(m -> m.role() == Role.OWNER).map(Member::userId).findFirst());
   }
 
   public void addMember(String actor, String convId, String userId) {
@@ -206,7 +228,7 @@ public final class Conversations {
         throw ChatRefusal.forbidden("only the owner removes an admin; nobody removes the owner");
       }
     }
-    if (actor.equals(userId) && roleOf(convId, userId) == Role.OWNER) {
+    if (actor.equals(userId) && ownerOf(convId).map(userId::equals).orElse(false)) {
       handOverOwnership(convId, userId);
     }
     changeMembers(convId, () -> members.remove(convId, userId));
@@ -227,18 +249,44 @@ public final class Conversations {
   }
 
   /**
-   * Review 2026-11-19 (F2): an owner leaving first makes the earliest admin, else the earliest member, owner, so a group
-   * or channel always has someone to manage it. A retry after the promotion already happened (a later step failed)
-   * finds the new owner: never a second one.
+   * Review 2026-11-19 (F2), batch 1 review I1: ownership leaves {@code from} for the earliest admin, else the earliest
+   * member. Each step is an LWT on {@code owner_id} that expects the current owner, so a racing transfer or leave wins
+   * or loses as a whole: never two owners, never none. A successor that left meanwhile hands it on again.
    */
-  private void handOverOwnership(String convId, String leaving) {
-    List<Member> rest = members.membersByJoin(convId).stream().filter(m -> !m.userId().equals(leaving)).toList();
-    if (rest.stream().anyMatch(m -> m.role() == Role.OWNER)) {
-      return;
+  private void handOverOwnership(String convId, String from) {
+    Optional<String> stored = conversations.owner(convId);
+    String expected = stored.orElse(null);
+    if (stored.isPresent() && !stored.get().equals(from)) {
+      return;   // someone else owns it already (a transfer won, or a retry after the hand-over)
     }
-    rest.stream().filter(m -> m.role() == Role.ADMIN).findFirst()
-        .or(() -> rest.stream().filter(m -> m.role() == Role.MEMBER).findFirst())
-        .ifPresent(next -> changeMembers(convId, () -> members.setRole(convId, next.userId(), Role.OWNER)));
+    if (stored.isEmpty()) {
+      // before V8: another member row saying OWNER is a promotion that already happened; record it, nothing more
+      Optional<Member> promoted = members.membersByJoin(convId).stream()
+          .filter(m -> m.role() == Role.OWNER && !m.userId().equals(from)).findFirst();
+      if (promoted.isPresent()) {
+        conversations.claimOwner(convId, null, promoted.get().userId());
+        return;
+      }
+    }
+    String leaving = from;
+    for (int attempt = 0; attempt < 5; attempt++) {
+      String gone = leaving;
+      List<Member> rest = members.membersByJoin(convId).stream().filter(m -> !m.userId().equals(gone)).toList();
+      Optional<Member> next = rest.stream().filter(m -> m.role() == Role.ADMIN).findFirst()
+          .or(() -> rest.stream().findFirst());
+      if (next.isEmpty()) {
+        return;   // nobody left to own it
+      }
+      if (!conversations.claimOwner(convId, expected, next.get().userId())) {
+        return;   // the owner changed meanwhile: not ours to hand over
+      }
+      changeMembers(convId, () -> members.setRole(convId, next.get().userId(), Role.OWNER));
+      if (members.member(convId, next.get().userId()).isPresent()) {
+        return;
+      }
+      expected = next.get().userId();   // they left meanwhile: hand it on from them
+      leaving = expected;
+    }
   }
 
   /** Review 2026-11-19 (F2): the owner makes a member admin or an admin member again. */
@@ -276,11 +324,17 @@ public final class Conversations {
     if (roleOf(convId, userId) == null) {
       throw new ChatRefusal(ChatRefusal.NOT_FOUND, "not a member");
     }
-    // the new owner first: a failure between the two writes leaves two owners for a moment, never none
-    changeMembers(convId, () -> {
-      members.setRole(convId, userId, Role.OWNER);
-      members.setRole(convId, actor, Role.ADMIN);
-    });
+    // batch 1 review I1: the LWT decides; a racing transfer or leave that moved owner_id first makes this one lose
+    if (!conversations.claimOwner(convId, conversations.owner(convId).orElse(null), userId)) {
+      throw ChatRefusal.forbidden("ownership changed meanwhile");
+    }
+    changeMembers(convId, () -> members.setRole(convId, userId, Role.OWNER));
+    if (members.member(convId, userId).isEmpty()) {
+      handOverOwnership(convId, userId);   // they left meanwhile: it moves on, possibly back to the actor
+    }
+    if (!ownerOf(convId).map(actor::equals).orElse(false)) {
+      changeMembers(convId, () -> members.setRole(convId, actor, Role.ADMIN));
+    }
   }
 
   /** Follows a public channel. */

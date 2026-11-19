@@ -161,4 +161,29 @@ class ExchangeTokenTest {
     down.set(false);
     assertThat(x.exchange(s.refreshToken()).token()).isEqualTo("jwt");
   }
+
+  /** Batch 1 review M8: a refusal from auth-service is an answer, not an outage, and still uses the budget. */
+  @Test
+  void refusedMintsStillUseTheHourlyBudget() {
+    AuthApi refusing = new AuthApi() {
+      @Override
+      public ConnectToken mint(String userId, String deviceId) {
+        throw new AuthRejectedException(403);
+      }
+
+      @Override
+      public void revoke(byte[] json) {}
+    };
+    ExchangeToken x = new ExchangeToken(f.sessionStore, f.accountStore, refusing, counter, TestLimits.SPEC, f.clock,
+        Duration.ofDays(180), Duration.ofMinutes(5), Metrics.NONE);
+    String last = "";
+    for (int i = 0; i < 61; i++) {
+      try {
+        x.exchange(s.refreshToken());
+      } catch (DomainException e) {
+        last = e.code();
+      }
+    }
+    assertThat(last).isEqualTo("rate_limited");
+  }
 }

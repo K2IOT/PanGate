@@ -257,4 +257,33 @@ class ConversationsTest {
     stores.updatePrivacy("shy", null, null, null, false, 2);
     assertThat(code(() -> checked.addMember("own", c.conversation().id(), "shy"))).isEmpty();
   }
+
+  long owners(String convId) {
+    return stores.members(convId).stream().filter(m -> m.role() == Role.OWNER).count();
+  }
+
+  /** Batch 1 review I1: two transfers racing (two devices) leave exactly one owner. */
+  @Test
+  void racingTransfersLeaveOneOwner() {
+    Conversation c = convs.create("own", ConversationKind.CONVERSATION_KIND_GROUP, "g", List.of("b", "c"), false);
+    List<String> inner = new ArrayList<>();
+    stores.beforeSetRole = (conv, user) -> inner.add(code(() -> convs.transferOwnership("own", c.id(), "c")));
+    assertThat(code(() -> convs.transferOwnership("own", c.id(), "b"))).isEmpty();
+    assertThat(inner).containsExactly(ChatRefusal.FORBIDDEN);
+    assertThat(owners(c.id())).isEqualTo(1);
+    assertThat(stores.member(c.id(), "b")).get().extracting(Member::role).isEqualTo(Role.OWNER);
+  }
+
+  /** Batch 1 review I1: the new owner leaving in the middle of a transfer does not leave the group without one. */
+  @Test
+  void aTransferToSomeoneLeavingStillLeavesAnOwner() {
+    Conversation c = convs.create("own", ConversationKind.CONVERSATION_KIND_GROUP, "g", List.of("b", "c"), false);
+    stores.beforeSetRole = (conv, user) -> convs.removeMember(user, conv, user);   // b leaves meanwhile
+    convs.transferOwnership("own", c.id(), "b");
+    assertThat(stores.member(c.id(), "b")).isEmpty();
+    assertThat(owners(c.id())).isEqualTo(1);
+    // b was owner when it left, so it handed ownership on; a manager of the group remains either way
+    assertThat(code(() -> convs.addMember(stores.members(c.id()).stream().filter(m -> m.role() == Role.OWNER)
+        .findFirst().orElseThrow().userId(), c.id(), "d"))).isEmpty();
+  }
 }

@@ -140,10 +140,16 @@ public final class LifecycleListener implements AutoCloseable {
     try {
       tracker.on(e);
       return true;
-    } catch (RuntimeException ex) {
+    } catch (com.pangate.chat.core.StoreUnavailableException ex) {
       meters.counter("chat.presence.unavailable").increment();
       log.debug("presence event to be read again: {}", ex.toString());
       return false;
+    } catch (RuntimeException ex) {
+      // batch 1 review I3: only a store failure is worth reading again; anything else would fail for ever and stop
+      // presence for the whole pod, so it is counted and skipped
+      meters.counter("chat.presence.errors").increment();
+      log.error("presence event {} skipped", e.getEventId(), ex);
+      return true;
     }
   }
 

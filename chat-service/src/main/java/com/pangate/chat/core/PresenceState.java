@@ -78,4 +78,10 @@ public interface PresenceState {
 
   /** Of {@code userIds}, those with {@code convId} open. */
   java.util.Set<String> haveOpen(String convId, java.util.Collection<String> userIds);
+
+  /**
+   * Batch 1 review I2: forgets a dead node's connection list once every user it emptied was handled. Until then a
+   * retried {@link #dropNode} still finds them.
+   */
+  void forgetNode(String node, long epoch);
 }

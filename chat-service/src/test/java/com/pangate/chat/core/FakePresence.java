@@ -22,6 +22,8 @@ public final class FakePresence implements PresenceState {
   public volatile int failLastSeenWrites;
   /** Fail this many remove calls (a Redis timeout on a disconnect). */
   public volatile int failRemoves;
+  /** Fail this many markGone calls (the connection was already removed: a partial failure). */
+  public volatile int failMarkGone;
 
   @Override public synchronized boolean add(String userId, String node, long epoch, String connId) {
     if (deadNodes.contains(node + ":" + epoch)) {
@@ -51,13 +53,17 @@ public final class FakePresence implements PresenceState {
       int slash = uc.indexOf('/');
       String user = uc.substring(0, slash);
       Set<String> s = conns.getOrDefault(user, new HashSet<>());
-      if (s.remove(node + "/" + uc.substring(slash + 1)) && s.isEmpty()) {
+      s.remove(node + "/" + uc.substring(slash + 1));
+      if (s.isEmpty()) {
         emptied.add(user);
       }
     }
-    byNode.remove(node + ":" + epoch);
     deadNodes.add(node + ":" + epoch);
     return emptied;
+  }
+
+  @Override public synchronized void forgetNode(String node, long epoch) {
+    byNode.remove(node + ":" + epoch);
   }
 
   @Override public boolean online(String userId) {
@@ -73,6 +79,10 @@ public final class FakePresence implements PresenceState {
   }
 
   @Override public void markGone(String userId, long atMs) {
+    if (failMarkGone > 0) {
+      failMarkGone--;
+      throw new StoreUnavailableException("redis: timeout", null);
+    }
     gone.put(userId, atMs);
   }
 

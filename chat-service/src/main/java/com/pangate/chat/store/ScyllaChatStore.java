@@ -41,6 +41,10 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   private final PreparedStatement selectMember;
   private final PreparedStatement joinUserConv;
   private final PreparedStatement joinMarks;
+  private final PreparedStatement setOwner;
+  private final PreparedStatement claimOwnerStmt;
+  private final PreparedStatement claimUnownedStmt;
+  private final PreparedStatement selectOwner;
   private final PreparedStatement markShown;
   private final PreparedStatement updateRole;
   private final PreparedStatement leaveUserConv;
@@ -90,6 +94,11 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     selectConv = s.prepare("SELECT conv_id, kind, title, created_by, last_seq, is_public, member_count FROM " + ks
         + ".conversations WHERE conv_id = ?");
     reserve = s.prepare("UPDATE " + ks + ".conversations SET last_seq = ? WHERE conv_id = ? IF last_seq = ?");
+    setOwner = s.prepare("UPDATE " + ks + ".conversations SET owner_id = ? WHERE conv_id = ? IF EXISTS");
+    claimOwnerStmt = s.prepare("UPDATE " + ks + ".conversations SET owner_id = ? WHERE conv_id = ? IF owner_id = ?");
+    claimUnownedStmt = s.prepare("UPDATE " + ks + ".conversations SET owner_id = ? WHERE conv_id = ? "
+        + "IF owner_id = null");
+    selectOwner = s.prepare("SELECT owner_id FROM " + ks + ".conversations WHERE conv_id = ?");
     selectLastSeq = s.prepare("SELECT last_seq FROM " + ks + ".conversations WHERE conv_id = ?");
     insertMember = s.prepare("INSERT INTO " + ks + ".members (conv_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)");
     deleteMember = s.prepare("DELETE FROM " + ks + ".members WHERE conv_id = ? AND user_id = ?");
@@ -192,6 +201,20 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     for (Member m : members) {
       add(c.id(), c.kind(), m, now);
     }
+    members.stream().filter(m -> m.role() == Role.OWNER).findFirst()
+        .ifPresent(o -> exec(setOwner.bind(o.userId(), c.id())));   // I1: an LWT, like every other owner write
+  }
+
+  @Override
+  public Optional<String> owner(String convId) {
+    Row r = exec(selectOwner.bind(convId)).one();
+    return r == null || r.isNull(0) ? Optional.empty() : Optional.of(r.getString(0));
+  }
+
+  @Override
+  public boolean claimOwner(String convId, String expected, String next) {
+    return exec(expected == null ? claimUnownedStmt.bind(next, convId) : claimOwnerStmt.bind(next, convId, expected))
+        .wasApplied();
   }
 
   @Override
@@ -271,11 +294,19 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   public void add(String convId, Member m) {
     Optional<Conversation> c = get(convId);
     ConversationKind kind = c.map(Conversation::kind).orElse(ConversationKind.CONVERSATION_KIND_UNSPECIFIED);
-    add(convId, kind, m, System.currentTimeMillis());
     long last = c.map(Conversation::lastSeq).orElse(0L);
-    if (last > 0) {
-      exec(joinMarks.bind(last, last, last, last, m.userId(), convId));
+    if (last <= 0) {
+      add(convId, kind, m, System.currentTimeMillis());
+      return;
     }
+    // batch 1 review M2: one logged batch, so a timeout never leaves a member without their join marks (a retry then
+    // finds them a member and stops early, leaving the whole history unread)
+    exec(com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
+            com.datastax.oss.driver.api.core.cql.DefaultBatchType.LOGGED)
+        .addStatement(insertMember.bind(convId, m.userId(), m.role().name(), System.currentTimeMillis()))
+        .addStatement(joinUserConv.bind(kind.getNumber(), m.userId(), convId))
+        .addStatement(joinMarks.bind(last, last, last, last, m.userId(), convId))
+        .build());
   }
 
   @Override

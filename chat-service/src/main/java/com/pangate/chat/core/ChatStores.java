@@ -186,6 +186,12 @@ public final class ChatStores {
 
     /** The DM of the pair: {@code newConvId} if this call created it, else the existing one. */
     String createDm(String userA, String userB, String newConvId);
+
+    /** Batch 1 review I1: the owner of a group or channel; empty for a DM or a row created before V8. */
+    Optional<String> owner(String convId);
+
+    /** LWT {@code owner_id = next IF owner_id = expected} ({@code expected} null: not set yet); true when applied. */
+    boolean claimOwner(String convId, String expected, String next);
   }
 
   public interface MemberStore {
