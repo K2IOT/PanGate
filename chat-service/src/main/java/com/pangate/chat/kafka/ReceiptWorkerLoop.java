@@ -205,7 +205,7 @@ public final class ReceiptWorkerLoop implements AutoCloseable {
     for (ReceiptAggregator.Flush f : agg.due()) {
       List<Member> to;
       try {
-        to = members.of(f.convId());
+        to = com.pangate.chat.core.ReceiptRecipients.audience(f, members);   // perf 3a: no channel list
         long now = System.currentTimeMillis();
         for (Map.Entry<String, Marks> e : f.byUser().entrySet()) {
           marks.advance(f.convId(), e.getKey(), e.getValue().deliveredSeq(), e.getValue().readSeq(),

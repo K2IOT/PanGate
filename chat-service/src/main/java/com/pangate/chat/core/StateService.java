@@ -42,11 +42,21 @@ public final class StateService {
   private final LongSupplier monoMs;
   private final LongSupplier wallMs;
   private final TokenBucketLimiter receiptLookups;
+  private final LastSeqCache lastSeq;
   private final Map<String, Count> counts = new ConcurrentHashMap<>();
 
   public StateService(ChatStores.ConversationStore conversations, MemberLookup members, ChatStores.MarkStore marks,
       ChatStores.MemberStore inbox, ChatStores.MessageStore messages, PrivacyCache privacy, int listedMax,
       LongSupplier monoMs, LongSupplier wallMs) {
+    this(conversations, members, marks, inbox, messages, privacy, listedMax, monoMs, wallMs,
+        new LastSeqCache(conversations, monoMs));
+  }
+
+  /** Perf 3a (spec §3.4): {@code lastSeq} gives a channel's last seq, cached 5 s, instead of a read per entry. */
+  public StateService(ChatStores.ConversationStore conversations, MemberLookup members, ChatStores.MarkStore marks,
+      ChatStores.MemberStore inbox, ChatStores.MessageStore messages, PrivacyCache privacy, int listedMax,
+      LongSupplier monoMs, LongSupplier wallMs, LastSeqCache lastSeq) {
+    this.lastSeq = lastSeq;
     this.conversations = conversations;
     this.members = members;
     this.marks = marks;
@@ -78,7 +88,7 @@ public final class StateService {
 
   /** {@code id, kind, lastSeq, readSeq, deliveredSeq, unread}, and {@code peer} for a DM. */
   public Map<String, Object> conversationView(String viewer, UserConvState s) {
-    long lastSeq = s.kind() == ConversationKind.CONVERSATION_KIND_CHANNEL ? conversations.lastSeq(s.convId())
+    long lastSeq = s.kind() == ConversationKind.CONVERSATION_KIND_CHANNEL ? this.lastSeq.lastSeq(s.convId())
         : s.lastSeq();
     Map<String, Object> m = new LinkedHashMap<>();
     m.put("id", s.convId());

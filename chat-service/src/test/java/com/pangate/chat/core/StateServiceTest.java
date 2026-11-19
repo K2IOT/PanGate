@@ -45,4 +45,22 @@ class StateServiceTest {
     assertThat(state.state("u", java.util.OptionalLong.empty(), null).now()).isEqualTo(100_000 - StateService.SINCE_MARGIN_MS);
     assertThat(StateService.SINCE_MARGIN_MS).isEqualTo(30_000);
   }
+
+  /** Perf 3a (spec §3.4): a channel's lastSeq in the conversation list comes from the 5 s cache. */
+  @Test
+  void channelLastSeqComesFromCache() {
+    FakeStores stores = new FakeStores();
+    String ch = Ids.next();
+    stores.create(new Conversation(ch, ConversationKind.CONVERSATION_KIND_CHANNEL, "c", "o", 0, true, 2),
+        List.of(new Member("o", Role.OWNER), new Member("f", Role.MEMBER)));
+    stores.lastSeq.put(ch, 30L);
+    StateService state = new StateService(stores, new MemberLookup(stores, stores), stores, stores, stores,
+        new PrivacyCache(stores, () -> 0L), 50, () -> 0L, System::currentTimeMillis);
+    ChatStores.UserConvState s = new ChatStores.UserConvState(ch, ConversationKind.CONVERSATION_KIND_CHANNEL, 0, 0,
+        0, 0);
+    stores.lastSeqCalls.set(0);
+    state.conversationView("f", s);
+    state.conversationView("f", s);
+    assertThat(stores.lastSeqCalls.get()).isEqualTo(1);
+  }
 }

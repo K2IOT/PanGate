@@ -98,13 +98,19 @@ public class ChatConfig {
         p.kafka().dlqTopic(), p.kafka().receiptsTopic());
   }
 
+  /** A conversation's last seq, cached 5 s per pod: marks are clamped to it, channel views show it (perf 3a). */
+  @Bean
+  com.pangate.chat.core.LastSeqCache lastSeqCache(ScyllaChatStore store) {
+    return new com.pangate.chat.core.LastSeqCache(store, () -> System.nanoTime() / 1_000_000);
+  }
+
   /** CH3 spec §3.3: delivered / read marks into chat.receipts. */
   @Bean
   com.pangate.chat.core.StateIngest stateIngest(ScyllaChatStore store, RedisChatCache cache, CommandProducer producer,
       ChatProperties p, MeterRegistry meters, com.pangate.chat.core.TypingRelay typing,
-      com.pangate.chat.core.PresenceWatch watch, RecentCount watchers) {
+      com.pangate.chat.core.PresenceWatch watch, RecentCount watchers, com.pangate.chat.core.LastSeqCache lastSeq) {
     return new com.pangate.chat.core.StateIngest(new com.pangate.chat.core.MarkValidator(
-        new MemberLookup(store, cache), new com.pangate.chat.core.LastSeqCache(store, () -> System.nanoTime() / 1_000_000),
+        new MemberLookup(store, cache), lastSeq,
         new com.pangate.chat.core.TokenBucketLimiter(p.state().markRate(), p.state().markBurst(), System::nanoTime),
         reason -> meters.counter("chat.receipts.rejected", "reason", reason).increment()), producer,
         System::currentTimeMillis, typing, r -> {
@@ -378,9 +384,9 @@ public class ChatConfig {
   /** CH3 spec §4, §7.2, §3.4 lookups. */
   @Bean
   com.pangate.chat.core.StateService stateService(ScyllaChatStore store, RedisChatCache cache,
-      com.pangate.chat.core.PrivacyCache privacy, ChatProperties p) {
+      com.pangate.chat.core.PrivacyCache privacy, ChatProperties p, com.pangate.chat.core.LastSeqCache lastSeq) {
     return new com.pangate.chat.core.StateService(store, new MemberLookup(store, cache), store, store, store, privacy,
-        p.state().listedReceiptsMax(), () -> System.nanoTime() / 1_000_000, System::currentTimeMillis);
+        p.state().listedReceiptsMax(), () -> System.nanoTime() / 1_000_000, System::currentTimeMillis, lastSeq);
   }
 
   /** CH3 spec §6.1: connection sets in Redis. */
