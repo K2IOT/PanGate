@@ -178,6 +178,9 @@ public final class Conversations {
         throw ChatRefusal.forbidden("only the owner removes an admin; nobody removes the owner");
       }
     }
+    if (actor.equals(userId) && roleOf(convId, userId) == Role.OWNER) {
+      handOverOwnership(convId, userId);
+    }
     changeMembers(convId, () -> members.remove(convId, userId));
     if (c.kind() == ConversationKind.CONVERSATION_KIND_CHANNEL) {
       leftChannel.accept(userId, convId);   // its open subscriptions end now, not at the next reconnect
@@ -185,22 +188,71 @@ public final class Conversations {
   }
 
   /**
-   * account spec §8: a deleted account leaves a group or channel as if it left itself; when it owned it, the earliest
-   * admin, else the earliest member, becomes owner first. Not a member (any more): nothing happens.
+   * account spec §8: a deleted account leaves a group or channel as if it left itself (which hands ownership on, see
+   * {@link #removeMember}). Not a member (any more): nothing happens.
    */
   public void leaveDeletedAccount(String userId, String convId) {
-    Optional<Member> me = members.member(convId, userId);
-    if (me.isEmpty()) {
+    if (members.member(convId, userId).isEmpty()) {
       return;
     }
-    List<Member> rest = members.membersByJoin(convId).stream().filter(m -> !m.userId().equals(userId)).toList();
-    // a retry after the promotion already happened (a later step failed) finds the new owner: never a second one
-    if (me.get().role() == Role.OWNER && rest.stream().noneMatch(m -> m.role() == Role.OWNER)) {
-      rest.stream().filter(m -> m.role() == Role.ADMIN).findFirst()
-          .or(() -> rest.stream().filter(m -> m.role() == Role.MEMBER).findFirst())
-          .ifPresent(next -> changeMembers(convId, () -> members.setRole(convId, next.userId(), Role.OWNER)));
-    }
     removeMember(userId, convId, userId);
+  }
+
+  /**
+   * Review 2026-11-19 (F2): an owner leaving first makes the earliest admin, else the earliest member, owner, so a group
+   * or channel always has someone to manage it. A retry after the promotion already happened (a later step failed)
+   * finds the new owner: never a second one.
+   */
+  private void handOverOwnership(String convId, String leaving) {
+    List<Member> rest = members.membersByJoin(convId).stream().filter(m -> !m.userId().equals(leaving)).toList();
+    if (rest.stream().anyMatch(m -> m.role() == Role.OWNER)) {
+      return;
+    }
+    rest.stream().filter(m -> m.role() == Role.ADMIN).findFirst()
+        .or(() -> rest.stream().filter(m -> m.role() == Role.MEMBER).findFirst())
+        .ifPresent(next -> changeMembers(convId, () -> members.setRole(convId, next.userId(), Role.OWNER)));
+  }
+
+  /** Review 2026-11-19 (F2): the owner makes a member admin or an admin member again. */
+  public void setRole(String actor, String convId, String userId, Role role) {
+    checkUserId(userId);
+    managed(actor, convId);
+    if (roleOf(convId, actor) != Role.OWNER) {
+      throw ChatRefusal.forbidden("only the owner sets roles");
+    }
+    if (role == Role.OWNER) {
+      throw ChatRefusal.invalid("ownership moves with a transfer");
+    }
+    Role current = roleOf(convId, userId);
+    if (current == null) {
+      throw new ChatRefusal(ChatRefusal.NOT_FOUND, "not a member");
+    }
+    if (current == Role.OWNER) {
+      throw ChatRefusal.invalid("the owner's role moves with a transfer");
+    }
+    if (current != role) {
+      changeMembers(convId, () -> members.setRole(convId, userId, role));
+    }
+  }
+
+  /** Review 2026-11-19 (F2): the owner hands ownership to a member and stays on as an admin. */
+  public void transferOwnership(String actor, String convId, String userId) {
+    checkUserId(userId);
+    managed(actor, convId);
+    if (roleOf(convId, actor) != Role.OWNER) {
+      throw ChatRefusal.forbidden("only the owner transfers ownership");
+    }
+    if (actor.equals(userId)) {
+      throw ChatRefusal.invalid("already the owner");
+    }
+    if (roleOf(convId, userId) == null) {
+      throw new ChatRefusal(ChatRefusal.NOT_FOUND, "not a member");
+    }
+    // the new owner first: a failure between the two writes leaves two owners for a moment, never none
+    changeMembers(convId, () -> {
+      members.setRole(convId, userId, Role.OWNER);
+      members.setRole(convId, actor, Role.ADMIN);
+    });
   }
 
   /** Follows a public channel. */

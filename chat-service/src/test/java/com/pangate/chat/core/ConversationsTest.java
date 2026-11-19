@@ -179,4 +179,54 @@ class ConversationsTest {
     assertThat(code(() -> checked.openDm("own", "live"))).isEmpty();
   }
 
+  /** Review 2026-11-19 (F2): an owner who leaves hands ownership on first, as a deleted account does. */
+  @Test
+  void anOwnerWhoLeavesHandsOwnershipOn() {
+    Conversation c = convs.create("own", ConversationKind.CONVERSATION_KIND_GROUP, "g", List.of("m1", "adm"), false);
+    stores.setRole(c.id(), "adm", Role.ADMIN);
+    assertThat(code(() -> convs.removeMember("own", c.id(), "own"))).isEmpty();
+    assertThat(stores.member(c.id(), "own")).isEmpty();
+    assertThat(stores.member(c.id(), "adm")).get().extracting(Member::role).isEqualTo(Role.OWNER);
+
+    Conversation ch = convs.create("own", ConversationKind.CONVERSATION_KIND_CHANNEL, "c", List.of("f1", "f2"), true);
+    assertThat(code(() -> convs.removeMember("own", ch.id(), "own"))).isEmpty();
+    assertThat(stores.member(ch.id(), "f1")).as("no admin: the earliest member").get().extracting(Member::role)
+        .isEqualTo(Role.OWNER);
+
+    Conversation alone = convs.create("own", ConversationKind.CONVERSATION_KIND_GROUP, "g", List.of(), false);
+    assertThat(code(() -> convs.removeMember("own", alone.id(), "own"))).as("the last one just leaves").isEmpty();
+    assertThat(stores.members(alone.id())).isEmpty();
+  }
+
+  /** Review 2026-11-19 (F2): only the owner makes or unmakes admins. */
+  @Test
+  void theOwnerSetsAdmins() {
+    Conversation c = convs.create("own", ConversationKind.CONVERSATION_KIND_GROUP, "g", List.of("m1", "m2"), false);
+    assertThat(code(() -> convs.setRole("m1", c.id(), "m2", Role.ADMIN))).isEqualTo(ChatRefusal.FORBIDDEN);
+    assertThat(code(() -> convs.setRole("own", c.id(), "m1", Role.ADMIN))).isEmpty();
+    assertThat(stores.member(c.id(), "m1")).get().extracting(Member::role).isEqualTo(Role.ADMIN);
+    assertThat(code(() -> convs.setRole("m1", c.id(), "m2", Role.ADMIN))).as("an admin does not make admins")
+        .isEqualTo(ChatRefusal.FORBIDDEN);
+    assertThat(code(() -> convs.setRole("own", c.id(), "own", Role.MEMBER))).as("the owner's role moves by transfer")
+        .isEqualTo(ChatRefusal.INVALID);
+    assertThat(code(() -> convs.setRole("own", c.id(), "stranger", Role.ADMIN))).isEqualTo(ChatRefusal.NOT_FOUND);
+    assertThat(code(() -> convs.setRole("own", c.id(), "m1", Role.OWNER))).isEqualTo(ChatRefusal.INVALID);
+    assertThat(code(() -> convs.setRole("own", c.id(), "m1", Role.MEMBER))).isEmpty();
+    assertThat(stores.member(c.id(), "m1")).get().extracting(Member::role).isEqualTo(Role.MEMBER);
+    Conversation dm = convs.openDm("a", "b");
+    assertThat(code(() -> convs.setRole("a", dm.id(), "b", Role.ADMIN))).isEqualTo(ChatRefusal.INVALID);
+  }
+
+  /** Review 2026-11-19 (F2): the owner hands ownership to a member and stays on as admin. */
+  @Test
+  void theOwnerTransfersOwnership() {
+    Conversation c = convs.create("own", ConversationKind.CONVERSATION_KIND_CHANNEL, "c", List.of("m1"), false);
+    assertThat(code(() -> convs.transferOwnership("m1", c.id(), "m1"))).isEqualTo(ChatRefusal.FORBIDDEN);
+    assertThat(code(() -> convs.transferOwnership("own", c.id(), "stranger"))).isEqualTo(ChatRefusal.NOT_FOUND);
+    assertThat(code(() -> convs.transferOwnership("own", c.id(), "own"))).isEqualTo(ChatRefusal.INVALID);
+    assertThat(code(() -> convs.transferOwnership("own", c.id(), "m1"))).isEmpty();
+    assertThat(stores.member(c.id(), "m1")).get().extracting(Member::role).isEqualTo(Role.OWNER);
+    assertThat(stores.member(c.id(), "own")).get().extracting(Member::role).isEqualTo(Role.ADMIN);
+    assertThat(stores.members(c.id()).stream().filter(m -> m.role() == Role.OWNER)).hasSize(1);
+  }
 }

@@ -229,6 +229,31 @@ public class QueryController {
     return ResponseEntity.noContent().build();
   }
 
+  /** Review 2026-11-19 (F2): {@code {"role":"admin"|"member"}}, by the owner. */
+  @org.springframework.web.bind.annotation.PutMapping(path = "/v1/conversations/{id}/members/{userId}/role",
+      consumes = "application/json")
+  public ResponseEntity<Void> setRole(@PathVariable("id") String id, @PathVariable("userId") String user,
+      @RequestBody Map<String, Object> body, HttpServletRequest req) {
+    com.pangate.chat.core.ChatStores.Role role = switch (String.valueOf(body.get("role"))) {
+      case "admin" -> com.pangate.chat.core.ChatStores.Role.ADMIN;
+      case "member" -> com.pangate.chat.core.ChatStores.Role.MEMBER;
+      default -> throw new ChatRefusal(ChatRefusal.INVALID, "role must be admin or member");
+    };
+    conversations.setRole(userId(req), id, user, role);
+    return ResponseEntity.noContent().build();
+  }
+
+  /** Review 2026-11-19 (F2): {@code {"userId":...}}, by the owner, who stays on as an admin. */
+  @PostMapping(path = "/v1/conversations/{id}/owner", consumes = "application/json")
+  public ResponseEntity<Void> transferOwnership(@PathVariable("id") String id, @RequestBody Map<String, Object> body,
+      HttpServletRequest req) {
+    if (!(body.get("userId") instanceof String u)) {
+      throw new ChatRefusal(ChatRefusal.INVALID, "userId must be a string");
+    }
+    conversations.transferOwnership(userId(req), id, u);
+    return ResponseEntity.noContent().build();
+  }
+
   @PostMapping("/v1/conversations/{id}/join")
   public ResponseEntity<Void> join(@PathVariable("id") String id, HttpServletRequest req) {
     conversations.join(userId(req), id);
