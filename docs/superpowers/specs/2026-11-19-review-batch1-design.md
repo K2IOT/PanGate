@@ -48,3 +48,20 @@
 
 ## Ngoài phạm vi đợt này
 Giới hạn tần suất thêm người, lời mời có chấp nhận, `whoCanAdd = contacts` (chưa có danh bạ), Android `collapse_key` (cần thử FCM thật), mọi điểm nghẽn (đợt 3).
+
+## Sau review của đợt 1
+
+Reviewer độc lập đọc toàn bộ thay đổi của đợt 1. Đã sửa (mỗi sửa có test fail trước):
+- **I1 (F2):** quyền chủ nằm ở `conversations.owner_id` (V8), chỉ đổi bằng LWT `IF owner_id = <chủ hiện tại>`; hai lần chuyển chen nhau hay chuyển chen với rời nhóm luôn còn đúng một chủ. Dòng thành viên đi theo sau; khi lệch, `owner_id` quyết định. Hội thoại tạo trước V8 dùng dòng thành viên.
+- **I2 (F5):** thử lại sau khi kết nối đã gỡ mà dấu "đã đi" chưa ghi vẫn đưa người đó về offline; danh sách kết nối của node chết chỉ bị xoá sau khi mọi người được xử lý.
+- **I3 (F5):** chỉ lỗi store được đọc lại; lỗi khác được đếm (`chat.presence.errors`) và bỏ qua.
+- **M1, M2, M8:** xoá kênh đang mở sau khi chuyển offline; dòng thành viên và mốc vào nhóm trong một logged batch; auth-service từ chối thì vẫn trừ lượt.
+
+Để lại (nhỏ):
+- **M3:** `last_seq` đọc trước khi chèn thành viên; tin gửi trong khe đó tính là chưa đọc.
+- **M4:** sau khi deploy, cặp ẩn đã xem thấy "đã nhận" = 0 cho lịch sử cũ (cột mới rỗng); bật `hideRead` cũng hạ "đã nhận" người kia thấy về mốc thật. Trong lúc rolling deploy, pod cũ vẫn còn lỗi lộ.
+- **M5:** kênh đang mở tính theo người, không theo thiết bị (thiết bị B đóng kênh xoá luôn của thiết bị A).
+- **M6:** cột `refuse_adds boolean` thay vì `who_can_add text`; thêm `contacts` sau này cần một migration.
+- **M7:** tạo nhóm đọc quyền riêng tư tuần tự, tối đa 200 lần.
+- **M9:** test listener tự đưa lại bản ghi (MockConsumer không giao lại sau seek); chưa có test nhiều partition.
+- **M10:** listener ngủ tới 5 s trong luồng poll (dưới `max.poll.interval` 5 phút).
