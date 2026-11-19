@@ -1,5 +1,6 @@
 package com.pangate.chat.http;
 
+import com.pangate.chat.core.ApiLimits;
 import com.pangate.chat.auth.ConnectTokenVerifier.Caller;
 import com.pangate.chat.core.ChatRefusal;
 import com.pangate.chat.core.ChatStores;
@@ -37,9 +38,12 @@ public class QueryController {
   private final ChatStores.MemberStore members;
   private final ChatStores.MessageStore messages;
   private final com.pangate.chat.core.StateService state;
+  private final ApiLimits limits;
 
+  /** Perf 3a (spec §3.2): every handler checks its {@code limits} bucket before any store read. */
   public QueryController(Conversations conversations, SyncService sync, ChatStores.MemberStore members,
-      ChatStores.MessageStore messages, com.pangate.chat.core.StateService state) {
+      ChatStores.MessageStore messages, com.pangate.chat.core.StateService state, ApiLimits limits) {
+    this.limits = limits;
     this.state = state;
     this.conversations = conversations;
     this.sync = sync;
@@ -115,6 +119,7 @@ public class QueryController {
     if (cursor != null && !cursor.isEmpty() && !cursor.matches("\\d{1,19}:[0-9A-Z]{26}")) {
       throw new ChatRefusal(ChatRefusal.INVALID, "bad cursor");
     }
+    limits.check(ApiLimits.Bucket.LIST, userId(req));
     List<UserConv> page = members.userConvs(userId(req), cursor, n);
     List<Map<String, Object>> out = new ArrayList<>();
     String viewer = userId(req);
@@ -133,6 +138,7 @@ public class QueryController {
 
   @GetMapping("/v1/conversations/{id}")
   public Map<String, Object> get(@PathVariable("id") String id, HttpServletRequest req) {
+    limits.check(ApiLimits.Bucket.OTHER, userId(req));
     return conversation(conversations.visible(userId(req), id));
   }
 
@@ -148,6 +154,7 @@ public class QueryController {
     if ((before != null && before < 0) || (after != null && after < 0)) {
       throw new ChatRefusal(ChatRefusal.INVALID, "before / after are >= 0");
     }
+    limits.check(ApiLimits.Bucket.HISTORY, userId(req));
     Conversation c = conversations.visible(userId(req), id);
     List<StoredMessage> ms = after != null ? messages.after(id, after, n)
         : messages.before(id, Math.min(before == null ? Long.MAX_VALUE : before, c.lastSeq() + 1), n);
@@ -174,6 +181,7 @@ public class QueryController {
     if (per != null && perConv == 0) {
       throw new ChatRefusal(ChatRefusal.INVALID, "limitPerConversation is 1.." + SyncService.MAX_PER_CONV);
     }
+    limits.check(ApiLimits.Bucket.SYNC, userId(req));
     List<Map<String, Object>> out = new ArrayList<>();
     for (SyncResult r : sync.sync(userId(req), in, perConv)) {
       Map<String, Object> m = new LinkedHashMap<>();
@@ -202,6 +210,7 @@ public class QueryController {
     }
     @SuppressWarnings("unchecked")
     List<String> memberIds = ids == null ? List.of() : (List<String>) ids;
+    limits.check(ApiLimits.Bucket.MANAGE, userId(req));
     com.pangate.chat.core.Conversations.Created made = conversations.createReporting(userId(req),
         kind(body.get("kind")), (String) title, memberIds, Boolean.TRUE.equals(pub));
     Map<String, Object> out = new java.util.LinkedHashMap<>(conversation(made.conversation()));
@@ -211,6 +220,7 @@ public class QueryController {
 
   @PostMapping("/v1/dm/{userId}")
   public Map<String, Object> dm(@PathVariable("userId") String other, HttpServletRequest req) {
+    limits.check(ApiLimits.Bucket.MANAGE, userId(req));
     return conversation(conversations.openDm(userId(req), other));
   }
 
@@ -220,6 +230,7 @@ public class QueryController {
     if (!(body.get("userId") instanceof String u)) {
       throw new ChatRefusal(ChatRefusal.INVALID, "userId must be a string");
     }
+    limits.check(ApiLimits.Bucket.MANAGE, userId(req));
     conversations.addMember(userId(req), id, u);
     return ResponseEntity.noContent().build();
   }
@@ -227,6 +238,7 @@ public class QueryController {
   @DeleteMapping("/v1/conversations/{id}/members/{userId}")
   public ResponseEntity<Void> removeMember(@PathVariable("id") String id, @PathVariable("userId") String user,
       HttpServletRequest req) {
+    limits.check(ApiLimits.Bucket.MANAGE, userId(req));
     conversations.removeMember(userId(req), id, user);
     return ResponseEntity.noContent().build();
   }
@@ -241,6 +253,7 @@ public class QueryController {
       case "member" -> com.pangate.chat.core.ChatStores.Role.MEMBER;
       default -> throw new ChatRefusal(ChatRefusal.INVALID, "role must be admin or member");
     };
+    limits.check(ApiLimits.Bucket.MANAGE, userId(req));
     conversations.setRole(userId(req), id, user, role);
     return ResponseEntity.noContent().build();
   }
@@ -252,12 +265,14 @@ public class QueryController {
     if (!(body.get("userId") instanceof String u)) {
       throw new ChatRefusal(ChatRefusal.INVALID, "userId must be a string");
     }
+    limits.check(ApiLimits.Bucket.MANAGE, userId(req));
     conversations.transferOwnership(userId(req), id, u);
     return ResponseEntity.noContent().build();
   }
 
   @PostMapping("/v1/conversations/{id}/join")
   public ResponseEntity<Void> join(@PathVariable("id") String id, HttpServletRequest req) {
+    limits.check(ApiLimits.Bucket.MANAGE, userId(req));
     conversations.join(userId(req), id);
     return ResponseEntity.noContent().build();
   }

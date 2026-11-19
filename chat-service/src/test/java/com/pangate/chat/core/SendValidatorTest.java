@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 
 class SendValidatorTest {
 
-  static final ChatProperties.Limits LIMITS = new ChatProperties.Limits(20, 40, 50, 100, 500, 4096, 50);
+  static final ChatProperties.Limits LIMITS = new ChatProperties.Limits(20, 40, 50, 100, 500, 4096, 50, ChatProperties.Api.DEFAULTS);
 
   @Test
   void everyContractCase() {

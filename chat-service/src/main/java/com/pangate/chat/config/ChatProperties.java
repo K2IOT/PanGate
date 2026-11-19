@@ -50,7 +50,18 @@ public record ChatProperties(
   public record Limits(@DefaultValue("20") int userRate, @DefaultValue("40") int userBurst,
       @DefaultValue("50") int convRate, @DefaultValue("100") int convBurst,
       @DefaultValue("500") int maxGroupMembers, @DefaultValue("4096") int maxTextBytes,
-      @DefaultValue("50") int maxMentions) {}
+      @DefaultValue("50") int maxMentions, @DefaultValue Api api) {}
+
+  /** Perf 3a (spec §3.2): per-user limits of the HTTP API (rate per second, burst), per pod. */
+  public record Api(@DefaultValue("5") int listRate, @DefaultValue("20") int listBurst,
+      @DefaultValue("2") int stateRate, @DefaultValue("10") int stateBurst,
+      @DefaultValue("2") int syncRate, @DefaultValue("10") int syncBurst,
+      @DefaultValue("2") int presenceRate, @DefaultValue("10") int presenceBurst,
+      @DefaultValue("20") int historyRate, @DefaultValue("50") int historyBurst,
+      @DefaultValue("5") int manageRate, @DefaultValue("20") int manageBurst,
+      @DefaultValue("10") int otherRate, @DefaultValue("30") int otherBurst) {
+    public static final Api DEFAULTS = new Api(5, 20, 2, 10, 2, 10, 2, 10, 20, 50, 5, 20, 10, 30);
+  }
 
   public record Http(@DefaultValue("3s") Duration sendWait) {}
 

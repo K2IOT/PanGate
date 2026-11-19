@@ -98,6 +98,12 @@ public class ChatConfig {
         p.kafka().dlqTopic(), p.kafka().receiptsTopic());
   }
 
+  /** Perf 3a (spec §3.2): per-user limits of the HTTP API. */
+  @Bean
+  com.pangate.chat.core.ApiLimits apiLimits(ChatProperties p) {
+    return new com.pangate.chat.core.ApiLimits(p.limits().api(), System::nanoTime);
+  }
+
   /** A conversation's last seq, cached 5 s per pod: marks are clamped to it, channel views show it (perf 3a). */
   @Bean
   com.pangate.chat.core.LastSeqCache lastSeqCache(ScyllaChatStore store) {

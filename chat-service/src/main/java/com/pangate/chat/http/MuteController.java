@@ -1,5 +1,6 @@
 package com.pangate.chat.http;
 
+import com.pangate.chat.core.ApiLimits;
 import com.pangate.chat.core.ChatRefusal;
 import com.pangate.chat.core.ChatStores;
 import com.pangate.chat.core.Ids;
@@ -22,13 +23,15 @@ public class MuteController {
   private final ChatStores.MuteStore mutes;
   private final ChatStores.MemberStore members;
   private final LongSupplier wallMs;
+  private final ApiLimits limits;
 
   @Autowired
-  public MuteController(ChatStores.MuteStore mutes, ChatStores.MemberStore members) {
-    this(mutes, members, System::currentTimeMillis);
+  public MuteController(ChatStores.MuteStore mutes, ChatStores.MemberStore members, ApiLimits limits) {
+    this(mutes, members, System::currentTimeMillis, limits);
   }
 
-  MuteController(ChatStores.MuteStore mutes, ChatStores.MemberStore members, LongSupplier wallMs) {
+  MuteController(ChatStores.MuteStore mutes, ChatStores.MemberStore members, LongSupplier wallMs, ApiLimits limits) {
+    this.limits = limits;
     this.mutes = mutes;
     this.members = members;
     this.wallMs = wallMs;
@@ -41,6 +44,7 @@ public class MuteController {
       throw new ChatRefusal(ChatRefusal.INVALID, "conversation id must be a ULID");
     }
     String user = AuthFilter.caller(req).userId();
+    limits.check(ApiLimits.Bucket.OTHER, user);   // perf 3a: before the member lookup
     if (members.member(id, user).isEmpty()) {
       throw new ChatRefusal(ChatRefusal.FORBIDDEN, "not a member of this conversation");
     }

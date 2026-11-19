@@ -18,7 +18,8 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
     ChatStores.SettingsStore, ChatStores.LastSeenStore, ChatStores.MuteStore, ChatStores.ChannelProgressStore {
 
   public static final com.pangate.chat.config.ChatProperties.Limits LIMITS =
-      new com.pangate.chat.config.ChatProperties.Limits(20, 40, 50, 100, 500, 4096, 50);
+      new com.pangate.chat.config.ChatProperties.Limits(20, 40, 50, 100, 500, 4096, 50,
+          com.pangate.chat.config.ChatProperties.Api.DEFAULTS);
 
   public final Map<String, Conversation> convs = new ConcurrentHashMap<>();
   public final Map<String, Map<String, Member>> members = new ConcurrentHashMap<>();
