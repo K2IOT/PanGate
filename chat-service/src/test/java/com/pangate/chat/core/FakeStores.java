@@ -128,9 +128,14 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
 
   // --- CH3 marks: each column keeps its max, as USING TIMESTAMP <mark> does in ScyllaDB ---
 
+  public final Map<String, Long> shownDelivered = new ConcurrentHashMap<>();
+
   @Override public synchronized void advance(String convId, String userId, long deliveredSeq, long readSeq,
-      long atMs) {
+      long shownDeliveredSeq, long atMs) {
     check();
+    if (shownDeliveredSeq > 0) {
+      shownDelivered.merge(convId + "|" + userId, shownDeliveredSeq, Math::max);
+    }
     Integer left = failAdvanceFor.get(convId);
     if (left != null && left > 0) {
       failAdvanceFor.put(convId, left - 1);
@@ -157,7 +162,7 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
         throw new StoreUnavailableException("marks down", null);
       }
     }
-    advance(convId, userId, seq, seq, atMs);
+    advance(convId, userId, seq, seq, seq, atMs);
     sent.merge(convId + "|" + userId, seq, Math::max);
   }
 
@@ -172,7 +177,8 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
   @Override public List<ChatStores.MemberMarks> marks(String convId) {
     check();
     return convMarks.getOrDefault(convId, Map.of()).entrySet().stream()
-        .map(e -> new ChatStores.MemberMarks(e.getKey(), e.getValue().deliveredSeq(), e.getValue().readSeq())).toList();
+        .map(e -> new ChatStores.MemberMarks(e.getKey(), e.getValue().deliveredSeq(), e.getValue().readSeq(),
+            shownDelivered.getOrDefault(convId + "|" + e.getKey(), 0L))).toList();
   }
 
   @Override public ChatStores.Marks own(String userId, String convId) {

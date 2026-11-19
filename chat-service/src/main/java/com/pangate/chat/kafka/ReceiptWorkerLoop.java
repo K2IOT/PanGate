@@ -208,11 +208,12 @@ public final class ReceiptWorkerLoop implements AutoCloseable {
         to = members.of(f.convId());
         long now = System.currentTimeMillis();
         for (Map.Entry<String, Marks> e : f.byUser().entrySet()) {
-          marks.advance(f.convId(), e.getKey(), e.getValue().deliveredSeq(), e.getValue().readSeq(), now);
+          marks.advance(f.convId(), e.getKey(), e.getValue().deliveredSeq(), e.getValue().readSeq(),
+              f.deliveredOnly().getOrDefault(e.getKey(), 0L), now);
         }
         if (f.kind() == ConversationKind.CONVERSATION_KIND_DIRECT) {
           for (Member m : to) {
-            if (!f.byUser().containsKey(m.userId())) {
+            if (!f.byUser().containsKey(m.userId()) && ReceiptRecipients.peerSeesChange(f, m.userId(), privacy::of)) {
               marks.touchState(m.userId(), f.convId(), now);   // the peer's /v1/state shows the change (§7.2)
             }
           }

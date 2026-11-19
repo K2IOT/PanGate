@@ -41,6 +41,7 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   private final PreparedStatement selectMember;
   private final PreparedStatement joinUserConv;
   private final PreparedStatement joinMarks;
+  private final PreparedStatement markShown;
   private final PreparedStatement updateRole;
   private final PreparedStatement leaveUserConv;
   private final PreparedStatement touchUserConv;
@@ -108,6 +109,8 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     // CH3 §3.2: each mark cell's timestamp is its value, so a smaller mark never wins; state_at is wall time (µs)
     markDelivered = s.prepare("UPDATE " + ks + ".conv_marks USING TIMESTAMP ? SET delivered_seq = ? "
         + "WHERE conv_id = ? AND user_id = ?");
+    markShown = s.prepare("UPDATE " + ks + ".conv_marks USING TIMESTAMP ? SET shown_delivered_seq = ? "
+        + "WHERE conv_id = ? AND user_id = ?");
     markRead = s.prepare("UPDATE " + ks + ".conv_marks USING TIMESTAMP ? SET read_seq = ? WHERE conv_id = ? AND user_id = ?");
     inboxDelivered = s.prepare("UPDATE " + ks + ".user_convs USING TIMESTAMP ? SET delivered_seq = ? "
         + "WHERE user_id = ? AND conv_id = ?");
@@ -116,7 +119,8 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     markSentStmt = s.prepare("UPDATE " + ks + ".conv_marks USING TIMESTAMP ? SET last_sent_seq = ? "
         + "WHERE conv_id = ? AND user_id = ?");
     selectSent = s.prepare("SELECT last_sent_seq FROM " + ks + ".conv_marks WHERE conv_id = ? AND user_id = ?");
-    selectMarks = s.prepare("SELECT user_id, delivered_seq, read_seq FROM " + ks + ".conv_marks WHERE conv_id = ?");
+    selectMarks = s.prepare("SELECT user_id, delivered_seq, read_seq, shown_delivered_seq FROM " + ks
+        + ".conv_marks WHERE conv_id = ?");
     selectOwn = s.prepare("SELECT delivered_seq, read_seq FROM " + ks + ".user_convs WHERE user_id = ? AND conv_id = ?");
     selectStates = s.prepare("SELECT conv_id, kind, last_seq, read_seq, delivered_seq, state_at, left FROM " + ks
         + ".user_convs WHERE user_id = ?");
@@ -363,17 +367,19 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   }
 
   @Override
-  public void advance(String convId, String userId, long deliveredSeq, long readSeq, long atMs) {
-    advance(convId, userId, deliveredSeq, readSeq, 0, atMs);
+  public void advance(String convId, String userId, long deliveredSeq, long readSeq, long shownDeliveredSeq,
+      long atMs) {
+    write(convId, userId, deliveredSeq, readSeq, shownDeliveredSeq, 0, atMs);
   }
 
   /** Review of PR #6: the sender's three marks go in the same conv_marks batch, one round trip per message. */
   @Override
   public void sent(String convId, String userId, long seq, long atMs) {
-    advance(convId, userId, seq, seq, seq, atMs);
+    write(convId, userId, seq, seq, seq, seq, atMs);
   }
 
-  private void advance(String convId, String userId, long deliveredSeq, long readSeq, long sentSeq, long atMs) {
+  private void write(String convId, String userId, long deliveredSeq, long readSeq, long shownDeliveredSeq,
+      long sentSeq, long atMs) {
     var conv = com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
         com.datastax.oss.driver.api.core.cql.DefaultBatchType.UNLOGGED);
     var inbox = com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
@@ -385,6 +391,9 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     if (readSeq > 0) {
       conv.addStatement(markRead.bind(readSeq, readSeq, convId, userId));
       inbox.addStatement(inboxRead.bind(readSeq, readSeq, userId, convId));
+    }
+    if (shownDeliveredSeq > 0) {
+      conv.addStatement(markShown.bind(shownDeliveredSeq, shownDeliveredSeq, convId, userId));
     }
     if (sentSeq > 0) {
       conv.addStatement(markSentStmt.bind(sentSeq, sentSeq, convId, userId));
@@ -412,7 +421,7 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   public List<ChatStores.MemberMarks> marks(String convId) {
     List<ChatStores.MemberMarks> out = new ArrayList<>();
     for (Row r : exec(selectMarks.bind(convId))) {
-      out.add(new ChatStores.MemberMarks(r.getString(0), r.getLong(1), r.getLong(2)));
+      out.add(new ChatStores.MemberMarks(r.getString(0), r.getLong(1), r.getLong(2), r.getLong(3)));
     }
     return out;
   }

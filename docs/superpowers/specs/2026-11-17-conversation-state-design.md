@@ -282,7 +282,7 @@ Tin gửi từ thiết bị khác của tôi tới như mọi tin (CH1 §4.1 bư
 | Người kia `hideRead` | — | Không có mốc đọc của họ (DM: tin của mình dừng ở "Đã nhận"; nhóm: không có trong danh sách và không tính vào `readCount`) |
 | Người xem `hideRead` | — | Không thấy mốc đọc của ai (có qua có lại) |
 
-- `delivered_seq` ("Đã nhận") không bị ảnh hưởng bởi `hideRead`.
+- `delivered_seq` ("Đã nhận") không bị ảnh hưởng bởi `hideRead`. **Sửa 2026-11-19 (F3):** với một cặp không được thấy nhau đọc, "Đã nhận" trả về là `shown_delivered_seq`, chỉ tăng theo `chat.delivered` thật (hoặc khi gửi tin), không theo lần đọc (đọc kéo `delivered_seq` lên theo §3.1, nên trước đây lần đọc lộ ra thành "Đã nhận"); và một lần đọc ẩn không đóng dấu `state_at` của người kia, để `/v1/state?since` không cho biết lúc đọc.
 - Mốc đọc của người `hideRead` vẫn được ghi (số chưa đọc của chính họ vẫn đúng, S4); chỉ không bao giờ được trả cho người khác, kể cả gián tiếp qua `readCount` hay `peer`.
 - Bật `hideRead` không xoá các mốc người khác đã thấy trước đó.
 

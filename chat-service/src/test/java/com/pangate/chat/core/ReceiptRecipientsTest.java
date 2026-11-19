@@ -152,4 +152,17 @@ class ReceiptRecipientsTest {
     assertThat(payload(to(out, "u2").getFirst()).getMarksList()).extracting(ReceiptUpdate.Mark::getUserId)
         .containsExactly("u1");
   }
+
+  /** Review 2026-11-19 (F3): the other member of a DM sees its state change only when there is something to see. */
+  @Test
+  void aHiddenReadDoesNotTouchThePeersState() {
+    Function<String, Privacy> bHides = u -> u.equals("b") ? new Privacy(false, true) : Privacy.OPEN;
+    ReceiptAggregator.Flush readOnly = new ReceiptAggregator.Flush("c1", ConversationKind.CONVERSATION_KIND_DIRECT,
+        Map.of("b", new Marks(5, 5)), Map.of());
+    assertThat(ReceiptRecipients.peerSeesChange(readOnly, "a", bHides)).isFalse();
+    assertThat(ReceiptRecipients.peerSeesChange(readOnly, "a", OPEN)).isTrue();
+    ReceiptAggregator.Flush delivered = new ReceiptAggregator.Flush("c1", ConversationKind.CONVERSATION_KIND_DIRECT,
+        Map.of("b", new Marks(5, 5)), Map.of("b", 4L));
+    assertThat(ReceiptRecipients.peerSeesChange(delivered, "a", bHides)).as("a real chat.delivered shows").isTrue();
+  }
 }

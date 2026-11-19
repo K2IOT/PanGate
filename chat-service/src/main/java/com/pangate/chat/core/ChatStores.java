@@ -69,7 +69,20 @@ public final class ChatStores {
     public static final Marks NONE = new Marks(0, 0);
   }
 
-  public record MemberMarks(String userId, long deliveredSeq, long readSeq) {}
+  /**
+   * {@code shownDeliveredSeq}: review 2026-11-19 (F3), the delivered mark shown to a member who may not see this one's
+   * reads: only a real {@code chat.delivered} (or sending) raises it, never a read.
+   */
+  public record MemberMarks(String userId, long deliveredSeq, long readSeq, long shownDeliveredSeq) {
+    public MemberMarks(String userId, long deliveredSeq, long readSeq) {
+      this(userId, deliveredSeq, readSeq, 0);
+    }
+
+    /** What {@code viewer} sees of the delivered mark: all of it, or only real deliveries when reads are hidden. */
+    public long deliveredFor(boolean readsVisible) {
+      return readsVisible ? deliveredSeq : shownDeliveredSeq;
+    }
+  }
 
   /** An inbox row with its marks and the time its state last changed (CH3 §7.2). */
   public record UserConvState(String convId, ConversationKind kind, long lastSeq, long readSeq, long deliveredSeq,
@@ -91,7 +104,12 @@ public final class ChatStores {
    */
   public interface MarkStore {
     /** Raises the user's marks in {@code conv_marks} and {@code user_convs}, and stamps the inbox row's state. */
-    void advance(String convId, String userId, long deliveredSeq, long readSeq, long atMs);
+    default void advance(String convId, String userId, long deliveredSeq, long readSeq, long atMs) {
+      advance(convId, userId, deliveredSeq, readSeq, 0, atMs);
+    }
+
+    /** Also raises {@code shownDeliveredSeq} (F3): the delivered mark that came from a real chat.delivered; 0 = none. */
+    void advance(String convId, String userId, long deliveredSeq, long readSeq, long shownDeliveredSeq, long atMs);
 
     /** Stamps the inbox row's state time only (the other member of a DM saw a mark move). */
     void touchState(String userId, String convId, long atMs);
