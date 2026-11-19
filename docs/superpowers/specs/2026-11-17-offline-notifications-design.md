@@ -38,7 +38,7 @@
 - nhiều cell.
 
 **Bất biến:**
-1. Không gửi thông báo cho một người đang có ít nhất một thiết bị nhận được tin đó (N1). Với kênh: không gửi cho người đang online (§4.2).
+1. Không gửi thông báo cho một người đang có ít nhất một thiết bị nhận được tin đó (N1). Với kênh: không gửi cho người đang online **và đang mở kênh đó** (§4.2, sửa 2026-11-19 F6).
 2. Token của một thiết bị đã bị thu hồi (đăng xuất, khoá, đổi mật khẩu, xoá tài khoản) không nhận thông báo nào sau khi `notify-service` đọc được lệnh thu hồi trên `gw.control`.
 3. Một push token chỉ thuộc một thiết bị: đăng ký lại cùng token cho thiết bị khác (cài lại app, đổi tài khoản) gỡ nó khỏi thiết bị cũ. Một chiếc điện thoại không bao giờ nhận thông báo của tài khoản đã đăng xuất trên nó.
 4. Một tin sinh tối đa một thông báo trên mỗi thiết bị, kể cả khi `OfflineRecord` hay yêu cầu thông báo bị đọc lại (§5.4).
@@ -161,7 +161,7 @@ Store lỗi tạm thì thử lại như các loop khác của chat-service (lùi
 ### 4.2 Worker `ChannelNotifier`
 
 - Consumer group `chat-channel-notify`. Một job duyệt `members` của kênh theo trang 1 000 dòng (partition `conv_id`, thứ tự `user_id`).
-- Với mỗi trang: bỏ người đã tắt kênh (`muted_until`, trừ khi được nhắc tên), bỏ người gửi, bỏ người **đang online** (presence của CH3: `pres:{user}` khác rỗng, đọc pipeline cả trang), bỏ người bật ẩn xem trước khỏi phần nội dung (vẫn đẩy, dạng `loc_key`). Produce một `NotifyRequest` mỗi người còn lại: `badge = -1` (không đổi badge, xem §9), `thread_id = convId`, **`collapse_id = convId`** (bài sau thay thông báo của bài trước trên máy).
+- Với mỗi trang: bỏ người đã tắt kênh (`muted_until`, trừ khi được nhắc tên), bỏ người gửi, bỏ người **đang online và đang mở kênh** (presence của CH3: `pres:{user}` khác rỗng, và `chanopen:{user}` chứa kênh, cả hai đọc pipeline cả trang; sửa 2026-11-19 F6: trước đây bỏ mọi người online, nên người online chưa mở kênh không nhận được gì), bỏ người bật ẩn xem trước khỏi phần nội dung (vẫn đẩy, dạng `loc_key`). Produce một `NotifyRequest` mỗi người còn lại: `badge = -1` (không đổi badge, xem §9), `thread_id = convId`, **`collapse_id = convId`** (bài sau thay thông báo của bài trước trên máy).
 - **Bài mới thay job cũ:** chỉ giữ một job sống mỗi kênh. Bài mới tới khi job cũ chưa xong thì **tiếp con trỏ** của job cũ (chốt khi hiện thực: bản nháp nói "duyệt lại từ đầu", trái với "không ai nhận hai lượt"). Người chưa được báo nhận bài mới, người đã được báo giữ thông báo bài cũ (cùng `collapse_id`); không ai nhận hai lượt cho một loạt bài. Bài cũ hơn 1 giờ thì job bỏ.
 - **Giới hạn tốc độ:** mỗi pod tối đa 5 000 `NotifyRequest`/s cho kênh (`chat.notify.channel-rate`), dùng chung cho mọi kênh; DM/nhóm không bị giới hạn này.
 - **Bền qua restart:** sau mỗi trang ghi điểm dừng `(convId, convSeq, lastUserId)` vào bảng `channel_notify_progress` (Scylla, TTL 1 ngày) rồi mới commit offset khi job xong. Pod chết giữa chừng: pod nhận partition đọc lại job và đi tiếp từ điểm dừng. Trang cuối có thể bị gửi lại; notify dedup theo `request_id = "<msgId>/<userId>"`.

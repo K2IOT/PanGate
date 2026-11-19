@@ -72,4 +72,26 @@ public final class ReceiptRecipients {
     }
     return out;
   }
+
+  /**
+   * Review 2026-11-19 (F3): whether {@code peer} sees anything of this flush, so their inbox row's state time may
+   * move: a reader whose reads the pair may see, or a delivered mark from a real {@code chat.delivered}. A hidden read
+   * alone stamps nothing, or {@code /v1/state?since} would time it.
+   */
+  public static boolean peerSeesChange(ReceiptAggregator.Flush f, String peer, Function<String, Privacy> privacy) {
+    Privacy pv = privacy.apply(peer);
+    for (Map.Entry<String, Marks> e : f.byUser().entrySet()) {
+      if (e.getKey().equals(peer)) {
+        continue;
+      }
+      if (PrivacyRules.mayShowRead(privacy.apply(e.getKey()), pv)) {
+        return true;
+      }
+      Long delivered = f.deliveredOnly().get(e.getKey());
+      if (delivered != null && delivered > 0) {
+        return true;
+      }
+    }
+    return false;
+  }
 }

@@ -32,7 +32,7 @@ class QueryApiIT {
     s = new ChatStack().start();
     // account spec §8: only users published on account.users join conversations
     com.pangate.chat.support.KnownUsers.add(s.kafka.getBootstrapServers(), s.chat, "su", "sx", "sy", "sz", "ha",
-        "hb", "pa", "pb", "ra", "rb", "rc", "fan", "x");
+        "hb", "pa", "pb", "ra", "rb", "rc", "fan", "x", "oa", "ob", "oc", "od", "wa", "wn", "wy");
   }
 
   @AfterAll
@@ -149,5 +149,42 @@ class QueryApiIT {
     assertThat(s.call("POST", "/v1/conversations/" + ch + "/join", "fan", null).statusCode()).isEqualTo(204);
     assertThat(s.call("GET", "/v1/conversations/" + ch, "anyone", null).statusCode()).isEqualTo(200);
     assertThat(s.call("POST", "/v1/conversations/" + g + "/join", "fan", null).statusCode()).isEqualTo(403);
+  }
+
+  /** Review 2026-11-19 (F2): the owner makes admins and hands ownership on through the HTTP API. */
+  @Test
+  void ownerSetsRolesAndTransfersOwnership() {
+    String g = group("oa", "ob", "oc");
+    String role = "/v1/conversations/" + g + "/members/ob/role";
+    assertThat(s.call("POST", "/v1/conversations/" + g + "/members", "ob", Map.of("userId", "od")).statusCode())
+        .isEqualTo(403);
+    assertThat(s.call("PUT", role, "oc", Map.of("role", "admin")).statusCode()).isEqualTo(403);
+    assertThat(s.call("PUT", role, "oa", Map.of("role", "boss")).statusCode()).isEqualTo(400);
+    assertThat(s.call("PUT", role, "oa", Map.of("role", "admin")).statusCode()).isEqualTo(204);
+    assertThat(s.call("POST", "/v1/conversations/" + g + "/members", "ob", Map.of("userId", "od")).statusCode())
+        .as("an admin adds members").isEqualTo(204);
+    assertThat(s.call("POST", "/v1/conversations/" + g + "/owner", "oa", Map.of("userId", "oc")).statusCode())
+        .isEqualTo(204);
+    assertThat(s.call("PUT", "/v1/conversations/" + g + "/members/od/role", "oa", Map.of("role", "admin"))
+        .statusCode()).as("the old owner is an admin now").isEqualTo(403);
+    assertThat(s.call("PUT", "/v1/conversations/" + g + "/members/od/role", "oc", Map.of("role", "admin"))
+        .statusCode()).isEqualTo(204);
+  }
+
+  /** Review 2026-11-19 (F7): whoCanAdd = nobody keeps others from putting you into groups and channels. */
+  @Test
+  void whoCanAddNobodyIsLeftOut() {
+    assertThat(s.call("PUT", "/v1/me/privacy", "wn", Map.of("whoCanAdd", "friends")).statusCode()).isEqualTo(400);
+    assertThat(s.call("PUT", "/v1/me/privacy", "wn", Map.of("whoCanAdd", "nobody")).statusCode()).isEqualTo(204);
+    assertThat(s.json(s.call("GET", "/v1/me/privacy", "wn", null)).get("whoCanAdd").asText()).isEqualTo("nobody");
+    assertThat(s.json(s.call("GET", "/v1/me/privacy", "wy", null)).get("whoCanAdd").asText()).isEqualTo("everyone");
+    HttpResponse<String> r = s.call("POST", "/v1/conversations", "wa", Map.of("kind", "group", "title", "g",
+        "memberIds", List.of("wn", "wy")));
+    assertThat(r.statusCode()).as(r.body()).isEqualTo(201);
+    assertThat(s.json(r).get("notAdded").get(0).asText()).isEqualTo("wn");
+    String g = s.json(r).get("id").asText();
+    HttpResponse<String> add = s.call("POST", "/v1/conversations/" + g + "/members", "wa", Map.of("userId", "wn"));
+    assertThat(add.statusCode()).isEqualTo(403);
+    assertThat(add.body()).contains("add_refused");
   }
 }

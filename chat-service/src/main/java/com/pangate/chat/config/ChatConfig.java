@@ -239,7 +239,9 @@ public class ChatConfig {
   @Bean
   Conversations conversations(ScyllaChatStore store, RedisChatCache cache, ChatProperties p,
       ChannelSubscriptions channels, UserDirectory users) {
-    return new Conversations(store, store, new MemberLookup(store, cache), p.limits(), channels::revoke, users);
+    // F7: whoCanAdd read from the store, not the 60 s privacy cache
+    return new Conversations(store, store, new MemberLookup(store, cache), p.limits(), channels::revoke, users,
+        store::privacy);
   }
 
   /** account spec §8: users known from account.users. */
@@ -319,9 +321,10 @@ public class ChatConfig {
   }
 
   @Bean
-  ChannelSubscriptions channelSubscriptions(ScyllaChatStore store, PushApiClient pusher, MeterRegistry meters) {
+  ChannelSubscriptions channelSubscriptions(ScyllaChatStore store, PushApiClient pusher, MeterRegistry meters,
+      com.pangate.chat.store.RedisPresence presence) {
     return new ChannelSubscriptions(store, store, pusher,
-        result -> meters.counter("chat.channel.control", "result", result).increment());
+        result -> meters.counter("chat.channel.control", "result", result).increment(), presence);
   }
 
   @Bean

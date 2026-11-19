@@ -93,4 +93,11 @@ class OfflineNotificationsTest {
     assertThat(n.handle(rec("chat", "chat.message", "u2", m), NOW).request()).get()
         .satisfies(q -> assertThat(q.getAlert().getBody()).isEqualTo("u3: hi"));
   }
+
+  /** Review 2026-11-19 (F4): the inbox row is raised after the pushes, so the message itself must be counted. */
+  @Test
+  void theBadgeCountsTheMessageBeforeFanOutRaisesTheInbox() {
+    OfflineNotifications.Result r = n.handle(rec("chat", "chat.message", "u2", msg(NOW - 1_000)), NOW);
+    assertThat(r.request().get().getBadge()).isEqualTo(1);
+  }
 }

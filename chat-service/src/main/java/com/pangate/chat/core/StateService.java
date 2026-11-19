@@ -100,7 +100,7 @@ public final class StateService {
     boolean showRead = PrivacyRules.mayShowRead(privacy.of(other), privacy.of(viewer));
     Map<String, Object> p = new LinkedHashMap<>();
     p.put("userId", other);
-    p.put("deliveredSeq", mm.deliveredSeq());
+    p.put("deliveredSeq", mm.deliveredFor(showRead));   // F3: a hidden read never shows up as "delivered"
     p.put("readSeq", showRead ? mm.readSeq() : 0L);
     return p;
   }
@@ -159,8 +159,9 @@ public final class StateService {
         MemberMarks mm = by.getOrDefault(m.userId(), new MemberMarks(m.userId(), 0, 0));
         Map<String, Object> e = new LinkedHashMap<>();
         e.put("userId", m.userId());
-        e.put("deliveredSeq", mm.deliveredSeq());
-        e.put("readSeq", PrivacyRules.mayShowRead(privacy.of(m.userId()), pv) ? mm.readSeq() : 0L);
+        boolean showRead = PrivacyRules.mayShowRead(privacy.of(m.userId()), pv);
+        e.put("deliveredSeq", mm.deliveredFor(showRead));
+        e.put("readSeq", showRead ? mm.readSeq() : 0L);
         list.add(e);
       }
       out.put("marks", list);

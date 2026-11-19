@@ -28,7 +28,7 @@ class StateApiIT {
       crowd.add("cr" + i);
     }
     List<String> all = new ArrayList<>(crowd);
-    all.addAll(List.of("la", "lb", "ta", "tb", "tc", "ha", "hb", "va", "vb"));
+    all.addAll(List.of("la", "lb", "ta", "tb", "tc", "ha", "hb", "va", "vb", "ja", "jb", "jc", "jd", "xa", "xb"));
     KnownUsers.add(s.kafka.getBootstrapServers(), s.chat, all.toArray(String[]::new));
   }
 
@@ -147,7 +147,8 @@ class StateApiIT {
     long t0 = System.currentTimeMillis() - 60_000;
     await().atMost(Duration.ofSeconds(20)).pollInterval(Duration.ofMillis(1_100)).untilAsserted(() -> {
       JsonNode a = row("ha", d);
-      assertThat(a.get("peer").get("deliveredSeq").asLong()).isEqualTo(1);
+      // review 2026-11-19 (F3): hb only read (no chat.delivered), so its delivered mark would be its read mark
+      assertThat(a.get("peer").get("deliveredSeq").asLong()).isZero();
       assertThat(a.get("peer").get("readSeq").asLong()).isZero();
       for (JsonNode c : s.json(s.call("GET", "/v1/state?since=" + t0, "ha", null)).get("conversations")) {
         if (c.get("id").asText().equals(d)) {
@@ -170,5 +171,57 @@ class StateApiIT {
     // reciprocal: hb hides reads, so hb sees nobody's
     JsonNode seen = s.json(s.call("GET", "/v1/conversations/" + g + "/receipts?seq=1", "hb", null)).get("marks");
     seen.forEach(m -> assertThat(m.get("readSeq").asLong()).isZero());
+  }
+
+  /** Review 2026-11-19 (F1): a member added later, or a follower joining, does not inherit the history as unread. */
+  @Test
+  void newMembersStartWithNothingUnread() {
+    String g = group("ja", List.of("jb"));
+    for (int i = 0; i < 3; i++) {
+      s.send("ja", g, "before " + i);
+    }
+    HttpResponse<String> ch = s.call("POST", "/v1/conversations", "ja", Map.of("kind", "channel", "title", "c",
+        "public", true));
+    String c = s.json(ch).get("id").asText();
+    for (int i = 0; i < 3; i++) {
+      s.send("ja", c, "post " + i);
+    }
+    await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
+      assertThat(row("jb", g).get("lastSeq").asLong()).isEqualTo(3);
+      assertThat(row("ja", c).get("lastSeq").asLong()).isEqualTo(3);
+    });
+    assertThat(s.call("POST", "/v1/conversations/" + g + "/members", "ja", Map.of("userId", "jc")).statusCode())
+        .isEqualTo(204);
+    assertThat(s.call("POST", "/v1/conversations/" + c + "/join", "jd", null).statusCode()).isEqualTo(204);
+    assertThat(row("jc", g).get("unread").asInt()).isZero();
+    assertThat(row("jd", c).get("unread").asInt()).isZero();
+    s.send("ja", g, "after");
+    s.send("ja", c, "after");
+    await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
+      assertThat(row("jc", g).get("unread").asInt()).isEqualTo(1);
+      assertThat(row("jd", c).get("unread").asInt()).isEqualTo(1);
+    });
+  }
+
+  /**
+   * Review 2026-11-19 (F3): with reads hidden, the other side sees only delivered marks that came from a real
+   * chat.delivered, never a read showing up as "delivered".
+   */
+  @Test
+  void hiddenReadsDoNotShowAsDelivered() {
+    assertThat(s.call("PUT", "/v1/me/privacy", "xb", Map.of("hideRead", true)).statusCode()).isEqualTo(204);
+    String d = dm("xa", "xb");
+    s.send("xa", d, "1");
+    s.send("xa", d, "2");
+    read("xb", d, 2);
+    await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
+      assertThat(row("xb", d).get("readSeq").asLong()).isEqualTo(2);   // the read is stored (conv_marks first)
+      assertThat(row("xb", d).get("unread").asInt()).isZero();
+    });
+    assertThat(row("xa", d).get("peer").get("deliveredSeq").asLong()).isZero();
+    assertThat(s.call("POST", "/v1/conversations/" + d + "/delivered", "xb", Map.of("upToSeq", 1)).statusCode())
+        .isEqualTo(204);
+    await().atMost(Duration.ofSeconds(20)).untilAsserted(() ->
+        assertThat(row("xa", d).get("peer").get("deliveredSeq").asLong()).isEqualTo(1));
   }
 }

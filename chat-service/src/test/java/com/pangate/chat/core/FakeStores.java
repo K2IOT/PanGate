@@ -65,8 +65,23 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
     return c == null ? Optional.empty() : Optional.of(new Conversation(c.id(), c.kind(), c.title(), c.createdBy(),
         lastSeq.getOrDefault(id, 0L), c.isPublic(), c.memberCount()));
   }
+  public final Map<String, String> owners = new ConcurrentHashMap<>();
+
+  @Override public Optional<String> owner(String convId) {
+    return Optional.ofNullable(owners.get(convId));
+  }
+
+  @Override public synchronized boolean claimOwner(String convId, String expected, String next) {
+    if (!java.util.Objects.equals(owners.get(convId), expected)) {
+      return false;
+    }
+    owners.put(convId, next);
+    return true;
+  }
+
   @Override public void create(Conversation c, List<Member> ms) {
     check();
+    ms.stream().filter(m -> m.role() == ChatStores.Role.OWNER).findFirst().ifPresent(o -> owners.put(c.id(), o.userId()));
     convs.put(c.id(), c);
     lastSeq.put(c.id(), 0L);
     ms.forEach(m -> add(c.id(), m));
@@ -99,8 +114,24 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
     joined.putIfAbsent(convId + "|" + m.userId(), joins.incrementAndGet());
     Conversation c = convs.get(convId);
     userConvs.computeIfAbsent(m.userId(), k -> new ConcurrentHashMap<>())
-        .putIfAbsent(convId, new UserConv(convId, c == null ? null : c.kind(), 0, 0, 0));
+        .putIfAbsent(convId, new UserConv(convId, c == null ? null : c.kind(), lastSeq.getOrDefault(convId, 0L),
+            lastSeq.getOrDefault(convId, 0L), 0, lastSeq.getOrDefault(convId, 0L)));
   }
+  /** Runs once, before the next setRole: a racing request in between. */
+  public volatile java.util.function.BiConsumer<String, String> beforeSetRole;
+
+  @Override public void setRole(String convId, String userId, ChatStores.Role role) {
+    java.util.function.BiConsumer<String, String> hook = beforeSetRole;
+    beforeSetRole = null;
+    if (hook != null) {
+      hook.accept(convId, userId);
+    }
+    Member m = members.getOrDefault(convId, Map.of()).get(userId);
+    if (m != null) {   // IF EXISTS
+      members.get(convId).put(userId, new Member(userId, role));
+    }
+  }
+
   @Override public void remove(String convId, String userId) {
     check();
     members.getOrDefault(convId, Map.of()).remove(userId);
@@ -127,9 +158,14 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
 
   // --- CH3 marks: each column keeps its max, as USING TIMESTAMP <mark> does in ScyllaDB ---
 
+  public final Map<String, Long> shownDelivered = new ConcurrentHashMap<>();
+
   @Override public synchronized void advance(String convId, String userId, long deliveredSeq, long readSeq,
-      long atMs) {
+      long shownDeliveredSeq, long atMs) {
     check();
+    if (shownDeliveredSeq > 0) {
+      shownDelivered.merge(convId + "|" + userId, shownDeliveredSeq, Math::max);
+    }
     Integer left = failAdvanceFor.get(convId);
     if (left != null && left > 0) {
       failAdvanceFor.put(convId, left - 1);
@@ -156,7 +192,7 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
         throw new StoreUnavailableException("marks down", null);
       }
     }
-    advance(convId, userId, seq, seq, atMs);
+    advance(convId, userId, seq, seq, seq, atMs);
     sent.merge(convId + "|" + userId, seq, Math::max);
   }
 
@@ -171,7 +207,8 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
   @Override public List<ChatStores.MemberMarks> marks(String convId) {
     check();
     return convMarks.getOrDefault(convId, Map.of()).entrySet().stream()
-        .map(e -> new ChatStores.MemberMarks(e.getKey(), e.getValue().deliveredSeq(), e.getValue().readSeq())).toList();
+        .map(e -> new ChatStores.MemberMarks(e.getKey(), e.getValue().deliveredSeq(), e.getValue().readSeq(),
+            shownDelivered.getOrDefault(convId + "|" + e.getKey(), 0L))).toList();
   }
 
   @Override public ChatStores.Marks own(String userId, String convId) {
@@ -203,10 +240,11 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
   }
 
   @Override public synchronized void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead,
-      Boolean hidePreview, long atMs) {
+      Boolean hidePreview, Boolean refuseAdds, long atMs) {
     ChatStores.Privacy cur = privacy(userId);
     privacy.put(userId, new ChatStores.Privacy(hidePresence == null ? cur.hidePresence() : hidePresence,
-        hideRead == null ? cur.hideRead() : hideRead, hidePreview == null ? cur.hidePreview() : hidePreview));
+        hideRead == null ? cur.hideRead() : hideRead, hidePreview == null ? cur.hidePreview() : hidePreview,
+        refuseAdds == null ? cur.refuseAdds() : refuseAdds));
   }
 
   public final Map<String, ChatStores.ChannelProgress> channelProgress = new ConcurrentHashMap<>();

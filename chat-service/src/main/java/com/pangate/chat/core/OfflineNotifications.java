@@ -71,7 +71,7 @@ public final class OfflineNotifications {
     }
     boolean hide = privacy.fresh(user).hidePreview();
     NotifyRequest q = NotificationComposer.compose(m, c.get().kind(), c.get().title(), names.of(m.getSenderId(), nowMs),
-        hide, badge.total(user), user, record.getTenantId());
+        hide, badge.total(user, m.getConversationId(), m.getConvSeq()), user, record.getTenantId());
     return new Result("sent", Optional.of(q));
   }
 

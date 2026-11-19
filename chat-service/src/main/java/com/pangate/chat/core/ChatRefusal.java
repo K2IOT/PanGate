@@ -12,6 +12,8 @@ public final class ChatRefusal extends RuntimeException {
   /** CH3 spec §3.4: receipts of a channel. */
   public static final String NOT_SUPPORTED = "not_supported";
   public static final String RATE_LIMITED = "rate_limited";
+  /** Review 2026-11-19 (F7): the user's whoCanAdd is nobody. */
+  public static final String ADD_REFUSED = "add_refused";
 
   private final String code;
 

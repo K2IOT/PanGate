@@ -67,6 +67,7 @@ class AccountRemovalTest {
   void aRetryAfterThePromotionDoesNotPromoteAgain() {
     String g = conv(ConversationKind.CONVERSATION_KIND_GROUP, new Member("gone", Role.OWNER),
         new Member("a1", Role.OWNER), new Member("a2", Role.ADMIN), new Member("m1", Role.MEMBER));
+    stores.owners.remove(g);   // a conversation from before V8 (no owner_id): the member rows tell the owner
     removal.removed("gone");
     assertThat(stores.member(g, "gone")).isEmpty();
     assertThat(stores.members(g).stream().filter(m -> m.role() == Role.OWNER)).extracting(Member::userId)

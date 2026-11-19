@@ -29,7 +29,7 @@ public class ProblemHandler {
   @ExceptionHandler(com.pangate.chat.core.ChatRefusal.class)
   ResponseEntity<ProblemDetail> refusal(com.pangate.chat.core.ChatRefusal e) {
     int status = switch (e.code()) {
-      case com.pangate.chat.core.ChatRefusal.FORBIDDEN -> 403;
+      case com.pangate.chat.core.ChatRefusal.FORBIDDEN, com.pangate.chat.core.ChatRefusal.ADD_REFUSED -> 403;
       case com.pangate.chat.core.ChatRefusal.NOT_FOUND, com.pangate.chat.core.ChatRefusal.USER_NOT_FOUND,
           com.pangate.chat.core.ChatRefusal.USER_DELETED, com.pangate.chat.core.ChatRefusal.NOT_SUPPORTED -> 404;
       case com.pangate.chat.core.ChatRefusal.RATE_LIMITED -> 429;

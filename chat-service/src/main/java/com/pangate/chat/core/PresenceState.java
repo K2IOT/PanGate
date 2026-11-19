@@ -34,8 +34,14 @@ public interface PresenceState {
     return out;
   }
 
-  /** True when this event id was handled before (dedup, kept 1 h); marks it handled otherwise. */
-  boolean seen(String eventId);
+  /** True when this event id was handled before (dedup, kept 1 h). */
+  boolean handled(String eventId);
+
+  /**
+   * Review 2026-11-19 (F5): marks the event handled; called only after it was applied, so an event whose write
+   * failed is applied again when it is read again.
+   */
+  void markHandled(String eventId);
 
   /** The user's last connection closed at {@code atMs}; offline once the grace ends. */
   void markGone(String userId, long atMs);
@@ -58,4 +64,24 @@ public interface PresenceState {
   boolean claimGrace(String userId);
 
   void cancelGrace(String userId);
+
+  // --- review 2026-11-19 (F6): channels a user has open ----------------------------------------------------------
+
+  /** {@code chat.channel.open}: the user's connections get this channel's posts live. */
+  void channelOpened(String userId, String convId);
+
+  /** {@code chat.channel.close}, or the server ended the subscription (left the channel). */
+  void channelClosed(String userId, String convId);
+
+  /** The user went offline: every subscription ended with their connections. */
+  void clearOpenChannels(String userId);
+
+  /** Of {@code userIds}, those with {@code convId} open. */
+  java.util.Set<String> haveOpen(String convId, java.util.Collection<String> userIds);
+
+  /**
+   * Batch 1 review I2: forgets a dead node's connection list once every user it emptied was handled. Until then a
+   * retried {@link #dropNode} still finds them.
+   */
+  void forgetNode(String node, long epoch);
 }

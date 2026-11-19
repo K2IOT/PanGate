@@ -5,7 +5,6 @@ import com.pangate.chat.core.PresenceState;
 import com.pangate.chat.core.StoreUnavailableException;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
-import io.lettuce.core.SetArgs;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.sync.RedisCommands;
 import java.time.Duration;
@@ -107,13 +106,19 @@ public final class RedisPresence implements PresenceState, com.pangate.chat.core
       for (String uc : r.smembers(key)) {
         int slash = uc.indexOf('/');
         String user = uc.substring(0, slash);
-        if (r.srem("pres:" + user, node + "/" + uc.substring(slash + 1)) == 1 && r.scard("pres:" + user) == 0) {
+        // batch 1 review I2: a retry finds the entry gone already; the user still counts as emptied
+        r.srem("pres:" + user, node + "/" + uc.substring(slash + 1));
+        if (r.scard("pres:" + user) == 0) {
           emptied.add(user);
         }
       }
-      r.del(key);
       return emptied;
     });
+  }
+
+  @Override
+  public void forgetNode(String node, long epoch) {
+    call(r -> r.del("presnode:" + node + ":" + epoch));
   }
 
   @Override
@@ -152,8 +157,13 @@ public final class RedisPresence implements PresenceState, com.pangate.chat.core
   }
 
   @Override
-  public boolean seen(String eventId) {
-    return call(r -> r.set("presev:" + eventId, "1", SetArgs.Builder.nx().ex(EVENT_TTL)) == null);
+  public boolean handled(String eventId) {
+    return call(r -> r.exists("presev:" + eventId) > 0);
+  }
+
+  @Override
+  public void markHandled(String eventId) {
+    call(r -> r.setex("presev:" + eventId, EVENT_TTL.toSeconds(), "1"));
   }
 
   @Override
@@ -197,6 +207,56 @@ public final class RedisPresence implements PresenceState, com.pangate.chat.core
   @Override
   public boolean claimGrace(String userId) {
     return call(r -> r.zrem("presgrace", userId) == 1);
+  }
+
+  // --- review 2026-11-19 (F6): open channels, chanopen:<user> = conv ids, kept a day after the last open ---------
+
+  @Override
+  public void channelOpened(String userId, String convId) {
+    call(r -> {
+      r.sadd("chanopen:" + userId, convId);
+      return r.expire("chanopen:" + userId, SET_TTL);
+    });
+  }
+
+  @Override
+  public void channelClosed(String userId, String convId) {
+    call(r -> r.srem("chanopen:" + userId, convId));
+  }
+
+  @Override
+  public void clearOpenChannels(String userId) {
+    call(r -> r.del("chanopen:" + userId));
+  }
+
+  /** One SISMEMBER per user, all written before any answer is awaited (pipelined like {@link #onlineOf}). */
+  @Override
+  public java.util.Set<String> haveOpen(String convId, java.util.Collection<String> userIds) {
+    if (userIds.isEmpty()) {
+      return java.util.Set.of();
+    }
+    return call(r -> {
+      var async = conn.async();
+      List<String> ids = List.copyOf(userIds);
+      List<io.lettuce.core.RedisFuture<Boolean>> answers = new java.util.ArrayList<>(ids.size());
+      for (String u : ids) {
+        answers.add(async.sismember("chanopen:" + u, convId));
+      }
+      java.util.Set<String> out = new java.util.HashSet<>();
+      for (int i = 0; i < ids.size(); i++) {
+        try {
+          if (Boolean.TRUE.equals(answers.get(i).get(5, java.util.concurrent.TimeUnit.SECONDS))) {
+            out.add(ids.get(i));
+          }
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          throw new StoreUnavailableException("redis: interrupted", e);
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
+          throw new StoreUnavailableException("redis: " + e, e);
+        }
+      }
+      return out;
+    });
   }
 
   @Override

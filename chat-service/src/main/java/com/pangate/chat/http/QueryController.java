@@ -202,9 +202,11 @@ public class QueryController {
     }
     @SuppressWarnings("unchecked")
     List<String> memberIds = ids == null ? List.of() : (List<String>) ids;
-    Conversation c = conversations.create(userId(req), kind(body.get("kind")), (String) title, memberIds,
-        Boolean.TRUE.equals(pub));
-    return ResponseEntity.status(201).body(conversation(c));
+    com.pangate.chat.core.Conversations.Created made = conversations.createReporting(userId(req),
+        kind(body.get("kind")), (String) title, memberIds, Boolean.TRUE.equals(pub));
+    Map<String, Object> out = new java.util.LinkedHashMap<>(conversation(made.conversation()));
+    out.put("notAdded", made.notAdded());   // review 2026-11-19 (F7): their whoCanAdd is nobody
+    return ResponseEntity.status(201).body(out);
   }
 
   @PostMapping("/v1/dm/{userId}")
@@ -226,6 +228,31 @@ public class QueryController {
   public ResponseEntity<Void> removeMember(@PathVariable("id") String id, @PathVariable("userId") String user,
       HttpServletRequest req) {
     conversations.removeMember(userId(req), id, user);
+    return ResponseEntity.noContent().build();
+  }
+
+  /** Review 2026-11-19 (F2): {@code {"role":"admin"|"member"}}, by the owner. */
+  @org.springframework.web.bind.annotation.PutMapping(path = "/v1/conversations/{id}/members/{userId}/role",
+      consumes = "application/json")
+  public ResponseEntity<Void> setRole(@PathVariable("id") String id, @PathVariable("userId") String user,
+      @RequestBody Map<String, Object> body, HttpServletRequest req) {
+    com.pangate.chat.core.ChatStores.Role role = switch (String.valueOf(body.get("role"))) {
+      case "admin" -> com.pangate.chat.core.ChatStores.Role.ADMIN;
+      case "member" -> com.pangate.chat.core.ChatStores.Role.MEMBER;
+      default -> throw new ChatRefusal(ChatRefusal.INVALID, "role must be admin or member");
+    };
+    conversations.setRole(userId(req), id, user, role);
+    return ResponseEntity.noContent().build();
+  }
+
+  /** Review 2026-11-19 (F2): {@code {"userId":...}}, by the owner, who stays on as an admin. */
+  @PostMapping(path = "/v1/conversations/{id}/owner", consumes = "application/json")
+  public ResponseEntity<Void> transferOwnership(@PathVariable("id") String id, @RequestBody Map<String, Object> body,
+      HttpServletRequest req) {
+    if (!(body.get("userId") instanceof String u)) {
+      throw new ChatRefusal(ChatRefusal.INVALID, "userId must be a string");
+    }
+    conversations.transferOwnership(userId(req), id, u);
     return ResponseEntity.noContent().build();
   }
 

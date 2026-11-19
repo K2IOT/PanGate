@@ -59,7 +59,8 @@ public final class ExchangeToken {
     Instant now = clock.now();
     byte[] hash = RefreshTokens.hash(refreshToken);
     Session s = usable(hash, now);
-    if (counter.increment("tok:" + s.deviceId(), Duration.ofHours(1)) > limits.tokensPerSessionPerHour()) {
+    String budget = "tok:" + s.deviceId();
+    if (counter.increment(budget, Duration.ofHours(1)) > limits.tokensPerSessionPerHour()) {
       metrics.count("account.ratelimited", "what", "token");
       throw new RateLimitedException("rate_limited", 60);
     }
@@ -67,6 +68,12 @@ public final class ExchangeToken {
     try {
       t = auth.mint(s.userId(), s.deviceId());
     } catch (AuthApi.AuthUnavailableException | AuthApi.AuthRejectedException e) {
+      // review 2026-11-19 (F8): auth-service did not answer, so a client retrying through the blip keeps its hourly
+      // budget instead of being locked out for up to an hour. Batch 1 review M8: a refusal is an answer and keeps
+      // counting, so a session auth-service always refuses cannot call it without limit.
+      if (e instanceof AuthApi.AuthUnavailableException) {
+        counter.decrement(budget);
+      }
       metrics.count("account.tokens", "result", "unavailable");
       throw new DomainException("unavailable", "try again shortly");
     }

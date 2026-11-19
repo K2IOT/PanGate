@@ -69,19 +69,39 @@ public final class ChatStores {
     public static final Marks NONE = new Marks(0, 0);
   }
 
-  public record MemberMarks(String userId, long deliveredSeq, long readSeq) {}
+  /**
+   * {@code shownDeliveredSeq}: review 2026-11-19 (F3), the delivered mark shown to a member who may not see this one's
+   * reads: only a real {@code chat.delivered} (or sending) raises it, never a read.
+   */
+  public record MemberMarks(String userId, long deliveredSeq, long readSeq, long shownDeliveredSeq) {
+    public MemberMarks(String userId, long deliveredSeq, long readSeq) {
+      this(userId, deliveredSeq, readSeq, 0);
+    }
+
+    /** What {@code viewer} sees of the delivered mark: all of it, or only real deliveries when reads are hidden. */
+    public long deliveredFor(boolean readsVisible) {
+      return readsVisible ? deliveredSeq : shownDeliveredSeq;
+    }
+  }
 
   /** An inbox row with its marks and the time its state last changed (CH3 §7.2). */
   public record UserConvState(String convId, ConversationKind kind, long lastSeq, long readSeq, long deliveredSeq,
       long stateAtMs) {}
 
-  /** CH3 §8: what a user hides from others (and, reciprocally, does not see of others). */
-  public record Privacy(boolean hidePresence, boolean hideRead, boolean hidePreview) {
-    public static final Privacy OPEN = new Privacy(false, false, false);
+  /**
+   * CH3 §8: what a user hides from others (and, reciprocally, does not see of others). {@code refuseAdds}: review
+   * 2026-11-19 (F7), whoCanAdd = nobody: nobody else puts them into a group or channel.
+   */
+  public record Privacy(boolean hidePresence, boolean hideRead, boolean hidePreview, boolean refuseAdds) {
+    public static final Privacy OPEN = new Privacy(false, false, false, false);
+
+    public Privacy(boolean hidePresence, boolean hideRead, boolean hidePreview) {
+      this(hidePresence, hideRead, hidePreview, false);
+    }
 
     /** CH3 settings only; the preview shows (CH4 §3.4). */
     public Privacy(boolean hidePresence, boolean hideRead) {
-      this(hidePresence, hideRead, false);
+      this(hidePresence, hideRead, false, false);
     }
   }
 
@@ -91,7 +111,12 @@ public final class ChatStores {
    */
   public interface MarkStore {
     /** Raises the user's marks in {@code conv_marks} and {@code user_convs}, and stamps the inbox row's state. */
-    void advance(String convId, String userId, long deliveredSeq, long readSeq, long atMs);
+    default void advance(String convId, String userId, long deliveredSeq, long readSeq, long atMs) {
+      advance(convId, userId, deliveredSeq, readSeq, 0, atMs);
+    }
+
+    /** Also raises {@code shownDeliveredSeq} (F3): the delivered mark that came from a real chat.delivered; 0 = none. */
+    void advance(String convId, String userId, long deliveredSeq, long readSeq, long shownDeliveredSeq, long atMs);
 
     /** Stamps the inbox row's state time only (the other member of a DM saw a mark move). */
     void touchState(String userId, String convId, long atMs);
@@ -123,14 +148,20 @@ public final class ChatStores {
      * Writes only the fields given (null = unchanged), so concurrent updates of different fields both stick (Codex
      * review of PR #6).
      */
-    void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead, Boolean hidePreview, long atMs);
+    void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead, Boolean hidePreview,
+        Boolean refuseAdds, long atMs);
+
+    default void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead, Boolean hidePreview,
+        long atMs) {
+      updatePrivacy(userId, hidePresence, hideRead, hidePreview, null, atMs);
+    }
 
     default void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead, long atMs) {
       updatePrivacy(userId, hidePresence, hideRead, null, atMs);
     }
 
     default void putPrivacy(String userId, Privacy p, long atMs) {
-      updatePrivacy(userId, p.hidePresence(), p.hideRead(), p.hidePreview(), atMs);
+      updatePrivacy(userId, p.hidePresence(), p.hideRead(), p.hidePreview(), p.refuseAdds(), atMs);
     }
   }
 
@@ -155,6 +186,12 @@ public final class ChatStores {
 
     /** The DM of the pair: {@code newConvId} if this call created it, else the existing one. */
     String createDm(String userA, String userB, String newConvId);
+
+    /** Batch 1 review I1: the owner of a group or channel; empty for a DM or a row created before V8. */
+    Optional<String> owner(String convId);
+
+    /** LWT {@code owner_id = next IF owner_id = expected} ({@code expected} null: not set yet); true when applied. */
+    boolean claimOwner(String convId, String expected, String next);
   }
 
   public interface MemberStore {
@@ -162,7 +199,18 @@ public final class ChatStores {
 
     Optional<Member> member(String convId, String userId);
 
+    /**
+     * Puts a new member in. Review 2026-11-19 (F1): their inbox row starts at the conversation's current last_seq,
+     * delivered and read, so a member added later (or joining, or coming back) does not inherit the history as unread.
+     */
     void add(String convId, Member m);
+
+    /** Changes an existing member's role; nothing when they are not a member. Their marks are left alone. */
+    default void setRole(String convId, String userId, Role role) {
+      if (member(convId, userId).isPresent()) {
+        add(convId, new Member(userId, role));
+      }
+    }
 
     void remove(String convId, String userId);
 

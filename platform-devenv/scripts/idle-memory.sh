@@ -10,6 +10,9 @@ GATEWAY_JAR=${1:?gateway jar}
 DEVTOOLS_JAR=${2:?devtools exec jar}
 N=${3:-10000}
 LIMIT=5120
+# On a slow runner the ramp can push the gateway to shed level 3 (spec §7.3): 503 + Retry-After to new upgrades, by
+# design. As in idle-load.sh, the load client retries a 503 for RETRY_FOR seconds instead of counting it lost.
+RETRY_FOR=${RETRY_FOR:-150}
 export GATEWAY_DEV_DIR=${GATEWAY_DEV_DIR:-$(mktemp -d)}
 GLOG=$(mktemp)
 CLOG=$(mktemp)
@@ -55,9 +58,9 @@ sleep 3
 BASE=$(heap)
 
 java -jar "$DEVTOOLS_JAR" client --url wss://localhost:8443/v1/ws --ca "$GATEWAY_DEV_DIR/ca.crt" \
-  --key "$GATEWAY_DEV_DIR/es256.pem" --load "$N" --ramp 2000 >"$CLOG" 2>&1 &
+  --key "$GATEWAY_DEV_DIR/es256.pem" --load "$N" --ramp 2000 --retry-for "PT${RETRY_FOR}S" >"$CLOG" 2>&1 &
 CPID=$!
-for _ in $(seq 1 120); do
+for _ in $(seq 1 $((120 + RETRY_FOR))); do
   grep -q "^connected=$N " "$CLOG" && break
   sleep 1
 done

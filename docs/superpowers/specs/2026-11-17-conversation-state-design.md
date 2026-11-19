@@ -282,7 +282,7 @@ Tin gửi từ thiết bị khác của tôi tới như mọi tin (CH1 §4.1 bư
 | Người kia `hideRead` | — | Không có mốc đọc của họ (DM: tin của mình dừng ở "Đã nhận"; nhóm: không có trong danh sách và không tính vào `readCount`) |
 | Người xem `hideRead` | — | Không thấy mốc đọc của ai (có qua có lại) |
 
-- `delivered_seq` ("Đã nhận") không bị ảnh hưởng bởi `hideRead`.
+- `delivered_seq` ("Đã nhận") không bị ảnh hưởng bởi `hideRead`. **Sửa 2026-11-19 (F3):** với một cặp không được thấy nhau đọc, "Đã nhận" trả về là `shown_delivered_seq`, chỉ tăng theo `chat.delivered` thật (hoặc khi gửi tin), không theo lần đọc (đọc kéo `delivered_seq` lên theo §3.1, nên trước đây lần đọc lộ ra thành "Đã nhận"); và một lần đọc ẩn không đóng dấu `state_at` của người kia, để `/v1/state?since` không cho biết lúc đọc.
 - Mốc đọc của người `hideRead` vẫn được ghi (số chưa đọc của chính họ vẫn đúng, S4); chỉ không bao giờ được trả cho người khác, kể cả gián tiếp qua `readCount` hay `peer`.
 - Bật `hideRead` không xoá các mốc người khác đã thấy trước đó.
 
@@ -296,7 +296,7 @@ Tin gửi từ thiết bị khác của tôi tới như mọi tin (CH1 §4.1 bư
 |---|---|
 | Kafka chậm | Mốc tới trễ; tin vẫn chạy. Typing không qua Kafka nên không ảnh hưởng |
 | ScyllaDB chậm | ReceiptWorker dừng ở lô hiện tại, không commit, lag tăng; `/v1/state` và `receipts` trả `503` |
-| Redis sập | Online: mọi người hiện offline, watch không lưu được (`chat.presence.unavailable` đếm), tự phục hồi khi Redis về và client watch lại sau tối đa 4 phút; tập kết nối được dựng lại từ sự kiện sau đó (người đang nối sẵn hiện offline tới lần nối lại kế tiếp — chấp nhận ở CH3, ghi ADR). Typing: giới hạn tần suất dùng bộ nhớ nên vẫn chạy |
+| Redis sập | Online: mọi người hiện offline, watch không lưu được (`chat.presence.unavailable` đếm), tự phục hồi khi Redis về và client watch lại sau tối đa 4 phút; tập kết nối được dựng lại từ sự kiện sau đó (người đang nối sẵn hiện offline tới lần nối lại kế tiếp — chấp nhận ở CH3, ghi ADR). **Sửa 2026-11-19 (F5):** sự kiện ghi Redis lỗi không bị bỏ qua mà được đọc lại (dừng 200 ms, gấp đôi tới 5 s), và chỉ được đánh dấu đã xử lý sau khi áp dụng xong; trước đây một lần ghi lỗi khi ngắt kết nối để lại kết nối ma giữ người đó online vô hạn. Typing: giới hạn tần suất dùng bộ nhớ nên vẫn chạy |
 | Push API không gọi được | Bỏ cập nhật trạng thái sau 3 lần thử; client lấy lại khi `/v1/state` hoặc watch lại |
 | Sự kiện lifecycle mất (gateway crash không phát) | Router phát `NODE_DOWN`; thiếu cả hai thì TTL 24 h của `pres:*` |
 | Rebalance `chat-receipts` | Lệnh xử lý lại sau khi commit cuối: ghi lại mốc cũ, `USING TIMESTAMP` làm nó vô hại; có thể đẩy trùng |

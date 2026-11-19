@@ -20,6 +20,10 @@ public final class FakePresence implements PresenceState {
   public final Set<String> deadNodes = ConcurrentHashMap.newKeySet();
   /** Fail this many putLastSeen calls. */
   public volatile int failLastSeenWrites;
+  /** Fail this many remove calls (a Redis timeout on a disconnect). */
+  public volatile int failRemoves;
+  /** Fail this many markGone calls (the connection was already removed: a partial failure). */
+  public volatile int failMarkGone;
 
   @Override public synchronized boolean add(String userId, String node, long epoch, String connId) {
     if (deadNodes.contains(node + ":" + epoch)) {
@@ -33,6 +37,10 @@ public final class FakePresence implements PresenceState {
   }
 
   @Override public synchronized boolean remove(String userId, String node, long epoch, String connId) {
+    if (failRemoves > 0) {
+      failRemoves--;
+      throw new StoreUnavailableException("redis: timeout", null);
+    }
     Set<String> s = conns.getOrDefault(userId, new HashSet<>());
     boolean removed = s.remove(node + "/" + connId);
     byNode.getOrDefault(node + ":" + epoch, new HashSet<>()).remove(userId + "/" + connId);
@@ -45,24 +53,36 @@ public final class FakePresence implements PresenceState {
       int slash = uc.indexOf('/');
       String user = uc.substring(0, slash);
       Set<String> s = conns.getOrDefault(user, new HashSet<>());
-      if (s.remove(node + "/" + uc.substring(slash + 1)) && s.isEmpty()) {
+      s.remove(node + "/" + uc.substring(slash + 1));
+      if (s.isEmpty()) {
         emptied.add(user);
       }
     }
-    byNode.remove(node + ":" + epoch);
     deadNodes.add(node + ":" + epoch);
     return emptied;
+  }
+
+  @Override public synchronized void forgetNode(String node, long epoch) {
+    byNode.remove(node + ":" + epoch);
   }
 
   @Override public boolean online(String userId) {
     return !conns.getOrDefault(userId, Set.of()).isEmpty();
   }
 
-  @Override public boolean seen(String eventId) {
-    return !events.add(eventId);
+  @Override public boolean handled(String eventId) {
+    return events.contains(eventId);
+  }
+
+  @Override public void markHandled(String eventId) {
+    events.add(eventId);
   }
 
   @Override public void markGone(String userId, long atMs) {
+    if (failMarkGone > 0) {
+      failMarkGone--;
+      throw new StoreUnavailableException("redis: timeout", null);
+    }
     gone.put(userId, atMs);
   }
 
@@ -102,5 +122,32 @@ public final class FakePresence implements PresenceState {
 
   @Override public void cancelGrace(String userId) {
     graces.remove(userId);
+  }
+
+  public final Map<String, Set<String>> open = new ConcurrentHashMap<>();
+
+  @Override public void channelOpened(String userId, String convId) {
+    open.computeIfAbsent(userId, k -> ConcurrentHashMap.newKeySet()).add(convId);
+  }
+
+  @Override public void channelClosed(String userId, String convId) {
+    open.computeIfPresent(userId, (k, v) -> {
+      v.remove(convId);
+      return v;
+    });
+  }
+
+  @Override public void clearOpenChannels(String userId) {
+    open.remove(userId);
+  }
+
+  @Override public Set<String> haveOpen(String convId, java.util.Collection<String> userIds) {
+    Set<String> out = new HashSet<>();
+    for (String u : userIds) {
+      if (open.getOrDefault(u, Set.of()).contains(convId)) {
+        out.add(u);
+      }
+    }
+    return out;
   }
 }

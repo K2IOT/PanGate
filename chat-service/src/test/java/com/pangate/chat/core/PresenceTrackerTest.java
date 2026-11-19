@@ -162,4 +162,78 @@ class PresenceTrackerTest {
     assertThat(state.online("a")).isFalse();
     assertThat(out).isEmpty();
   }
+
+  /**
+   * Review 2026-11-19 (F5): a disconnect whose store write failed is not marked handled, so its retry applies it
+   * instead of leaving a ghost connection that keeps the user online.
+   */
+  @Test
+  void aDisconnectThatFailedIsAppliedWhenRetried() {
+    tracker.on(ev(EventType.EVENT_TYPE_CONNECTED, "a", "n1", "c1"));
+    ConnectionEvent bye = ev(EventType.EVENT_TYPE_DISCONNECTED, "a", "n1", "c1");
+    state.failRemoves = 1;
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> tracker.on(bye))
+        .isInstanceOf(StoreUnavailableException.class);
+    tracker.on(bye);
+    at(1_005_000);
+    assertThat(state.online("a")).isFalse();
+    assertThat(out).extracting(PresenceTracker.Transition::online).containsExactly(true, false);
+  }
+
+  /** Review 2026-11-19 (F6): going offline ends every channel subscription, so none stays recorded as open. */
+  @Test
+  void goingOfflineForgetsOpenChannels() {
+    tracker.on(ev(EventType.EVENT_TYPE_CONNECTED, "a", "n1", "c1"));
+    state.channelOpened("a", "ch1");
+    tracker.on(ev(EventType.EVENT_TYPE_DISCONNECTED, "a", "n1", "c1"));
+    at(1_002_000);
+    assertThat(state.haveOpen("ch1", List.of("a"))).as("inside the grace: kept").containsExactly("a");
+    at(1_005_000);
+    assertThat(state.haveOpen("ch1", List.of("a"))).isEmpty();
+  }
+
+  /**
+   * Batch 1 review I2: the connection was removed, then the gone mark failed. The retry's remove finds nothing to
+   * remove, yet the user must still go offline.
+   */
+  @Test
+  void aDisconnectRetriedAfterAPartialFailureStillGoesOffline() {
+    tracker.on(ev(EventType.EVENT_TYPE_CONNECTED, "a", "n1", "c1"));
+    ConnectionEvent bye = ev(EventType.EVENT_TYPE_DISCONNECTED, "a", "n1", "c1");
+    state.failMarkGone = 1;
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> tracker.on(bye))
+        .isInstanceOf(StoreUnavailableException.class);
+    tracker.on(bye);
+    at(1_005_000);
+    assertThat(out).extracting(PresenceTracker.Transition::online).containsExactly(true, false);
+  }
+
+  /** Batch 1 review I2: the same for every user a NODE_DOWN had already emptied when it failed. */
+  @Test
+  void aNodeDownRetriedAfterAPartialFailureStillTakesEveryoneOffline() {
+    tracker.on(ev(EventType.EVENT_TYPE_CONNECTED, "a", "n1", "c1"));
+    tracker.on(ev(EventType.EVENT_TYPE_CONNECTED, "b", "n1", "c2"));
+    ConnectionEvent down = ConnectionEvent.newBuilder().setType(EventType.EVENT_TYPE_NODE_DOWN).setNodeId("n1")
+        .setEpoch(1).setEventId(Ids.next()).build();
+    state.failMarkGone = 1;
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> tracker.on(down))
+        .isInstanceOf(StoreUnavailableException.class);
+    tracker.on(down);
+    at(1_005_000);
+    assertThat(out.stream().filter(t -> !t.online()).map(PresenceTracker.Transition::userId))
+        .containsExactlyInAnyOrder("a", "b");
+  }
+
+  /** Batch 1 review I2: a disconnect of a connection already gone, for a user already offline, changes nothing. */
+  @Test
+  void aStrayDisconnectAfterOfflineDoesNotGoOfflineAgain() {
+    tracker.on(ev(EventType.EVENT_TYPE_CONNECTED, "a", "n1", "c1"));
+    tracker.on(ev(EventType.EVENT_TYPE_DISCONNECTED, "a", "n1", "c1"));
+    at(1_005_000);
+    out.clear();
+    // a stray copy carries the gateway's time of the disconnect it repeats
+    tracker.on(ev(EventType.EVENT_TYPE_DISCONNECTED, "a", "n1", "c1").toBuilder().setAtMs(1_000_000).build());
+    at(1_011_000);
+    assertThat(out).isEmpty();
+  }
 }

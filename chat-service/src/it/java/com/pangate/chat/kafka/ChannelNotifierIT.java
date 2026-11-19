@@ -72,6 +72,9 @@ class ChannelNotifierIT {
     presence.add("f0001", "n1", 1, "c1");
     presence.add("f0002", "n1", 1, "c2");
     presence.add("f0003", "n1", 1, "c3");
+    // review 2026-11-19 (F6): online and with the channel open = received; f0003 is online without it open
+    presence.channelOpened("f0001", ch);
+    presence.channelOpened("f0002", ch);
     stores.setMute(ch, "f0010", Long.MAX_VALUE);
     stores.setMute(ch, "f0011", Long.MAX_VALUE);
   }
@@ -117,11 +120,11 @@ class ChannelNotifierIT {
       l.start();
       produce(t, post(ch, 1, System.currentTimeMillis()), ConversationKind.CONVERSATION_KIND_CHANNEL);
       produce(t, post(Ids.next(), 1, System.currentTimeMillis()), ConversationKind.CONVERSATION_KIND_GROUP);
-      await().atMost(Duration.ofSeconds(30)).until(() -> sent.size() >= FOLLOWERS - 5);
+      await().atMost(Duration.ofSeconds(30)).until(() -> sent.size() >= FOLLOWERS - 4);
       Thread.sleep(1_000);
-      assertThat(sent).hasSize(FOLLOWERS - 5);
-      assertThat(perUser()).doesNotContainKeys("chat:own", "chat:f0001", "chat:f0010").allSatisfy((u, c) ->
-          assertThat(c).isEqualTo(1));
+      assertThat(sent).hasSize(FOLLOWERS - 4);
+      assertThat(perUser()).doesNotContainKeys("chat:own", "chat:f0001", "chat:f0002", "chat:f0010")
+          .containsKey("chat:f0003").allSatisfy((u, c) -> assertThat(c).isEqualTo(1));
       NotifyRequest r = sent.get(0);
       assertThat(r.getBadge()).isEqualTo(-1);
       assertThat(r.getCollapseId()).isEqualTo(ch);
@@ -137,10 +140,10 @@ class ChannelNotifierIT {
       produce(t, post(ch, 1, System.currentTimeMillis()), ConversationKind.CONVERSATION_KIND_CHANNEL);
       await().atMost(Duration.ofSeconds(10)).until(() -> sent.size() >= 300);
       produce(t, post(ch, 2, System.currentTimeMillis()), ConversationKind.CONVERSATION_KIND_CHANNEL);
-      await().atMost(Duration.ofSeconds(30)).until(() -> sent.size() >= FOLLOWERS - 5);
+      await().atMost(Duration.ofSeconds(30)).until(() -> sent.size() >= FOLLOWERS - 4);
       Thread.sleep(2_000);
       assertThat(perUser().values()).allSatisfy(c -> assertThat(c).isEqualTo(1));
-      assertThat(sent).hasSize(FOLLOWERS - 5);
+      assertThat(sent).hasSize(FOLLOWERS - 4);
       assertThat(sent.getLast().getAlert().getBody()).isEqualTo("bài 2");
     }
   }
@@ -159,9 +162,9 @@ class ChannelNotifierIT {
     int before = sent.size();
     try (ChannelNotifierLoop l = loop(t, group, 50_000)) {
       l.start();
-      await().atMost(Duration.ofSeconds(30)).until(() -> perUser().size() >= FOLLOWERS - 5);
+      await().atMost(Duration.ofSeconds(30)).until(() -> perUser().size() >= FOLLOWERS - 4);
     }
-    assertThat(perUser()).hasSize(FOLLOWERS - 5);
+    assertThat(perUser()).hasSize(FOLLOWERS - 4);
     assertThat(sent.size() - perUser().size()).as("sent again after the restart").isLessThanOrEqualTo(1_000);
     assertThat(before).isPositive();
   }
@@ -184,7 +187,7 @@ class ChannelNotifierIT {
       l.start();
       long t0 = System.nanoTime();
       produce(t, post(ch, 1, System.currentTimeMillis()), ConversationKind.CONVERSATION_KIND_CHANNEL);
-      await().atMost(Duration.ofSeconds(30)).until(() -> sent.size() >= FOLLOWERS - 5);
+      await().atMost(Duration.ofSeconds(30)).until(() -> sent.size() >= FOLLOWERS - 4);
       assertThat(Duration.ofNanos(System.nanoTime() - t0)).isGreaterThan(Duration.ofSeconds(2));
     }
   }
@@ -199,7 +202,7 @@ class ChannelNotifierIT {
       produce(t, post(ch, 1, System.currentTimeMillis()), ConversationKind.CONVERSATION_KIND_CHANNEL);
       Thread.sleep(3_000);
       stores.fail = false;
-      await().atMost(Duration.ofSeconds(30)).until(() -> sent.size() >= FOLLOWERS - 5);
+      await().atMost(Duration.ofSeconds(30)).until(() -> sent.size() >= FOLLOWERS - 4);
     }
   }
 
@@ -212,9 +215,9 @@ class ChannelNotifierIT {
       l.start();
       produce(t, post(ch, 1, System.currentTimeMillis() - 3_600_001), ConversationKind.CONVERSATION_KIND_CHANNEL);
       produce(t, post(ch, 2, System.currentTimeMillis()), ConversationKind.CONVERSATION_KIND_CHANNEL);
-      await().atMost(Duration.ofSeconds(30)).until(() -> sent.size() >= FOLLOWERS - 5);
+      await().atMost(Duration.ofSeconds(30)).until(() -> sent.size() >= FOLLOWERS - 4);
       Thread.sleep(1_000);
-      assertThat(perUser()).containsKey("chat:f0000").hasSize(FOLLOWERS - 5);
+      assertThat(perUser()).containsKey("chat:f0000").hasSize(FOLLOWERS - 4);
     }
   }
 

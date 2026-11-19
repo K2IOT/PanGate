@@ -23,8 +23,10 @@ import org.slf4j.LoggerFactory;
 
 /**
  * CH3 spec §6.1: reads {@code c1.gw.lifecycle} (group {@code chat-presence}) into {@link PresenceTracker}, and ticks
- * it every 500 ms to end offline graces. Presence is best effort: a record that does not parse is skipped, and a
- * Redis failure is counted ({@code chat.presence.unavailable}) and skipped rather than stalling the topic (spec §9).
+ * it every 500 ms to end offline graces. A record that does not parse is skipped. Review 2026-11-19 (F5): a Redis
+ * failure is counted ({@code chat.presence.unavailable}) and the record is read again after a pause (200 ms, doubling
+ * to 5 s), never skipped: a lost disconnect would leave a connection that keeps its user online. Presence does not
+ * work while Redis is down anyway; once it is back the topic is read on, in order.
  */
 public final class LifecycleListener implements AutoCloseable {
 
@@ -35,6 +37,9 @@ public final class LifecycleListener implements AutoCloseable {
   private final String topic;
   private final PresenceTracker tracker;
   private final MeterRegistry meters;
+  static final long FIRST_PAUSE_MS = 200;
+  static final long MAX_PAUSE_MS = 5_000;
+
   private final ScheduledExecutorService ticker = Executors.newSingleThreadScheduledExecutor(
       Thread.ofPlatform().daemon().name("chat-presence-tick").factory());
   private volatile boolean running = true;
@@ -73,15 +78,39 @@ public final class LifecycleListener implements AutoCloseable {
   private void run() {
     try {
       consumer.subscribe(List.of(topic));
+      long pause = FIRST_PAUSE_MS;
       while (running) {
         try {
           var batch = consumer.poll(Duration.ofMillis(200));
+          Map<org.apache.kafka.common.TopicPartition, Long> next = new HashMap<>();
+          boolean failed = false;
           for (ConsumerRecord<String, byte[]> r : batch) {
-            handle(r);
+            org.apache.kafka.common.TopicPartition tp = new org.apache.kafka.common.TopicPartition(r.topic(),
+                r.partition());
+            if (failed) {
+              next.putIfAbsent(tp, r.offset());   // not handled: read again from here
+              continue;
+            }
+            if (!handle(r)) {
+              failed = true;
+              next.put(tp, r.offset());
+            }
+          }
+          if (failed) {
+            next.forEach(consumer::seek);
           }
           if (!batch.isEmpty()) {
             consumer.commitSync();
           }
+          if (failed) {
+            Thread.sleep(pause);
+            pause = Math.min(MAX_PAUSE_MS, pause * 2);
+          } else {
+            pause = FIRST_PAUSE_MS;
+          }
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          return;
         } catch (WakeupException e) {
           throw e;
         } catch (RuntimeException e) {
@@ -99,19 +128,28 @@ public final class LifecycleListener implements AutoCloseable {
     }
   }
 
-  private void handle(ConsumerRecord<String, byte[]> r) {
+  /** False when the store failed and the record is to be read again. */
+  private boolean handle(ConsumerRecord<String, byte[]> r) {
     ConnectionEvent e;
     try {
       e = ConnectionEvent.parseFrom(r.value() == null ? new byte[0] : r.value());
     } catch (InvalidProtocolBufferException ex) {
       meters.counter("chat.presence.records", "result", "malformed").increment();
-      return;
+      return true;
     }
     try {
       tracker.on(e);
-    } catch (RuntimeException ex) {
+      return true;
+    } catch (com.pangate.chat.core.StoreUnavailableException ex) {
       meters.counter("chat.presence.unavailable").increment();
-      log.debug("presence event skipped: {}", ex.toString());
+      log.debug("presence event to be read again: {}", ex.toString());
+      return false;
+    } catch (RuntimeException ex) {
+      // batch 1 review I3: only a store failure is worth reading again; anything else would fail for ever and stop
+      // presence for the whole pod, so it is counted and skipped
+      meters.counter("chat.presence.errors").increment();
+      log.error("presence event {} skipped", e.getEventId(), ex);
+      return true;
     }
   }
 

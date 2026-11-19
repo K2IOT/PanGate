@@ -40,6 +40,13 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   private final PreparedStatement selectMembers;
   private final PreparedStatement selectMember;
   private final PreparedStatement joinUserConv;
+  private final PreparedStatement joinMarks;
+  private final PreparedStatement setOwner;
+  private final PreparedStatement claimOwnerStmt;
+  private final PreparedStatement claimUnownedStmt;
+  private final PreparedStatement selectOwner;
+  private final PreparedStatement markShown;
+  private final PreparedStatement updateRole;
   private final PreparedStatement leaveUserConv;
   private final PreparedStatement touchUserConv;
   private final PreparedStatement selectUserConvs;
@@ -65,6 +72,7 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   private final PreparedStatement setHidePresence;
   private final PreparedStatement setHideRead;
   private final PreparedStatement setHidePreview;
+  private final PreparedStatement setRefuseAdds;
   private final PreparedStatement muteMember;
   private final PreparedStatement muteUserConv;
   private final PreparedStatement selectMute;
@@ -86,6 +94,11 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     selectConv = s.prepare("SELECT conv_id, kind, title, created_by, last_seq, is_public, member_count FROM " + ks
         + ".conversations WHERE conv_id = ?");
     reserve = s.prepare("UPDATE " + ks + ".conversations SET last_seq = ? WHERE conv_id = ? IF last_seq = ?");
+    setOwner = s.prepare("UPDATE " + ks + ".conversations SET owner_id = ? WHERE conv_id = ? IF EXISTS");
+    claimOwnerStmt = s.prepare("UPDATE " + ks + ".conversations SET owner_id = ? WHERE conv_id = ? IF owner_id = ?");
+    claimUnownedStmt = s.prepare("UPDATE " + ks + ".conversations SET owner_id = ? WHERE conv_id = ? "
+        + "IF owner_id = null");
+    selectOwner = s.prepare("SELECT owner_id FROM " + ks + ".conversations WHERE conv_id = ?");
     selectLastSeq = s.prepare("SELECT last_seq FROM " + ks + ".conversations WHERE conv_id = ?");
     insertMember = s.prepare("INSERT INTO " + ks + ".members (conv_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)");
     deleteMember = s.prepare("DELETE FROM " + ks + ".members WHERE conv_id = ? AND user_id = ?");
@@ -95,12 +108,18 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     upsertUser = s.prepare("INSERT INTO " + ks + ".users (user_id, status, updated_at, display_name) VALUES (?, ?, ?, ?)");
     selectMember = s.prepare("SELECT user_id, role FROM " + ks + ".members WHERE conv_id = ? AND user_id = ?");
     joinUserConv = s.prepare("UPDATE " + ks + ".user_convs SET kind = ?, left = false WHERE user_id = ? AND conv_id = ?");
+    // F1: the joiner's inbox starts at the conversation's last_seq; every cell's timestamp is that seq, as for marks
+    joinMarks = s.prepare("UPDATE " + ks + ".user_convs USING TIMESTAMP ? SET last_seq = ?, read_seq = ?, "
+        + "delivered_seq = ? WHERE user_id = ? AND conv_id = ?");
+    updateRole = s.prepare("UPDATE " + ks + ".members SET role = ? WHERE conv_id = ? AND user_id = ? IF EXISTS");
     leaveUserConv = s.prepare("UPDATE " + ks + ".user_convs SET left = true WHERE user_id = ? AND conv_id = ?");
     // the cell timestamp is the conv_seq: concurrent or replayed touches keep the highest seq without an LWT
     touchUserConv = s.prepare("UPDATE " + ks + ".user_convs USING TIMESTAMP ? SET last_seq = ?, last_msg_at = ? "
         + "WHERE user_id = ? AND conv_id = ?");
     // CH3 §3.2: each mark cell's timestamp is its value, so a smaller mark never wins; state_at is wall time (µs)
     markDelivered = s.prepare("UPDATE " + ks + ".conv_marks USING TIMESTAMP ? SET delivered_seq = ? "
+        + "WHERE conv_id = ? AND user_id = ?");
+    markShown = s.prepare("UPDATE " + ks + ".conv_marks USING TIMESTAMP ? SET shown_delivered_seq = ? "
         + "WHERE conv_id = ? AND user_id = ?");
     markRead = s.prepare("UPDATE " + ks + ".conv_marks USING TIMESTAMP ? SET read_seq = ? WHERE conv_id = ? AND user_id = ?");
     inboxDelivered = s.prepare("UPDATE " + ks + ".user_convs USING TIMESTAMP ? SET delivered_seq = ? "
@@ -110,15 +129,17 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     markSentStmt = s.prepare("UPDATE " + ks + ".conv_marks USING TIMESTAMP ? SET last_sent_seq = ? "
         + "WHERE conv_id = ? AND user_id = ?");
     selectSent = s.prepare("SELECT last_sent_seq FROM " + ks + ".conv_marks WHERE conv_id = ? AND user_id = ?");
-    selectMarks = s.prepare("SELECT user_id, delivered_seq, read_seq FROM " + ks + ".conv_marks WHERE conv_id = ?");
+    selectMarks = s.prepare("SELECT user_id, delivered_seq, read_seq, shown_delivered_seq FROM " + ks
+        + ".conv_marks WHERE conv_id = ?");
     selectOwn = s.prepare("SELECT delivered_seq, read_seq FROM " + ks + ".user_convs WHERE user_id = ? AND conv_id = ?");
     selectStates = s.prepare("SELECT conv_id, kind, last_seq, read_seq, delivered_seq, state_at, left FROM " + ks
         + ".user_convs WHERE user_id = ?");
-    selectPrivacy = s.prepare("SELECT hide_presence, hide_read, hide_preview FROM " + ks
+    selectPrivacy = s.prepare("SELECT hide_presence, hide_read, hide_preview, refuse_adds FROM " + ks
         + ".user_settings WHERE user_id = ?");
     setHidePresence = s.prepare("UPDATE " + ks + ".user_settings SET hide_presence = ?, updated_at = ? WHERE user_id = ?");
     setHideRead = s.prepare("UPDATE " + ks + ".user_settings SET hide_read = ?, updated_at = ? WHERE user_id = ?");
     setHidePreview = s.prepare("UPDATE " + ks + ".user_settings SET hide_preview = ?, updated_at = ? WHERE user_id = ?");
+    setRefuseAdds = s.prepare("UPDATE " + ks + ".user_settings SET refuse_adds = ?, updated_at = ? WHERE user_id = ?");
     // IF EXISTS: an UPDATE of a row removed meanwhile (a member leaving) would create a row of only muted_until, and
     // members() would then read a null role (the ghost row of review PR #6)
     muteMember = s.prepare("UPDATE " + ks + ".members SET muted_until = ? WHERE conv_id = ? AND user_id = ? IF EXISTS");
@@ -180,6 +201,20 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     for (Member m : members) {
       add(c.id(), c.kind(), m, now);
     }
+    members.stream().filter(m -> m.role() == Role.OWNER).findFirst()
+        .ifPresent(o -> exec(setOwner.bind(o.userId(), c.id())));   // I1: an LWT, like every other owner write
+  }
+
+  @Override
+  public Optional<String> owner(String convId) {
+    Row r = exec(selectOwner.bind(convId)).one();
+    return r == null || r.isNull(0) ? Optional.empty() : Optional.of(r.getString(0));
+  }
+
+  @Override
+  public boolean claimOwner(String convId, String expected, String next) {
+    return exec(expected == null ? claimUnownedStmt.bind(next, convId) : claimOwnerStmt.bind(next, convId, expected))
+        .wasApplied();
   }
 
   @Override
@@ -257,8 +292,26 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
 
   @Override
   public void add(String convId, Member m) {
-    ConversationKind kind = get(convId).map(Conversation::kind).orElse(ConversationKind.CONVERSATION_KIND_UNSPECIFIED);
-    add(convId, kind, m, System.currentTimeMillis());
+    Optional<Conversation> c = get(convId);
+    ConversationKind kind = c.map(Conversation::kind).orElse(ConversationKind.CONVERSATION_KIND_UNSPECIFIED);
+    long last = c.map(Conversation::lastSeq).orElse(0L);
+    if (last <= 0) {
+      add(convId, kind, m, System.currentTimeMillis());
+      return;
+    }
+    // batch 1 review M2: one logged batch, so a timeout never leaves a member without their join marks (a retry then
+    // finds them a member and stops early, leaving the whole history unread)
+    exec(com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
+            com.datastax.oss.driver.api.core.cql.DefaultBatchType.LOGGED)
+        .addStatement(insertMember.bind(convId, m.userId(), m.role().name(), System.currentTimeMillis()))
+        .addStatement(joinUserConv.bind(kind.getNumber(), m.userId(), convId))
+        .addStatement(joinMarks.bind(last, last, last, last, m.userId(), convId))
+        .build());
+  }
+
+  @Override
+  public void setRole(String convId, String userId, Role role) {
+    exec(updateRole.bind(role.name(), convId, userId));
   }
 
   private void add(String convId, ConversationKind kind, Member m, long now) {
@@ -347,17 +400,19 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   }
 
   @Override
-  public void advance(String convId, String userId, long deliveredSeq, long readSeq, long atMs) {
-    advance(convId, userId, deliveredSeq, readSeq, 0, atMs);
+  public void advance(String convId, String userId, long deliveredSeq, long readSeq, long shownDeliveredSeq,
+      long atMs) {
+    write(convId, userId, deliveredSeq, readSeq, shownDeliveredSeq, 0, atMs);
   }
 
   /** Review of PR #6: the sender's three marks go in the same conv_marks batch, one round trip per message. */
   @Override
   public void sent(String convId, String userId, long seq, long atMs) {
-    advance(convId, userId, seq, seq, seq, atMs);
+    write(convId, userId, seq, seq, seq, seq, atMs);
   }
 
-  private void advance(String convId, String userId, long deliveredSeq, long readSeq, long sentSeq, long atMs) {
+  private void write(String convId, String userId, long deliveredSeq, long readSeq, long shownDeliveredSeq,
+      long sentSeq, long atMs) {
     var conv = com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
         com.datastax.oss.driver.api.core.cql.DefaultBatchType.UNLOGGED);
     var inbox = com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
@@ -369,6 +424,9 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     if (readSeq > 0) {
       conv.addStatement(markRead.bind(readSeq, readSeq, convId, userId));
       inbox.addStatement(inboxRead.bind(readSeq, readSeq, userId, convId));
+    }
+    if (shownDeliveredSeq > 0) {
+      conv.addStatement(markShown.bind(shownDeliveredSeq, shownDeliveredSeq, convId, userId));
     }
     if (sentSeq > 0) {
       conv.addStatement(markSentStmt.bind(sentSeq, sentSeq, convId, userId));
@@ -396,7 +454,7 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   public List<ChatStores.MemberMarks> marks(String convId) {
     List<ChatStores.MemberMarks> out = new ArrayList<>();
     for (Row r : exec(selectMarks.bind(convId))) {
-      out.add(new ChatStores.MemberMarks(r.getString(0), r.getLong(1), r.getLong(2)));
+      out.add(new ChatStores.MemberMarks(r.getString(0), r.getLong(1), r.getLong(2), r.getLong(3)));
     }
     return out;
   }
@@ -436,11 +494,12 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   public ChatStores.Privacy privacy(String userId) {
     Row r = exec(selectPrivacy.bind(userId)).one();
     return r == null ? ChatStores.Privacy.OPEN : new ChatStores.Privacy(r.getBoolean(0), r.getBoolean(1),
-        r.getBoolean(2));
+        r.getBoolean(2), r.getBoolean(3));
   }
 
   @Override
-  public void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead, Boolean hidePreview, long atMs) {
+  public void updatePrivacy(String userId, Boolean hidePresence, Boolean hideRead, Boolean hidePreview,
+      Boolean refuseAdds, long atMs) {
     var b = com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
         com.datastax.oss.driver.api.core.cql.DefaultBatchType.UNLOGGED);
     if (hidePresence != null) {
@@ -452,7 +511,10 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     if (hidePreview != null) {
       b.addStatement(setHidePreview.bind(hidePreview, atMs, userId));
     }
-    if (hidePresence != null || hideRead != null || hidePreview != null) {
+    if (refuseAdds != null) {
+      b.addStatement(setRefuseAdds.bind(refuseAdds, atMs, userId));
+    }
+    if (hidePresence != null || hideRead != null || hidePreview != null || refuseAdds != null) {
       exec(b.build());
     }
   }
