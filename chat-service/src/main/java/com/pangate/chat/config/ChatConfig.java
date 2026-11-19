@@ -191,7 +191,8 @@ public class ChatConfig {
       ChatProperties p, com.pangate.chat.store.RedisPresence presence) {
     return new com.pangate.chat.core.TypingRelay(store, new MemberLookup(store, cache), pusher,
         presence, () -> System.nanoTime() / 1_000_000,
-        p.state().listedReceiptsMax());
+        p.state().listedReceiptsMax(), new com.pangate.chat.core.TokenBucketLimiter(p.state().typingRate(),
+            p.state().typingBurst(), System::nanoTime));
   }
 
   @Bean

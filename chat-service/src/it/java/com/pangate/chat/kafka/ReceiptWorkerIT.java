@@ -41,7 +41,7 @@ class ReceiptWorkerIT {
 
   static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("apache/kafka:3.9.1"));
   static final ChatProperties.State STATE = new ChatProperties.State(50, 100, Duration.ofMillis(500),
-      Duration.ofSeconds(2), 50, Duration.ofSeconds(5), Duration.ofMinutes(5), 200, Duration.ofSeconds(2));
+      Duration.ofSeconds(2), 50, Duration.ofSeconds(5), Duration.ofMinutes(5), 200, Duration.ofSeconds(2), 5, 10);
 
   @BeforeAll
   static void start() {

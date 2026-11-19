@@ -59,5 +59,6 @@ public record ChatProperties(
       @DefaultValue("500ms") Duration dmWindow, @DefaultValue("2s") Duration groupWindow,
       @DefaultValue("50") int listedReceiptsMax, @DefaultValue("5s") Duration offlineGrace,
       @DefaultValue("5m") Duration watchTtl, @DefaultValue("200") int watchMax,
-      @DefaultValue("2s") Duration typingEvery) {}
+      @DefaultValue("2s") Duration typingEvery, @DefaultValue("5") int typingRate,
+      @DefaultValue("10") int typingBurst) {}
 }
