@@ -1,6 +1,6 @@
 # Đợt 3a: tra cứu nóng (thành viên, giới hạn tần suất, badge)
 
-- **Trạng thái:** Bản thảo (2026-11-19), chờ duyệt.
+- **Trạng thái:** Bản thảo (2026-11-19), chờ duyệt. Đã đọc lại một lượt (§7 ghi những gì đã sửa).
 - **Nguồn:** review toàn bộ chat 2026-11-19 (CH1 I5/I6/I8, CH3 I3/I5/I7, CH4 I2/I6, cross I2/I6). Đợt 3 có ba phần: **3a** (tài liệu này), 3b client Push API, 3c vòng Kafka. Thứ tự và cách chia do chủ dự án duyệt ngày 2026-11-19.
 
 ## 1. Mục tiêu và vì sao
@@ -44,9 +44,9 @@ Badge:
 | `Ingest.check` | cả danh sách | `member(sender)`; DM: thêm `member(người kia)` + `users.isDeleted` cho đúng một người kia (DM luôn 2 người: lấy người kia từ `of(convId)` của DM là hợp lệ, ≤ 2 dòng) |
 | `MarkValidator.validate` | cả danh sách | `member(user)` |
 | `TypingRelay.typing` | cả danh sách, rồi mới kiểm kênh | kiểm loại hội thoại trước (kênh → `channel`); rồi `member(user)`; danh sách (≤ nhóm) chỉ tải khi đã qua giới hạn |
-| `PresenceWatch` (2 chỗ) | cả danh sách, hai lần | `member(viewer)` và `member(user)` |
-| `PresenceFanOut.on` | cả danh sách mỗi hội thoại | `member(viewer)` và `member(subject)` mỗi mục watch |
-| `ReceiptWorkerLoop.flushDue` | cả danh sách mọi loại | DM/nhóm: như cũ; kênh: `member()` cho từng người có trong lần flush (đã giới hạn bởi số lệnh) |
+| `PresenceWatch` | đã từ chối kênh trước khi tải danh sách; nhưng mỗi mục watch gọi `conversations.get` một lần và tải danh sách (≤ 500, cache) hai lần | giữ danh sách có cache (chỉ DM / nhóm); **mỗi hội thoại chỉ tra một lần cho cả lệnh watch** (một watch 200 mục hay trỏ nhiều mục vào cùng hội thoại) |
+| `PresenceFanOut.on` | danh sách có cache, chỉ DM / nhóm (watch không bao giờ trỏ vào kênh) | không đổi |
+| `ReceiptWorkerLoop.flushDue` | cả danh sách mọi loại | DM / nhóm: như cũ; **kênh: không tra lại**. Thành viên đã được kiểm ở `MarkValidator` lúc nhận lệnh; với kênh, worker chỉ ghi mốc của chính người đó và đẩy `own_read_seq` cho chính họ, nên một người vừa rời trong khoảng 2 s đó không lộ gì cho ai (`conv_marks` không bao giờ bị xoá, dòng `user_convs` đã đánh dấu `left`) |
 
 ### 3.2 Giới hạn tần suất trước khi tra (H2) và cho API đọc (H3)
 
@@ -68,16 +68,18 @@ Badge:
 ### 3.3 Badge từ bộ đếm duy trì (H4)
 
 - Redis hash `badge:{user}`: mỗi hội thoại (DM, nhóm; **không** kênh) một field `<convId>` = `"<last>:<read>"`, và field `_total`. TTL 30 ngày, gia hạn mỗi lần ghi.
-- Một script Lua `raise(user, conv, last, read)`: đọc field cũ, lấy `max` từng phần (0 = không đổi), tính lại `unread = max(0, last - read)`, cộng chênh lệch vào `_total`. Idempotent: gửi lại cùng giá trị không đổi gì; giá trị nhỏ hơn không lùi. Thêm `drop(user, conv)` (rời hội thoại: trừ phần chưa đọc, xoá field).
+- Một script Lua `raise(user, conv, last, read)`: **không làm gì nếu `badge:{user}` chưa tồn tại** (chưa dựng hoặc đã mất: lần đọc sau dựng lại từ ScyllaDB, nơi thay đổi này đã được ghi trước); nếu có thì đọc field cũ, lấy `max` từng phần (0 = không đổi), tính lại `unread = max(0, last - read)`, cộng chênh lệch vào `_total`. Idempotent: gửi lại cùng giá trị không đổi gì; giá trị nhỏ hơn không lùi. Thêm `drop(user, conv)` (rời hội thoại: trừ phần chưa đọc, xoá field; cũng không làm gì khi hash không tồn tại).
+- **Thứ tự:** mọi `raise` / `drop` chạy **sau** khi ghi ScyllaDB tương ứng xong, nên ScyllaDB luôn đi trước bộ đếm và lần dựng lại luôn thấy thay đổi.
 - Ai gọi:
-  - fan-out, khi nâng `user_convs.last_seq` của một thành viên (`touchAll`): `raise(member, conv, seq, 0)`; người gửi (`senderMarks`): `raise(sender, conv, seq, seq)`;
+  - fan-out, khi nâng `user_convs.last_seq` của một thành viên (`touchAll`): `raise(member, conv, seq, 0)`; người gửi (`senderMarks`): `raise(sender, conv, seq, seq)`. Nhóm 500 người là 500 lệnh Redis mỗi tin: gửi **tất cả cùng lúc rồi mới chờ trả lời** (Lettuce pipeline, như `onlineOf`), không tuần tự, để 3a không làm fan-out nhóm chậm thêm trước khi 3c ghi inbox theo lô;
   - worker biên nhận, khi nâng `read_seq`: `raise(user, conv, 0, read)`;
   - thêm vào nhóm (F1): `raise(user, conv, last, last)`; rời / bị xoá: `drop`.
 - Đọc (`Badge.total(user, conv, seq)`): `raise(user, conv, seq, 0)` rồi đọc `_total` trong **cùng** một script (tin đang báo luôn được tính, như F4).
-- **Khi chưa có hoặc đã mất** (`badge:{user}` không tồn tại: người dùng cũ, Redis mất dữ liệu, hết TTL): đọc `user_convs` một lần như hiện nay (giới hạn 10 000), ghi cả hash, rồi trả. Chỉ người nhận thông báo mới tốn lần dựng lại này.
+- **Khi chưa có hoặc đã mất** (`badge:{user}` không tồn tại: người dùng cũ, Redis mất dữ liệu, hết TTL): đọc `user_convs` một lần như hiện nay (giới hạn 10 000; bỏ dòng `left` và dòng kênh), ghi cả hash, rồi trả. Chỉ người nhận thông báo mới tốn lần dựng lại này, nên hash chỉ tồn tại cho người từng nhận thông báo offline trong 30 ngày.
 - **Khi ghi lỗi:** một lần `raise`/`drop` thất bại (Redis lỗi) thì `DEL badge:{user}` (best effort) để lần đọc sau dựng lại từ ScyllaDB; không bao giờ để bộ đếm lệch âm thầm. Lỗi Redis không làm hỏng fan-out hay biên nhận (badge là phụ).
 - **Tự sửa định kỳ** (quyết định của người viết, sau builder check): một lần ghi bị mất mà Redis vẫn còn hash (Redis không gọi được nên cả `DEL` cũng hỏng, failover mất vài giây ghi, pod cũ chưa gọi `raise` trong lúc deploy cuốn chiếu) chỉ tự sửa ở lần có tin hay mốc mới của chính hội thoại đó; một `drop` mất thì không bao giờ. Vì thế hash có field `_built_at`: lần đọc thấy hash dựng quá **24 giờ** thì dựng lại từ ScyllaDB. Badge lệch tối đa một ngày, không vĩnh viễn.
-- Đua giữa dựng lại và ghi: dựng lại dùng `HSETNX` cho từng field rồi tính `_total` trong script, nên một `raise` chạy cùng lúc không bị ghi đè lùi.
+- **Dựng lại là một script gộp** (`rebuild(user, snapshot)`), không ghi đè: với mỗi hội thoại trong ảnh chụp từ ScyllaDB, field mới = `max` từng phần của field đang có và ảnh chụp (một `raise` chạy cùng lúc không bị kéo lùi; một lần ghi bị mất được ảnh chụp bù lên); field có trong hash mà **không** có trong ảnh chụp (một `drop` bị mất) bị xoá; rồi tính lại `_total` từ đầu và đặt `_built_at`. Một người vừa vào nhóm đúng lúc ảnh chụp được đọc có thể mất field của nhóm đó tới lần có tin kế tiếp hoặc lần dựng lại sau (lệch nhỏ, tự sửa).
+- **Bộ nhớ Redis:** khoảng 30 byte mỗi hội thoại; một người nhận thông báo với 500 hội thoại ≈ 15 KB; 1 triệu người như vậy ≈ 15 GB. Giới hạn bởi TTL 30 ngày và việc chỉ người nhận thông báo mới có hash.
 
 ### 3.4 Danh sách hội thoại và `/v1/state` (H5)
 
@@ -91,12 +93,26 @@ Badge:
 
 ## 4. Kiểm chứng
 
-- **Đếm lời gọi:** test đơn vị với `FakeStores` có kênh 100 000 thành viên: một lệnh gửi / đánh dấu / gõ phím / theo dõi online gọi `members()` **0 lần** và `member()` ≤ 2 lần.
+- **Đếm lời gọi:** test đơn vị với `FakeStores` có kênh 100 000 thành viên: một lệnh gửi / đánh dấu / gõ phím và một lần flush biên nhận của kênh gọi `members()` (và cache danh sách) **0 lần**, `member()` ≤ 2 lần. Một lệnh watch 200 mục trỏ vào 10 hội thoại gọi `conversations.get` ≤ 10 lần.
 - **Giới hạn trước tra:** người không phải thành viên gửi dồn lệnh tới hội thoại ngẫu nhiên → sau burst nhận `rate_limited` và không còn lần tra store nào.
-- **Badge:** test thuộc tính: chuỗi thao tác ngẫu nhiên (tin mới, đánh dấu, giao lại, vào, rời, mất hash) → `_total` luôn bằng tổng tính lại từ `user_convs`. Thêm: một lần ghi bị mất (hash vẫn còn) → lệch tới khi `_built_at` quá 24 giờ, rồi đúng lại. IT Redis thật cho script Lua.
+- **Badge:** test thuộc tính: chuỗi thao tác ngẫu nhiên (tin mới, đánh dấu, giao lại, vào, rời, mất hash, `raise` khi hash chưa có) → `_total` luôn bằng tổng tính lại từ `user_convs`; `raise` khi hash chưa có không tạo hash. Thêm: một lần ghi bị mất (hash vẫn còn) → lệch tới khi `_built_at` quá 24 giờ, rồi đúng lại. IT Redis thật cho script Lua.
 - **Xoá thành viên:** IT có sẵn `removedMemberStopsReceivingAtOnce` vẫn xanh; thêm: thành viên bị xoá đánh dấu đã xem → `not_member` ngay.
 - Không có số đo tải mới trong 3a (đo ở 3c).
 
-## 5. Để người xây dựng tự quyết
+## 5. Giới hạn theo pod
+
+Mọi giới hạn ở §3.2 là theo pod, như các giới hạn hiện có: với N pod sau load balancer, một người đi qua nhiều pod có thể được tới N lần mức trong bảng. Chấp nhận ở 3a (vẫn chặn được việc tốn đọc không giới hạn); giới hạn dùng chung qua Redis để sau nếu cần.
+
+## 6. Để người xây dựng tự quyết
 
 Tên lớp và phương thức; vị trí script Lua (resource); cách tiêm các limiter; dùng lại hay tách `RedisChatCache` cho badge.
+
+## 7. Đọc lại lần một (2026-11-19)
+
+Đối chiếu với code, đã sửa:
+- **Lỗi thiết kế:** `raise` trên hash chưa tồn tại sẽ tạo một hash chỉ có một hội thoại; quy tắc "hash không tồn tại thì dựng lại" sẽ không bao giờ chạy và badge sai mãi. Nay `raise` / `drop` không làm gì khi hash chưa có.
+- **Lỗi thiết kế:** dựng lại bằng `HSETNX` không sửa được field đã có (chính là trường hợp lần dựng lại 24 giờ cần sửa) và không xoá field của `drop` bị mất. Nay dựng lại gộp bằng `max` và xoá field thừa.
+- Fan-out nhóm 500 người sẽ chậm thêm 500 lệnh Redis tuần tự mỗi tin: nay gửi pipeline.
+- `PresenceWatch` / `PresenceFanOut` đã không bao giờ tải danh sách kênh (kiểm loại trước); đổi sang đọc ScyllaDB từng người sẽ *tốn hơn* danh sách có cache. Giữ danh sách, chỉ bỏ tra trùng trong một lệnh watch.
+- Worker biên nhận với kênh: tra từng người trong mỗi lần flush (hàng nghìn lần đọc mỗi 2 s, một luồng) tệ hơn bỏ hẳn việc tra lại; thành viên đã được kiểm lúc nhận lệnh.
+- Thêm ước lượng bộ nhớ Redis của badge và ghi rõ giới hạn tần suất là theo pod.
