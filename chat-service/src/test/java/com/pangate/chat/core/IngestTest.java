@@ -96,14 +96,45 @@ class IngestTest {
     assertThat(ok).isEqualTo(100);
   }
 
+  /** Perf 3a (spec §1 anti-goal): membership is read from the store, so a removed member is refused at once. */
   @Test
-  void membersAreReadThroughTheCache() {
-    String c = conv(ConversationKind.CONVERSATION_KIND_GROUP, new Member("u1", Role.MEMBER));
-    ingest.accept(new SendInput("u1", "d", send(c), ""));
-    assertThat(stores.cache).containsKey(c);
-    stores.members.get(c).clear();   // cache still says u1 is a member
-    assertThat(ingest.accept(new SendInput("u1", "d", send(c), ""))).isEmpty();
+  void removedMemberIsRefusedAtOnce() {
+    String c = conv(ConversationKind.CONVERSATION_KIND_GROUP, new Member("a", Role.OWNER), new Member("b", Role.MEMBER));
+    assertThat(ingest.accept(new SendInput("b", "d", send(c), ""))).isEmpty();
+    stores.cache.put(c, List.of(new Member("a", Role.OWNER), new Member("b", Role.MEMBER)));
+    stores.members.get(c).remove("b");   // the cached list still says b is a member
+    assertThat(ingest.accept(new SendInput("b", "d", send(c), ""))).get().extracting(Rejection::reason)
+        .isEqualTo(Rejection.NOT_MEMBER);
   }
+
+  /** Perf 3a (spec §4): a post to a channel of 100 000 never loads the member list. */
+  @Test
+  void channelSendReadsNoMemberList() {
+    String c = Ids.next();
+    FakeStores big = FakeStores.withChannel(c, 100_000);
+    Ingest in = new Ingest(big, big, big, published::add, SendValidatorTest.LIMITS, nanos::get,
+        System::currentTimeMillis);
+    assertThat(in.accept(new SendInput("owner", "d", send(c), ""))).isEmpty();
+    assertThat(big.membersCalls.get()).isZero();
+    assertThat(big.cachedMembersCalls.get()).isZero();
+    assertThat(big.memberCalls.get()).isLessThanOrEqualTo(2);
+  }
+
+  /** Perf 3a (spec §3.2): the user limit comes before any lookup, so a stranger cannot make the store work. */
+  @Test
+  void strangerIsLimitedBeforeAnyLookup() {
+    for (int i = 0; i < 40; i++) {
+      assertThat(ingest.accept(new SendInput("x", "d", send(Ids.next()), ""))).get().extracting(Rejection::reason)
+          .isEqualTo(Rejection.NOT_FOUND);
+    }
+    int gets = stores.getCalls.get();
+    int members = stores.memberCalls.get();
+    assertThat(ingest.accept(new SendInput("x", "d", send(Ids.next()), ""))).get().extracting(Rejection::reason)
+        .isEqualTo(Rejection.RATE_LIMITED);
+    assertThat(stores.getCalls.get()).isEqualTo(gets);
+    assertThat(stores.memberCalls.get()).isEqualTo(members);
+  }
+
   /** account spec §8: a DM whose other side deleted the account takes no new messages. */
   @Test
   void dmWithDeletedUserIsRejected() {
