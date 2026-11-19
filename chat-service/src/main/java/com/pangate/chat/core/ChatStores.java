@@ -162,7 +162,18 @@ public final class ChatStores {
 
     Optional<Member> member(String convId, String userId);
 
+    /**
+     * Puts a new member in. Review 2026-11-19 (F1): their inbox row starts at the conversation's current last_seq,
+     * delivered and read, so a member added later (or joining, or coming back) does not inherit the history as unread.
+     */
     void add(String convId, Member m);
+
+    /** Changes an existing member's role; nothing when they are not a member. Their marks are left alone. */
+    default void setRole(String convId, String userId, Role role) {
+      if (member(convId, userId).isPresent()) {
+        add(convId, new Member(userId, role));
+      }
+    }
 
     void remove(String convId, String userId);
 

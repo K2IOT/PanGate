@@ -40,6 +40,8 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   private final PreparedStatement selectMembers;
   private final PreparedStatement selectMember;
   private final PreparedStatement joinUserConv;
+  private final PreparedStatement joinMarks;
+  private final PreparedStatement updateRole;
   private final PreparedStatement leaveUserConv;
   private final PreparedStatement touchUserConv;
   private final PreparedStatement selectUserConvs;
@@ -95,6 +97,10 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
     upsertUser = s.prepare("INSERT INTO " + ks + ".users (user_id, status, updated_at, display_name) VALUES (?, ?, ?, ?)");
     selectMember = s.prepare("SELECT user_id, role FROM " + ks + ".members WHERE conv_id = ? AND user_id = ?");
     joinUserConv = s.prepare("UPDATE " + ks + ".user_convs SET kind = ?, left = false WHERE user_id = ? AND conv_id = ?");
+    // F1: the joiner's inbox starts at the conversation's last_seq; every cell's timestamp is that seq, as for marks
+    joinMarks = s.prepare("UPDATE " + ks + ".user_convs USING TIMESTAMP ? SET last_seq = ?, read_seq = ?, "
+        + "delivered_seq = ? WHERE user_id = ? AND conv_id = ?");
+    updateRole = s.prepare("UPDATE " + ks + ".members SET role = ? WHERE conv_id = ? AND user_id = ? IF EXISTS");
     leaveUserConv = s.prepare("UPDATE " + ks + ".user_convs SET left = true WHERE user_id = ? AND conv_id = ?");
     // the cell timestamp is the conv_seq: concurrent or replayed touches keep the highest seq without an LWT
     touchUserConv = s.prepare("UPDATE " + ks + ".user_convs USING TIMESTAMP ? SET last_seq = ?, last_msg_at = ? "
@@ -257,8 +263,18 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
 
   @Override
   public void add(String convId, Member m) {
-    ConversationKind kind = get(convId).map(Conversation::kind).orElse(ConversationKind.CONVERSATION_KIND_UNSPECIFIED);
+    Optional<Conversation> c = get(convId);
+    ConversationKind kind = c.map(Conversation::kind).orElse(ConversationKind.CONVERSATION_KIND_UNSPECIFIED);
     add(convId, kind, m, System.currentTimeMillis());
+    long last = c.map(Conversation::lastSeq).orElse(0L);
+    if (last > 0) {
+      exec(joinMarks.bind(last, last, last, last, m.userId(), convId));
+    }
+  }
+
+  @Override
+  public void setRole(String convId, String userId, Role role) {
+    exec(updateRole.bind(role.name(), convId, userId));
   }
 
   private void add(String convId, ConversationKind kind, Member m, long now) {

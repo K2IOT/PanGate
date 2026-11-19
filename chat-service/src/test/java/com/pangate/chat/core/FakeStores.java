@@ -99,7 +99,8 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
     joined.putIfAbsent(convId + "|" + m.userId(), joins.incrementAndGet());
     Conversation c = convs.get(convId);
     userConvs.computeIfAbsent(m.userId(), k -> new ConcurrentHashMap<>())
-        .putIfAbsent(convId, new UserConv(convId, c == null ? null : c.kind(), 0, 0, 0));
+        .putIfAbsent(convId, new UserConv(convId, c == null ? null : c.kind(), lastSeq.getOrDefault(convId, 0L),
+            lastSeq.getOrDefault(convId, 0L), 0, lastSeq.getOrDefault(convId, 0L)));
   }
   @Override public void remove(String convId, String userId) {
     check();

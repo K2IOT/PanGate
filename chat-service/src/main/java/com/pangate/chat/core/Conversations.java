@@ -198,7 +198,7 @@ public final class Conversations {
     if (me.get().role() == Role.OWNER && rest.stream().noneMatch(m -> m.role() == Role.OWNER)) {
       rest.stream().filter(m -> m.role() == Role.ADMIN).findFirst()
           .or(() -> rest.stream().filter(m -> m.role() == Role.MEMBER).findFirst())
-          .ifPresent(next -> changeMembers(convId, () -> members.add(convId, new Member(next.userId(), Role.OWNER))));
+          .ifPresent(next -> changeMembers(convId, () -> members.setRole(convId, next.userId(), Role.OWNER)));
     }
     removeMember(userId, convId, userId);
   }
