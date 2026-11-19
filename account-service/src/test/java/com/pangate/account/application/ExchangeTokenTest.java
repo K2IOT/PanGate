@@ -135,4 +135,30 @@ class ExchangeTokenTest {
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> x.exchange(s.refreshToken()))
         .isInstanceOfSatisfying(DomainException.class, e -> assertThat(e.code()).isEqualTo("account_locked"));
   }
+
+  /** Review 2026-11-19 (F8): an exchange auth-service did not answer gives its slot back. */
+  @Test
+  void failedMintsDoNotUseTheHourlyBudget() {
+    java.util.concurrent.atomic.AtomicBoolean down = new java.util.concurrent.atomic.AtomicBoolean(true);
+    AuthApi flaky = new AuthApi() {
+      @Override
+      public ConnectToken mint(String userId, String deviceId) {
+        if (down.get()) {
+          throw new AuthUnavailableException("down");
+        }
+        return new ConnectToken("jwt", Instant.now().plusSeconds(600));
+      }
+
+      @Override
+      public void revoke(byte[] json) {}
+    };
+    ExchangeToken x = new ExchangeToken(f.sessionStore, f.accountStore, flaky, counter, TestLimits.SPEC, f.clock,
+        Duration.ofDays(180), Duration.ofMinutes(5), Metrics.NONE);
+    for (int i = 0; i < 70; i++) {
+      org.assertj.core.api.Assertions.assertThatThrownBy(() -> x.exchange(s.refreshToken()))
+          .isInstanceOfSatisfying(DomainException.class, e -> assertThat(e.code()).isEqualTo("unavailable"));
+    }
+    down.set(false);
+    assertThat(x.exchange(s.refreshToken()).token()).isEqualTo("jwt");
+  }
 }
