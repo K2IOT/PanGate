@@ -67,7 +67,8 @@ class LifecycleListenerIT {
           .toByteArray()));
       p.send(new ProducerRecord<>("c1.gw.lifecycle", "chat:lc1", new byte[] {(byte) 0xff, 1}));   // malformed: skipped
       p.flush();
-      await().atMost(Duration.ofSeconds(20)).until(() -> presence.online("lc1"));
+      // the tracker writes Redis first and reports the transition after: wait for both, not just the first
+      await().atMost(Duration.ofSeconds(20)).until(() -> presence.online("lc1") && !out.isEmpty());
       assertThat(out).extracting(PresenceTracker.Transition::userId).containsExactly("lc1");
     }
   }
