@@ -323,8 +323,8 @@ public class ChatConfig {
   }
 
   @Bean(destroyMethod = "")
-  PushApiClient pushApiClient(ChatProperties p) {
-    return PushApiClient.create(p.pushApi());
+  PushApiClient pushApiClient(ChatProperties p, MeterRegistry meters) {
+    return PushApiClient.create(p.pushApi(), meters);
   }
 
   @Bean

@@ -44,8 +44,16 @@ public record ChatProperties(
   public record Auth(@DefaultValue("https://auth.pangate/.well-known/jwks.json") String jwksUri,
       @DefaultValue("https://auth.pangate") String issuer, @DefaultValue("pangate-gw") String audience) {}
 
+  /**
+   * Perf 3b (spec §4.5): {@code streams} per pod over round-robin; per stream at most {@code window} unanswered
+   * requests (≤ the Push API's max-in-flight-per-stream), of which BEST_EFFORT + DROPPABLE use at most
+   * {@code lowShare}; BEST_EFFORT waits at most {@code lowWait}, MUST at most {@code mustWait}; {@code queueMax} per
+   * stream and queue; {@code timeout} counts from the write.
+   */
   public record PushApi(@DefaultValue("dns:///push-api:9443") String target, @DefaultValue("false") boolean plaintext,
-      @DefaultValue("2s") Duration timeout) {}
+      @DefaultValue("8s") Duration timeout, @DefaultValue("4") int streams, @DefaultValue("1000") int window,
+      @DefaultValue("0.2") double lowShare, @DefaultValue("2s") Duration lowWait,
+      @DefaultValue("10000") int queueMax, @DefaultValue("10s") Duration mustWait) {}
 
   public record Limits(@DefaultValue("20") int userRate, @DefaultValue("40") int userBurst,
       @DefaultValue("50") int convRate, @DefaultValue("100") int convBurst,
