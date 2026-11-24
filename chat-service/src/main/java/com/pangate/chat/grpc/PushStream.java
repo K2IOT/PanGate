@@ -392,7 +392,7 @@ final class PushStream implements AutoCloseable {
 
   /**
    * No answer in time: the caller hears now, but the slot stays taken until the server answers. Final review I3: when
-   * every request on the current call has timed out and the call answered nothing for {@link #STALL_TIMEOUTS}
+   * every request on a call (current or rotated out) has timed out and the call answered nothing for {@link #STALL_TIMEOUTS}
    * timeouts, it is cancelled,
    * which frees its slots ({@link #ended}) and lets round-robin place the next call elsewhere.
    */
@@ -410,11 +410,14 @@ final class PushStream implements AutoCloseable {
     checkStalled(item.call);
   }
 
-  /** Cancels {@code c} when it is stalled; re-checks later when it is quiet but not for long enough yet. */
+  /**
+   * Cancels {@code c} when it is stalled; re-checks later when it is quiet but not for long enough yet. A call rotated
+   * out is checked too (Codex review of PR #11): its unanswered requests hold slots of this stream.
+   */
   private void checkStalled(Call c) {
     boolean stalled;
     synchronized (this) {
-      if (c != call || inFlight.values().stream().noneMatch(i -> i.call == c)
+      if (inFlight.values().stream().noneMatch(i -> i.call == c)
           || !inFlight.values().stream().filter(i -> i.call == c).allMatch(i -> i.timedOut)) {
         return;
       }

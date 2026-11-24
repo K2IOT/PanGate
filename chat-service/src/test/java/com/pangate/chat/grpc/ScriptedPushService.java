@@ -23,6 +23,8 @@ public final class ScriptedPushService extends PushServiceGrpc.PushServiceImplBa
   public volatile boolean autoAnswer;
   /** Ask for one message at a time (the transport reports not ready in between), instead of the whole window. */
   public volatile boolean oneAtATime;
+  /** A wedged Push API: a half-closed call is never completed (and nothing is answered unless told to). */
+  public volatile boolean wedged;
   private final Map<String, StreamObserver<PushResponse>> pending = new ConcurrentHashMap<>();
   private final List<StreamObserver<PushResponse>> open = new CopyOnWriteArrayList<>();
 
@@ -54,6 +56,9 @@ public final class ScriptedPushService extends PushServiceGrpc.PushServiceImplBa
 
       @Override
       public void onCompleted() {
+        if (wedged) {
+          return;
+        }
         open.remove(out);
         synchronized (out) {
           out.onCompleted();

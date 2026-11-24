@@ -343,6 +343,26 @@ class PushStreamTest {
     await().atMost(Duration.ofSeconds(3)).until(() -> api.received.stream().anyMatch(r -> r.stream() == 2));
   }
 
+  /**
+   * Codex review of PR #11: a call rotated out while its requests wait on a wedged server is cancelled like a current
+   * one, so its slots come back and queued requests reach a new call.
+   */
+  @Test
+  void rotatedCallThatStallsIsCancelled() {
+    api.wedged = true;
+    PushStream s = stream(Duration.ofMillis(100), Duration.ofSeconds(10), Duration.ofMillis(200));
+    for (int i = 0; i < 10; i++) {
+      s.send(req("p" + i), Priority.MUST);
+    }
+    await().until(() -> api.received.size() == 10);
+    await().until(() -> meters.counter("chat.push.stream.rotations").count() >= 1);
+    for (int i = 10; i < 15; i++) {
+      s.send(req("p" + i), Priority.MUST);
+    }
+    await().atMost(Duration.ofSeconds(3)).until(() -> api.received.stream().anyMatch(r -> r.stream() == 2));
+    assertThat(meters.counter("chat.push.stream.stalled").count()).isGreaterThanOrEqualTo(1);
+  }
+
   /** I4: must-wait does not fail requests while the stream keeps answering, however slowly. */
   @Test
   void mustDoesNotExpireWhileTheStreamProgresses() throws Exception {
