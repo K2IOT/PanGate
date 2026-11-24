@@ -127,8 +127,7 @@ class ChatLoadIT {
     }
     com.pangate.chat.support.KnownUsers.add(h.bootstrap(), h.chat, users.toArray(String[]::new));
     connectAll(users).forEach(ChatLoadIT::listen);
-    String g = h.json(h.call("POST", "/v1/conversations", users.getFirst(), Map.of("kind", "group", "title", "load",
-        "memberIds", users.subList(1, users.size())), Map.of())).get("id").asText();
+    String g = createGroup(users);
     latenciesNs.clear();
     int messages = 20;
     for (int i = 0; i < messages; i++) {
@@ -150,8 +149,44 @@ class ChatLoadIT {
     }
     com.pangate.chat.support.KnownUsers.add(h.bootstrap(), h.chat, users.toArray(String[]::new));
     connectAll(users).forEach(ChatLoadIT::listen);
-    return h.json(h.call("POST", "/v1/conversations", users.getFirst(), Map.of("kind", "group", "title", "load",
-        "memberIds", users.subList(1, users.size())), Map.of())).get("id").asText() + " " + run;
+    return createGroup(users) + " " + run;
+  }
+
+  /**
+   * A group of all {@code users}, the first one owning it. Review 2026-11-19 (F7): a create takes at most 200 others,
+   * and only owners and admins add (5/s, burst 20 each), so 15 admins add the rest, 20 each, in parallel.
+   */
+  static String createGroup(List<String> users) throws Exception {
+    String owner = users.getFirst();
+    int first = Math.min(users.size(), 201);
+    HttpResponse<String> created = h.call("POST", "/v1/conversations", owner, Map.of("kind", "group", "title", "load",
+        "memberIds", users.subList(1, first)), Map.of());
+    assertThat(created.statusCode()).as(created.body()).isEqualTo(201);
+    String g = h.json(created).get("id").asText();
+    List<String> rest = users.subList(first, users.size());
+    int admins = (rest.size() + 19) / 20;
+    try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
+      List<Future<?>> fs = new ArrayList<>();
+      for (int a = 0; a < admins; a++) {
+        String admin = users.get(1 + a);
+        HttpResponse<String> r = h.call("PUT", "/v1/conversations/" + g + "/members/" + admin + "/role", owner,
+            Map.of("role", "admin"), Map.of());
+        assertThat(r.statusCode()).as(r.body()).isEqualTo(204);
+        List<String> mine = rest.subList(a * 20, Math.min(rest.size(), a * 20 + 20));
+        fs.add(pool.submit(() -> {
+          for (String u : mine) {
+            HttpResponse<String> add = h.call("POST", "/v1/conversations/" + g + "/members", admin,
+                Map.of("userId", u), Map.of());
+            assertThat(add.statusCode()).as(add.body()).isEqualTo(204);
+          }
+          return null;
+        }));
+      }
+      for (Future<?> f : fs) {
+        f.get();
+      }
+    }
+    return g;
   }
 
   /** Sends {@code perSecond} messages a second for 10 s to every group (one sender thread per group). */
