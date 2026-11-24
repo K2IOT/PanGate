@@ -53,6 +53,8 @@ class ChatLoadIT {
 
   /** Every chat.message pushed to these clients: latency from the "t=<nanos>" in its text. */
   static final ConcurrentLinkedQueue<Long> latenciesNs = new ConcurrentLinkedQueue<>();
+  static final Map<String, java.util.concurrent.atomic.AtomicInteger> perConversation =
+      new java.util.concurrent.ConcurrentHashMap<>();
 
   static void listen(GatewayClient c) {
     c.onPush(f -> {
@@ -61,7 +63,10 @@ class ChatLoadIT {
       }
       if ("chat.message".equals(f.getHeadersMap().get("type"))) {
         try {
-          String text = ChatMessage.parseFrom(f.getPayload()).getText();
+          ChatMessage cm = ChatMessage.parseFrom(f.getPayload());
+          String text = cm.getText();
+          perConversation.computeIfAbsent(cm.getConversationId(), k -> new java.util.concurrent.atomic.AtomicInteger())
+              .incrementAndGet();
           if (text.startsWith("t=")) {
             latenciesNs.add(System.nanoTime() - Long.parseLong(text.substring(2)));
           }
@@ -246,6 +251,13 @@ class ChatLoadIT {
       System.out.printf("CHAT-LOAD   %d/%d delivered%n", latenciesNs.size(), expected);
     }
     report("five groups of 500 (50 messages each, 5/s each)", expected);
+    for (String g : groups) {
+      String id = g.split(" ")[0];
+      System.out.printf("CHAT-LOAD   group %s: %s deliveries%n", id, perConversation.get(id));
+    }
+    io.micrometer.core.instrument.MeterRegistry m = h.chat.getBean(io.micrometer.core.instrument.MeterRegistry.class);
+    m.find("chat.fanout.push").counters().forEach(c -> System.out.printf("CHAT-LOAD   chat.fanout.push %s: %.0f%n",
+        c.getId().getTag("result"), c.count()));
     System.out.printf("CHAT-LOAD   sending took %.1f s, last delivery %.1f s after the last send%n",
         (sent - t0) / 1e9, (System.nanoTime() - sent) / 1e9);
     h.closeClients();
