@@ -1,6 +1,6 @@
 # Đợt 3b: client Push API của chat-service (pool, kiểm soát luồng, ưu tiên)
 
-- **Trạng thái:** Bản thảo (2026-11-24), chờ duyệt. Đã qua builder check (§7 ghi các quyết định sau đó).
+- **Trạng thái:** Đã duyệt (2026-11-24). Đã qua builder check (§7 ghi các quyết định sau đó).
 - **Nguồn:** review toàn bộ chat 2026-11-19, CH1 I2 ("One Push API stream per pod"). Đợt 3 gồm 3a (đã merge, K2IOT/PanGate#10), **3b** (tài liệu này), 3c (vòng Kafka theo partition).
 - **Quy mô mục tiêu** (chủ dự án, 2026-11-19): 1 triệu người dùng, kênh 100 000 thành viên.
 
