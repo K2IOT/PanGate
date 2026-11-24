@@ -1,6 +1,6 @@
 # Đợt 3c: vòng Kafka thành pipeline theo khoá (ingest, sequencer, fan-out, offline)
 
-- **Trạng thái:** Bản nháp, đã qua builder check (§7), chờ chủ dự án duyệt.
+- **Trạng thái:** Đã làm (2026-11-24, plan `docs/superpowers/plans/2026-11-24-perf-3c-kafka-pipelines.md`). Đã qua builder check (§7). Số đo ở §8.
 - **Nguồn:** review toàn bộ chat 2026-11-19: CH1 I3 (độ trễ 1-1 p99 443 ms, "stop-and-wait step loop"), CH1 I1 (ghi inbox nhóm 500 tuần tự), CH3 I5 và cross (lệnh `chat.presence.watch` chạy chung hàng với `chat.send`), CH4 I2 (vòng offline một luồng). Đợt 3 gồm 3a (K2IOT/PanGate#10), 3b (K2IOT/PanGate#11), **3c** (tài liệu này).
 - **Quy mô mục tiêu** (chủ dự án, 2026-11-19): 1 triệu người dùng, kênh 100 000 thành viên.
 - **Quyết định của chủ dự án:** tự viết pipeline cho từng partition, không dùng Confluent Parallel Consumer (2026-11-19); song song **theo hội thoại (khoá Kafka)** bên trong một partition, không chỉ theo partition (2026-11-24).
@@ -153,3 +153,15 @@ Builder check (một người xây dựng đọc tài liệu mà không hỏi đ
 - **Mẻ thử lại** đóng băng cho tới khi xong hoặc bị đưa vào DLQ (§4.1).
 
 Thêm vào thiết kế từ các điểm nhỏ của builder check: hai mẻ cùng khoá không bao giờ chạy cùng lúc trên một pod khi partition được giao lại (§4.1); làn ngừng thử lại khi mất partition hay pipeline đóng (§4.1); giới hạn ghi inbox là chung cho cả pod (§4.3); assignor giữ mặc định.
+
+## 8. Số đo (2026-11-24, máy 4 vCPU, `ChatLoadIT`)
+
+| Ca | Trước 3c | Sau 3c |
+|---|---|---|
+| 1-1, 100 tin/s | p99 194,7 ms | p99 33,3 ms |
+| Nhóm 500, 10 tin/s | đủ, p99 6,6 s, tin cuối tới 6,6 s sau lần gửi cuối (fan-out tụt dần) | đủ, p99 1,4 s, tin cuối tới 0,3 s sau lần gửi cuối (theo kịp) |
+| 5 nhóm 500, mỗi nhóm 5 tin/s | không có số hợp lệ (client test không heartbeat bị đóng) | đủ 125 000, p99 8,7 s, tin cuối tới 10 s sau lần gửi cuối |
+
+- §2 "1-1 100 tin/s p99 < 300 ms": đạt (máy này nhanh hơn máy đo CH1, nên số gốc cũng đã đạt).
+- §2 "nhóm 500 ở 10 tin/s, lag không tăng dần": đạt.
+- §2 "5 nhóm × 5 tin/s": mọi tin tới đủ, nhưng hàng đợi dồn trong 10 s rồi rút: 12 500 push/s vượt sức của cả stack chạy chung trên 4 lõi (khoảng 6 000/s). Giới hạn là CPU của máy chung, không phải thứ tự theo hội thoại, nên không nới thứ tự (§7).

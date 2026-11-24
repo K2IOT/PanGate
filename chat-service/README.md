@@ -175,6 +175,24 @@ At 100 messages/s the 1-1 p99 is above the spec's 300 ms. Where the time goes, a
 Everything shares the four cores: seven services, three containers and the clients. Partitions are processed in
 parallel by ingest, sequencer and fan-out; before that change the group p99 was 722 ms and the 1-1 p99 was 981 ms.
 
+### After perf 3c (keyed pipelines), same kind of machine (4 vCPU), 2026-11-24
+
+Measured before and after on the same machine (faster than the CH1 one: the 1-1 baseline was already under 300 ms).
+Groups are built through admins (a create takes at most 200 others since review F7); members connect just before
+the first message.
+
+| Run | Before 3c | After 3c |
+|---|---|---|
+| 1-1 over WebSocket, 50 chats, 100 messages/s | p50 70.6 / p99 194.7 / max 217.1 ms | p50 23.5 / p99 33.3 / max 40.9 ms |
+| group of 500, 20 messages at 5/s | p99 91.4 ms | p99 90.4 ms |
+| group of 500, 100 messages at 10/s (5 000 pushes/s) | all delivered, p99 6 596 ms, last delivery 6.6 s after the last send (fan-out falls behind) | all delivered, p99 1 395 ms, last delivery 0.3 s after the last send (keeps up) |
+| five groups of 500, 50 messages each at 5/s (12 500 pushes/s) | (no valid number: idle test clients were closed) | all 125 000 delivered, p99 8 745 ms, last delivery 10 s after the last send |
+| channel, 10 000 sessions, 10 messages at 2/s | p99 295.8 ms | p99 287.2 ms |
+
+Five groups offer 12 500 pushes/s for 10 s; the whole stack on this machine (seven services, three containers and
+the clients on four cores) delivers about 6 000/s, so that run queues for 10 s and drains. One group of 500 at 10/s
+(5 000 pushes/s) keeps up: a conversation no longer limits itself to 2–4 messages/s.
+
 ## Tests
 
 `./mvnw -f chat-service verify`: unit tests, ScyllaDB/Kafka/Redis ITs, `QueryApiIT` (with the Push API in the JVM)

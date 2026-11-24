@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Perf 3c (keyed Kafka pipelines)
+Design: `docs/superpowers/specs/2026-11-24-perf-3c-kafka-pipelines-design.md`.
+- chat-service: ingest, sequencer, fan-out and the offline notifier run on one keyed pipeline: one lane per record
+  key (conversation, or sender), in order within a lane, lanes in parallel; the poll never waits for the work, each
+  partition commits its oldest unfinished record, a partition with 1 000 unfinished records pauses. A failed batch
+  is retried in place: a slow or stuck conversation only holds itself (`chat.pipeline.*`, `chat.kafka.lag`).
+- chat-service: state commands (read, delivered, typing, presence watch) are read by their own group `chat-state`,
+  so a slow watch no longer sits in front of a message; it starts from the end of the topic the first time.
+- chat-service: fan-out writes every member's inbox row together (at most 256 at once per pod) and retries only the
+  rows that failed; the 30 s give-up and the 120 s step budget are gone.
+- Measured on a 4 vCPU machine: 1-1 at 100 messages/s p99 194.7 → 33.3 ms; a group of 500 at 10 messages/s now keeps
+  up (p99 6.6 s → 1.4 s).
+
 ### Perf 3b (Push API client)
 Design: `docs/superpowers/specs/2026-11-24-perf-3b-push-api-client-design.md`.
 - chat-service: pushes go over a pool of 4 SendStreams spread by round-robin over every Push API pod (`push-api` must
