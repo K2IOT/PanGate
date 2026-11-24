@@ -345,9 +345,23 @@ public class ChatConfig {
   UpstreamCommandListener upstreamCommandListener(ChatProperties p, Ingest ingest, Notifier notifier,
       CommandProducer producer, MeterRegistry meters, ChannelSubscriptions channels,
       com.pangate.chat.core.StateIngest state) {
-    return new UpstreamCommandListener(UpstreamCommandListener.consumer(p.kafka().bootstrap()),
-        p.kafka().upstreamTopic(), ingest, notifier, producer,
-        outcome -> meters.counter("chat.ingest.records", "result", outcome).increment(), channels, state);
+    return new UpstreamCommandListener(UpstreamCommandListener.consumer(p.kafka().bootstrap(),
+        UpstreamCommandListener.GROUP, "earliest"), p.kafka().upstreamTopic(), ingest, notifier, producer,
+        outcome -> meters.counter("chat.ingest.records", "role", "ingest", "result", outcome).increment(), channels,
+        state, UpstreamCommandListener.Role.INGEST,
+        com.pangate.chat.kafka.KeyedPipeline.Settings.of(p.pipeline(), 1, true), meters);
+  }
+
+  /** Perf 3c (spec §4.4): the state ops in their own group, from the end of the topic on its first start. */
+  @Bean(destroyMethod = "")
+  UpstreamCommandListener stateCommandListener(ChatProperties p, Ingest ingest, Notifier notifier,
+      CommandProducer producer, MeterRegistry meters, ChannelSubscriptions channels,
+      com.pangate.chat.core.StateIngest state) {
+    return new UpstreamCommandListener(UpstreamCommandListener.consumer(p.kafka().bootstrap(),
+        p.kafka().stateGroup(), "latest"), p.kafka().upstreamTopic(), ingest, notifier, producer,
+        outcome -> meters.counter("chat.ingest.records", "role", "state", "result", outcome).increment(), channels,
+        state, UpstreamCommandListener.Role.STATE,
+        com.pangate.chat.kafka.KeyedPipeline.Settings.of(p.pipeline(), 1, true), meters);
   }
 
   @Bean
@@ -515,7 +529,11 @@ public class ChatConfig {
 
   @Bean
   SmartLifecycle chatBackground(CqlSession cql, ChatHealth health, ConnectTokenVerifier verifier,
-      RevocationListener revocationListener, UpstreamCommandListener upstream, CommandProducer producer,
+      RevocationListener revocationListener,
+      @org.springframework.beans.factory.annotation.Qualifier("upstreamCommandListener")
+      UpstreamCommandListener upstream,
+      @org.springframework.beans.factory.annotation.Qualifier("stateCommandListener")
+      UpstreamCommandListener stateCommands, CommandProducer producer,
       RedisChatCache redis, MeterRegistry meters, Revocations revocations, SequencerLoop sequencerLoop,
       EventProducer events, RedisSendResults results, FanOutLoop fanOut, PushApiClient pusher,
       AccountsListener accounts, com.pangate.chat.kafka.ReceiptWorkerLoop receipts,
@@ -549,13 +567,14 @@ public class ChatConfig {
         lifecycle.start();
         accounts.start();
         upstream.start();
+        stateCommands.start();
         running = true;
       }
 
       @Override
       public void stop() {
         running = false;
-        closeInOrder(upstream, accounts, lifecycle, sequencerLoop, fanOut, receipts, pusher, revocationListener,
+        closeInOrder(upstream, stateCommands, accounts, lifecycle, sequencerLoop, fanOut, receipts, pusher, revocationListener,
             producer, events, results, timers::shutdownNow, presence, redis, cql);
       }
 

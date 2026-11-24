@@ -259,7 +259,7 @@ class UpstreamCommandListenerIT {
                 new com.pangate.chat.core.MemberLookup(stores, stores),
                 new com.pangate.chat.core.LastSeqCache(stores, System::currentTimeMillis),
                 new com.pangate.chat.core.TokenBucketLimiter(50, 100, System::nanoTime), reason -> { }),
-                producer))) {
+                producer), UpstreamCommandListener.Role.STATE)) {
       listener.start();
       com.pangate.contracts.v1.ChatMark read = com.pangate.contracts.v1.ChatMark.newBuilder().setConversationId(conv)
           .setUpToSeq(4).build();
@@ -279,6 +279,58 @@ class UpstreamCommandListenerIT {
       });
       assertThat(drain("chat.commands.dlq.rd", 1).stream().filter(r -> new String(r.headers().lastHeader("reason").value())
           .contains("chat.delivered"))).hasSize(1);
+    }
+  }
+
+  /** Perf 3c (spec §4.4): a new chat-state group starts at the end; state ops from before it are not replayed. */
+  @Test
+  void stateGroupStartsAtTheEnd() throws Exception {
+    String upstream = "c1.gw.upstream.st";
+    try (Admin a = Admin.create(Map.of("bootstrap.servers", kafka.getBootstrapServers()))) {
+      a.createTopics(List.of(new NewTopic(upstream, 1, (short) 1))).all().get();
+    }
+    List<String> marks = new CopyOnWriteArrayList<>();
+    com.pangate.chat.core.StateCommands state = new com.pangate.chat.core.StateCommands() {
+      @Override
+      public String mark(String userId, String deviceId, com.pangate.contracts.v1.ChatMark m, boolean read) {
+        marks.add(m.getConversationId());
+        return "accepted";
+      }
+
+      @Override
+      public String typing(String userId, String deviceId, com.pangate.contracts.v1.ChatTyping t) {
+        return "accepted";
+      }
+
+      @Override
+      public String watch(String userId, String deviceId, com.pangate.contracts.v1.PresenceWatch w) {
+        return "accepted";
+      }
+    };
+    try (KafkaProducer<String, byte[]> p = new KafkaProducer<>(Map.of("bootstrap.servers",
+        kafka.getBootstrapServers()), new StringSerializer(), new ByteArraySerializer())) {
+      p.send(new ProducerRecord<>(upstream, "chat:u1", upstream("chat", "chat:u1", "chat.read",
+          com.pangate.contracts.v1.ChatMark.newBuilder().setConversationId("old").setUpToSeq(1).build()
+              .toByteArray()))).get();
+      FakeStores stores = new FakeStores();
+      try (CommandProducer producer = CommandProducer.create(kafka.getBootstrapServers(), Duration.ofSeconds(5),
+          ChatTopics.COMMANDS, "chat.commands.dlq.st");
+          UpstreamCommandListener listener = new UpstreamCommandListener(UpstreamCommandListener.consumer(
+              kafka.getBootstrapServers(), "state-" + Ids.next(), "latest"), upstream,
+              new Ingest(stores, stores, stores, producer, FakeStores.LIMITS, System::nanoTime,
+                  System::currentTimeMillis),
+              (sender, r) -> { }, producer, outcome -> { },
+              new ChannelSubscriptions(stores, stores, (r, prio) -> new CompletableFuture<>()), state,
+              UpstreamCommandListener.Role.STATE)) {
+        listener.start();
+        await().atMost(Duration.ofSeconds(30)).until(() -> {
+          p.send(new ProducerRecord<>(upstream, "chat:u1", upstream("chat", "chat:u1", "chat.read",
+              com.pangate.contracts.v1.ChatMark.newBuilder().setConversationId("new").setUpToSeq(1).build()
+                  .toByteArray()))).get();
+          return marks.contains("new");
+        });
+        assertThat(marks).doesNotContain("old");
+      }
     }
   }
 }
