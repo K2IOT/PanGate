@@ -147,14 +147,35 @@ class ChatLoadIT {
 
   /** Perf 3c (spec §2): users of a new group of 500, all connected and listening; returns the group id. */
   static String groupOfConnected(String prefix) throws Exception {
+    String g = groupOf(prefix);
+    connectMembers(List.of(g));
+    return g;
+  }
+
+  /** A group of 500 new users, none connected yet; "id run". */
+  static String groupOf(String prefix) throws Exception {
     String run = prefix + UUID.randomUUID().toString().substring(0, 6);
     List<String> users = new ArrayList<>();
     for (int i = 0; i < 500; i++) {
       users.add(run + "-" + i);
     }
     com.pangate.chat.support.KnownUsers.add(h.bootstrap(), h.chat, users.toArray(String[]::new));
-    connectAll(users).forEach(ChatLoadIT::listen);
     return createGroup(users) + " " + run;
+  }
+
+  /**
+   * Connects and listens as every member, right before sending: test clients send no heartbeat, so connections
+   * opened while other groups are still being built would be closed as idle before the first message.
+   */
+  static void connectMembers(List<String> groups) throws Exception {
+    List<String> users = new ArrayList<>();
+    for (String g : groups) {
+      String run = g.split(" ")[1];
+      for (int i = 0; i < 500; i++) {
+        users.add(run + "-" + i);
+      }
+    }
+    connectAll(users).forEach(ChatLoadIT::listen);
   }
 
   /**
@@ -238,8 +259,9 @@ class ChatLoadIT {
   void fiveGroupsOf500At5PerSecond() throws Exception {
     List<String> groups = new ArrayList<>();
     for (int i = 0; i < 5; i++) {
-      groups.add(groupOfConnected("g" + i));
+      groups.add(groupOf("g" + i));
     }
+    connectMembers(groups);
     latenciesNs.clear();
     long t0 = System.nanoTime();
     sendToGroups(groups, 5);
