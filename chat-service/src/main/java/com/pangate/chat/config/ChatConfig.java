@@ -319,7 +319,8 @@ public class ChatConfig {
   SequencerLoop sequencerLoop(ChatProperties p, Sequencer sequencer, EventProducer events, RedisSendResults results,
       CommandProducer producer, MeterRegistry meters) {
     return new SequencerLoop(SequencerLoop.consumer(p.kafka().bootstrap(), SequencerLoop.GROUP),
-        p.kafka().commandsTopic(), sequencer, events, results, producer, meters);
+        p.kafka().commandsTopic(), sequencer, events, results, producer, meters,
+        com.pangate.chat.kafka.KeyedPipeline.Settings.of(p.pipeline(), p.pipeline().maxBatch(), true));
   }
 
   @Bean(destroyMethod = "")

@@ -53,6 +53,11 @@ public final class KeyedPipeline implements AutoCloseable {
       return new Settings(p.maxPendingPerPartition(), maxBatch, p.maxConcurrency(), p.commitInterval(),
           p.revokeWait(), deadLetters);
     }
+
+    /** The {@code chat.pipeline.*} defaults (spec §4.6). */
+    public static Settings defaults(int maxBatch, boolean deadLetters) {
+      return new Settings(1_000, maxBatch, 256, Duration.ofMillis(200), Duration.ofSeconds(5), deadLetters);
+    }
   }
 
   static final long MIN_BACKOFF_MS = 100;

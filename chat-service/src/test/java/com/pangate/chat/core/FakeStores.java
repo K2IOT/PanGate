@@ -313,7 +313,19 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
     lastSeen.put(userId, atMs);
   }
 
+  /** Perf 3c: a message write of this conversation waits for the latch. */
+  public final Map<String, java.util.concurrent.CountDownLatch> holdWrites = new ConcurrentHashMap<>();
+
   @Override public void write(StoredMessage m) {
+    java.util.concurrent.CountDownLatch hold = holdWrites.get(m.convId());
+    if (hold != null) {
+      try {
+        hold.await();
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new StoreUnavailableException("interrupted", e);
+      }
+    }
     check();
     if (m.clientMsgId().equals(poisonClientMsgId)) {
       throw new IllegalArgumentException("cannot store " + m.clientMsgId());
