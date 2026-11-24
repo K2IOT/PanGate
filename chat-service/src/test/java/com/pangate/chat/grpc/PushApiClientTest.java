@@ -124,11 +124,14 @@ class PushApiClientTest {
       await().until(() -> a.received.size() + b.received.size() == 400);
       if (a.streams.get() == 0 || b.streams.get() == 0) {
         (a.streams.get() == 0 ? b : a).endAll();   // as a connection age would: the streams reopen and spread
-        for (int i = 0; i < 400; i++) {
-          c.send(req("p" + i, "1"), Priority.MUST);
-        }
       }
-      await().until(() -> a.streams.get() > 0 && b.streams.get() > 0);
+      int[] n = {0};
+      await().until(() -> {
+        for (int i = 0; i < 50; i++) {
+          c.send(req("p" + (n[0]++ % 400), "1"), Priority.MUST);
+        }
+        return a.streams.get() > 0 && b.streams.get() > 0;
+      });
     } finally {
       sa.shutdownNow();
       sb.shutdownNow();
