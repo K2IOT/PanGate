@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Perf 3a (hot lookups; target 1 million users, channels of 100 000)
+Design: `docs/superpowers/specs/2026-11-19-perf-3a-hot-lookups-design.md`.
+- chat-service: membership is one ScyllaDB row read per command (sends, marks, typing), never a channel's member list;
+  a removed member is refused at once. Presence watch looks each conversation up once; a channel's receipt flush
+  and its `lastSeq` in the conversation list no longer load the list or read per entry.
+- chat-service: per-user limits come before any lookup (sends, marks, typing 5/s burst 10), and every read and
+  management API has one (`chat.limits.api.*`, `429 rate_limited`).
+- chat-service: the offline notification badge is a counter per user in Redis (`badge:{user}`), O(1) per
+  notification, rebuilt from the inbox when missing or older than 24 h; Redis down → summed as before.
+- chat-service (final review): a conversation left keeps a mark so late raises do not count its history; a Redis
+  failure pauses the counters 5 s instead of slowing every message; HTTP sends and presence watches are limited
+  before any lookup.
+- chat-service (Codex review of #10): a badge rebuild racing a join or leave refuses and retries (membership version
+  `_mv`), and writes during the snapshot read land in a placeholder hash instead of being lost.
+
+### account-service
+- Registration limits per IP raised to 200 attempts and 50 accounts per hour (were 20 / 5): many users share one
+  carrier-grade NAT address. Review 2026-11-19.
+
 ### Review 2026-11-19, batch 1 (business logic and privacy)
 Design: `docs/superpowers/specs/2026-11-19-review-batch1-design.md`.
 - chat-service: a member added later or a follower joining starts with nothing unread (was the whole history).

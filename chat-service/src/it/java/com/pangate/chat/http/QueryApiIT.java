@@ -32,7 +32,7 @@ class QueryApiIT {
     s = new ChatStack().start();
     // account spec §8: only users published on account.users join conversations
     com.pangate.chat.support.KnownUsers.add(s.kafka.getBootstrapServers(), s.chat, "su", "sx", "sy", "sz", "ha",
-        "hb", "pa", "pb", "ra", "rb", "rc", "fan", "x", "oa", "ob", "oc", "od", "wa", "wn", "wy");
+        "hb", "pa", "pb", "ra", "rb", "rc", "fan", "x", "oa", "ob", "oc", "od", "wa", "wn", "wy", "ma", "mb", "mc");
   }
 
   @AfterAll
@@ -109,8 +109,8 @@ class QueryApiIT {
   @Test
   void removedMemberStopsReceivingAtOnce() {
     String g = group("ra", "rb", "rc");
-    s.send("rb", g, "warms the member cache");
     RedisChatCache cache = s.chat.getBean(RedisChatCache.class);
+    new MemberLookup(s.chat.getBean(ScyllaChatStore.class), cache).of(g);   // perf 3a: sends read rows, not the list
     assertThat(cache.cachedMembers(g)).get().asList().hasSize(3);
     assertThat(s.call("DELETE", "/v1/conversations/" + g + "/members/rb", "ra", null).statusCode()).isEqualTo(204);
     MemberLookup lookup = new MemberLookup(s.chat.getBean(ScyllaChatStore.class), cache);
@@ -124,6 +124,18 @@ class QueryApiIT {
     assertThat(s.call("GET", "/v1/conversations/" + g + "/messages", "rb", null).statusCode()).isEqualTo(403);
     // rb may still leave a conversation it is no longer in: no error, nothing changes
     assertThat(s.call("DELETE", "/v1/conversations/" + g + "/members/rc", "rc", null).statusCode()).isEqualTo(204);
+  }
+
+  /** Perf 3a (spec §1 anti-goal): membership is read per row, so a removed member's mark is refused at once. */
+  @Test
+  void removedMemberMarkIsRefusedAtOnce() {
+    String g = group("ma", "mb", "mc");
+    s.send("mb", g, "warms the member cache");
+    assertThat(s.call("POST", "/v1/conversations/" + g + "/read", "mb", Map.of("upToSeq", 1)).statusCode())
+        .isEqualTo(204);
+    assertThat(s.call("DELETE", "/v1/conversations/" + g + "/members/mb", "ma", null).statusCode()).isEqualTo(204);
+    assertThat(s.call("POST", "/v1/conversations/" + g + "/read", "mb", Map.of("upToSeq", 1)).statusCode())
+        .isEqualTo(403);
   }
 
   @Test

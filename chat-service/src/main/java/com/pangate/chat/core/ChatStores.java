@@ -269,6 +269,51 @@ public final class ChatStores {
   }
 
   /** Member lists in front of {@link MemberStore} (Redis, TTL 60 s); a miss or an outage reads as empty. */
+  /** Perf 3a (spec §3.3): one inbox row as the badge counters see it. */
+  public record BadgeRow(String convId, long lastSeq, long readSeq) {}
+
+  /**
+   * Perf 3a (spec §3.3): per-user badge counters ({@code badge:{user}} in Redis), each conversation's last and read seq
+   * kept as the max ever written, so a repeat or an older value changes nothing. Writes to a user without counters do
+   * nothing (the next read rebuilds them from the inbox).
+   */
+  public interface BadgeStore {
+    /**
+     * -1 when the user has no counters or they were built before {@code builtAfterMs}; else counts message {@code seq}
+     * of {@code convId} (none when null) and answers the total, in one step. A conversation left is not counted; one
+     * not known yet counts the message alone and is not kept (fan-out creates it).
+     */
+    long totalWith(String user, String convId, long seq, long builtAfterMs);
+
+    /**
+     * Codex review of PR #10: before an inbox snapshot is read. Makes sure the user has counters (a placeholder that
+     * reads as stale), so raises, joins and leaves while the snapshot is read land in them, and answers the
+     * membership version that {@link #rebuild} expects.
+     */
+    long prepareRebuild(String user);
+
+    /**
+     * Merges an inbox snapshot: each conversation's values become the max of both, conversations not in it are
+     * marked left, the total is counted again and the build time set. False, changing nothing, when a join or leave
+     * moved the membership version since {@link #prepareRebuild} (the snapshot may be older than it).
+     */
+    boolean rebuild(String user, List<BadgeRow> snapshot, long nowMs, long version);
+
+    /** Joined at {@code last}: nothing before it is unread; clears a left mark. */
+    void join(String user, String convId, long last);
+
+    void raise(String user, String convId, long last, long read);
+
+    /** {@code raise(u, convId, last, 0)} for each user, all sent before any answer is awaited. */
+    void raiseAll(List<String> users, String convId, long last);
+
+    /** Left: its unread leave the total and later raises of it are ignored until a join. */
+    void drop(String user, String convId);
+
+    /** Deletes these users' counters: the next read rebuilds them. */
+    void forget(java.util.Collection<String> users);
+  }
+
   public interface MemberCache {
     Optional<List<Member>> cachedMembers(String convId);
 

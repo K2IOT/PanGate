@@ -32,8 +32,8 @@ class AccountPropertiesTest {
     assertThat(l.failureWindow()).isEqualTo(Duration.ofMinutes(15));
     assertThat(l.block()).isEqualTo(Duration.ofMinutes(15));
     assertThat(l.loginAllDelay()).isEqualTo(Duration.ofSeconds(2));
-    assertThat(l.registrationsPerIpPerHour()).isEqualTo(5);
-    assertThat(l.registrationAttemptsPerIpPerHour()).isEqualTo(20);
+    assertThat(l.registrationsPerIpPerHour()).isEqualTo(50);   // raised 2026-11-19 (carrier NAT)
+    assertThat(l.registrationAttemptsPerIpPerHour()).isEqualTo(200);
     assertThat(l.tokensPerSessionPerHour()).isEqualTo(60);
     assertThat(l.lookupsPerUserPerMinute()).isEqualTo(600);
     assertThat(l.adminPerSecond()).isEqualTo(20);

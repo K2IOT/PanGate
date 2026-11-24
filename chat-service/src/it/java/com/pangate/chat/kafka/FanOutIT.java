@@ -134,6 +134,10 @@ class FanOutIT {
   }
 
   static Rig rig(String topic) throws Exception {
+    return rig(topic, com.pangate.chat.core.BadgeUpdates.NONE);
+  }
+
+  static Rig rig(String topic, com.pangate.chat.core.BadgeUpdates badges) throws Exception {
     FakeStores stores = new FakeStores();
     FakePushApi api = new FakePushApi();
     String name = "push-" + Ids.next();
@@ -142,7 +146,7 @@ class FanOutIT {
     String group = "fanout-" + topic;
     SimpleMeterRegistry meters = new SimpleMeterRegistry();
     FanOutLoop loop = new FanOutLoop(SequencerLoop.consumer(kafka.getBootstrapServers(), group), topic,
-        new MemberLookup(stores, stores), stores, stores, client, meters);
+        new MemberLookup(stores, stores), stores, stores, client, meters, badges);
     return new Rig(stores, api, server, client, loop, group, meters);
   }
 
@@ -386,6 +390,34 @@ class FanOutIT {
         assertThat(r.stores().sentSeq(g, m7.senderId())).isEqualTo(7);   // presence rule
         assertThat(r.stores().sentSeq(g, "u2")).isZero();
       });
+    }
+  }
+
+  /** Perf 3a (spec §3.3): the badge counters move after the inbox rows; the sender's after their own marks. */
+  @Test
+  void raisesBadgesAfterInboxRows() throws Exception {
+    String t = topic();
+    com.pangate.chat.core.RecordingBadges b = new com.pangate.chat.core.RecordingBadges();
+    try (Rig r = rig(t, b); EventProducer events = EventProducer.create(kafka.getBootstrapServers(), t,
+        Duration.ofSeconds(5))) {
+      String g = Ids.next();
+      r.stores().create(new Conversation(g, ConversationKind.CONVERSATION_KIND_GROUP, "g", "u1", 0, false, 3),
+          List.of(new Member("u1", Role.OWNER), new Member("u2", Role.MEMBER), new Member("u3", Role.MEMBER)));
+      String ch = Ids.next();
+      r.stores().create(new Conversation(ch, ConversationKind.CONVERSATION_KIND_CHANNEL, "c", "u1", 0, true, 1),
+          List.of(new Member("u1", Role.OWNER)));
+      java.util.List<Long> seenB = new java.util.concurrent.CopyOnWriteArrayList<>();
+      b.onCall = call -> {
+        if (call.startsWith("raiseAll")) {
+          seenB.add(r.stores().userConvs.get("u2").get(g).lastSeq());
+        }
+      };
+      r.loop().start();
+      events.send(SequencerLoop.event(msg(ch, 1), ConversationKind.CONVERSATION_KIND_CHANNEL));
+      events.send(SequencerLoop.event(msg(g, 1), ConversationKind.CONVERSATION_KIND_GROUP));
+      await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> assertThat(b.calls)
+          .containsExactly("raiseAll [u2, u3] " + g + " 1", "raise u1 " + g + " 1 1"));
+      assertThat(seenB).containsExactly(1L);
     }
   }
 }

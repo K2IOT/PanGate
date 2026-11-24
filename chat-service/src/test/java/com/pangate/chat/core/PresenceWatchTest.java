@@ -251,4 +251,30 @@ class PresenceWatchTest {
     assertThat(fanOut.on(new PresenceTracker.Transition("b", true, now.get()))).isZero();
     assertThat(fanOut.on(new PresenceTracker.Transition("a", true, now.get()))).isEqualTo(1);
   }
+
+  /** Perf 3a (spec §3.1, §4): a watch of 200 entries in 10 conversations looks each conversation up once. */
+  @Test
+  void watchLooksUpEachConversationOnce() {
+    PresenceWatch.Builder b = PresenceWatch.newBuilder();
+    for (int c = 0; c < 10; c++) {
+      String[] users = new String[21];
+      users[0] = "me";
+      for (int i = 0; i < 20; i++) {
+        users[i + 1] = "p" + c + "_" + i;
+      }
+      String id = conv(ConversationKind.CONVERSATION_KIND_GROUP, users);
+      for (int i = 0; i < 20; i++) {
+        stores.sent(id, users[i + 1], i + 1, 0);
+        b.addEntries(PresenceWatch.Entry.newBuilder().setUserId(users[i + 1]).setConversationId(id));
+      }
+    }
+    stores.getCalls.set(0);
+    stores.membersCalls.set(0);
+    stores.cachedMembersCalls.set(0);
+    assertThat(watch.watch("me", "d1", b.build())).isEqualTo(200);
+    assertThat(stores.getCalls.get()).isLessThanOrEqualTo(10);
+    // one list lookup per conversation (a cache miss reads the cache, then the store)
+    assertThat(stores.cachedMembersCalls.get()).isLessThanOrEqualTo(10);
+    assertThat(stores.membersCalls.get()).isLessThanOrEqualTo(10);
+  }
 }

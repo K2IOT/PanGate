@@ -165,4 +165,21 @@ class ReceiptRecipientsTest {
         Map.of("b", new Marks(5, 5)), Map.of("b", 4L));
     assertThat(ReceiptRecipients.peerSeesChange(delivered, "a", bHides)).as("a real chat.delivered shows").isTrue();
   }
+
+  /** Perf 3a (spec §3.1): a channel's flush never loads its follower list. */
+  @Test
+  void channelAudienceReadsNoMemberList() {
+    FakeStores big = FakeStores.withChannel("c1", 100_000);
+    Map<String, Marks> by = new java.util.LinkedHashMap<>();
+    for (String u : List.of("f1", "f2", "f3")) {
+      by.put(u, new Marks(4, 4));
+    }
+    ReceiptAggregator.Flush f = flush(ConversationKind.CONVERSATION_KIND_CHANNEL, by);
+    List<Member> audience = ReceiptRecipients.audience(f, new MemberLookup(big, big));
+    assertThat(audience).extracting(Member::userId).containsExactlyInAnyOrder("f1", "f2", "f3");
+    assertThat(big.membersCalls.get()).isZero();
+    assertThat(big.cachedMembersCalls.get()).isZero();
+    assertThat(ReceiptRecipients.plan(f, audience, OPEN, 50)).hasSize(3)
+        .allSatisfy(r -> assertThat(r.getHeadersMap()).containsEntry("type", ChatTopics.TYPE_RECEIPTS));
+  }
 }

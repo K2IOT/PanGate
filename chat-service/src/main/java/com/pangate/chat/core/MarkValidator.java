@@ -51,11 +51,12 @@ public final class MarkValidator {
     if (!Ids.isUlid(m.getConversationId()) || m.getUpToSeq() < 1 || userId == null || userId.isEmpty()) {
       return refused(INVALID);
     }
-    if (members.of(m.getConversationId()).stream().noneMatch(x -> x.userId().equals(userId))) {
-      return refused(NOT_MEMBER);
-    }
+    // perf 3a (spec §3.2): the limit before the lookup; one member row, never the conversation's list
     if (!perUser.tryAcquire(userId)) {
       return refused(RATE_LIMITED);
+    }
+    if (members.member(m.getConversationId(), userId).isEmpty()) {
+      return refused(NOT_MEMBER);
     }
     long seq = Math.min(m.getUpToSeq(), lastSeq.lastSeq(m.getConversationId(), m.getUpToSeq()));
     if (seq < 1) {

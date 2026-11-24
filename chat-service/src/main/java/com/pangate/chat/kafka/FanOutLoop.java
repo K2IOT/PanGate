@@ -56,6 +56,7 @@ public final class FanOutLoop implements AutoCloseable {
   private final MeterRegistry meters;
   private final Timer lag;
   private final Duration stepBudget;
+  private final com.pangate.chat.core.BadgeUpdates badges;
   private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
   private volatile boolean running = true;
   private Thread thread;
@@ -86,10 +87,24 @@ public final class FanOutLoop implements AutoCloseable {
     this(consumer, topic, members, inbox, marks, pusher, meters, STEP_BUDGET);
   }
 
+  /** {@code badges}: perf 3a (spec §3.3), raised after the inbox rows and the sender's marks. */
+  public FanOutLoop(Consumer<String, byte[]> consumer, String topic, MemberLookup members,
+      ChatStores.MemberStore inbox, ChatStores.MarkStore marks, Pusher pusher, MeterRegistry meters,
+      com.pangate.chat.core.BadgeUpdates badges) {
+    this(consumer, topic, members, inbox, marks, pusher, meters, STEP_BUDGET, badges);
+  }
+
   /** {@code stepBudget}: no new event of a poll starts after this; the rest is polled again. */
   public FanOutLoop(Consumer<String, byte[]> consumer, String topic, MemberLookup members,
       ChatStores.MemberStore inbox, ChatStores.MarkStore marks, Pusher pusher, MeterRegistry meters,
       Duration stepBudget) {
+    this(consumer, topic, members, inbox, marks, pusher, meters, stepBudget, com.pangate.chat.core.BadgeUpdates.NONE);
+  }
+
+  public FanOutLoop(Consumer<String, byte[]> consumer, String topic, MemberLookup members,
+      ChatStores.MemberStore inbox, ChatStores.MarkStore marks, Pusher pusher, MeterRegistry meters,
+      Duration stepBudget, com.pangate.chat.core.BadgeUpdates badges) {
+    this.badges = badges;
     this.consumer = consumer;
     this.marks = marks;
     this.topic = topic;
@@ -248,8 +263,16 @@ public final class FanOutLoop implements AutoCloseable {
     if (!channel && !touchAll(to, m, giveUpAt)) {
       return false;
     }
+    if (!channel) {
+      // perf 3a (spec §3.3): after the rows, so a rebuild from the inbox always sees this message; never throws
+      badges.raiseAll(to.stream().map(Member::userId).filter(u -> !u.equals(m.getSenderId())).toList(),
+          m.getConversationId(), m.getConvSeq());
+    }
     if (!senderMarks(m, giveUpAt)) {
       return false;
+    }
+    if (!channel) {
+      badges.raise(m.getSenderId(), m.getConversationId(), m.getConvSeq(), m.getConvSeq());
     }
     lag.record(Math.max(0, System.currentTimeMillis() - m.getSentAtMs()), TimeUnit.MILLISECONDS);
     return true;

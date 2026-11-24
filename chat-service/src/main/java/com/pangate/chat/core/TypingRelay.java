@@ -30,11 +30,19 @@ public final class TypingRelay {
   private final OpenConversations open;
   private final LongSupplier monoMs;
   private final int listedMax;
+  private final TokenBucketLimiter perUser;
   private final Map<String, Long> lastByUser = new ConcurrentHashMap<>();
   private final Map<String, Long> lastByConv = new ConcurrentHashMap<>();
 
   public TypingRelay(ChatStores.ConversationStore conversations, MemberLookup members, Pusher pusher,
       OpenConversations open, LongSupplier monoMs, int listedMax) {
+    this(conversations, members, pusher, open, monoMs, listedMax, new TokenBucketLimiter(5, 10, System::nanoTime));
+  }
+
+  /** Perf 3a (spec §3.2): {@code perUser} is checked before any lookup ({@code rate_limited}). */
+  public TypingRelay(ChatStores.ConversationStore conversations, MemberLookup members, Pusher pusher,
+      OpenConversations open, LongSupplier monoMs, int listedMax, TokenBucketLimiter perUser) {
+    this.perUser = perUser;
     this.conversations = conversations;
     this.members = members;
     this.pusher = pusher;
@@ -47,10 +55,10 @@ public final class TypingRelay {
     if (!Ids.isUlid(convId)) {
       return "not_member";
     }
-    List<Member> current = members.of(convId);
-    if (current.stream().noneMatch(m -> m.userId().equals(userId))) {
-      return "not_member";
+    if (!perUser.tryAcquire(userId)) {
+      return "rate_limited";
     }
+    // perf 3a (spec §3.1): the kind first, so a channel never loads anything; then one member row
     Optional<ChatStores.Conversation> c = conversations.get(convId);
     if (c.isEmpty()) {
       return "not_member";
@@ -58,11 +66,15 @@ public final class TypingRelay {
     if (c.get().kind() == ConversationKind.CONVERSATION_KIND_CHANNEL) {
       return "channel";
     }
+    if (members.member(convId, userId).isEmpty()) {
+      return "not_member";
+    }
     long now = monoMs.getAsLong();
     Long prev = lastByUser.get(userId + "|" + convId);
     if (prev != null && now - prev < PER_USER_MS) {
       return "too_often";
     }
+    List<Member> current = members.of(convId);   // DM or group: at most 500, cached
     boolean large = current.size() > listedMax;
     Long conv = lastByConv.get(convId);
     if (large && conv != null && now - conv < PER_CONV_MS) {   // final review I9: large groups only (spec §5)

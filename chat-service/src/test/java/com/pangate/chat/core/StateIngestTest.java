@@ -47,4 +47,26 @@ class StateIngestTest {
         .isEqualTo("rejected");
     assertThat(rejected).containsExactly("unavailable");
   }
+
+  /** Final review I4: presence watch has a per-user limit before any lookup. */
+  @Test
+  void watchIsLimitedBeforeAnyLookup() {
+    List<String> outcomes = new java.util.ArrayList<>();
+    PresenceWatch w = new PresenceWatch(stores, new MemberLookup(stores, stores), stores,
+        new FakeWatchers(() -> 0L), new FakePresence(), stores, new PrivacyCache(stores, () -> 0L), r -> null,
+        () -> 0L, java.time.Duration.ofMinutes(5), 200);
+    StateIngest s = new StateIngest(new MarkValidator(new MemberLookup(stores, stores),
+        new LastSeqCache(stores, () -> 0L), new TokenBucketLimiter(50, 100, () -> 0L), rejected::add), c -> { },
+        () -> 0L, null, r -> { }, w, outcomes::add, new TokenBucketLimiter(1, 5, () -> 0L));
+    com.pangate.contracts.v1.PresenceWatch msg = com.pangate.contracts.v1.PresenceWatch.newBuilder()
+        .addEntries(com.pangate.contracts.v1.PresenceWatch.Entry.newBuilder().setUserId("b")
+            .setConversationId(Ids.next())).build();
+    for (int i = 0; i < 5; i++) {
+      assertThat(s.watch("x", "d1", msg)).isEqualTo("accepted");
+    }
+    int gets = stores.getCalls.get();
+    assertThat(s.watch("x", "d1", msg)).isEqualTo("rejected");
+    assertThat(stores.getCalls.get()).isEqualTo(gets);
+    assertThat(outcomes).last().isEqualTo("rate_limited");
+  }
 }

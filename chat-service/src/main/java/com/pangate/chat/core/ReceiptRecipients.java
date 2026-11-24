@@ -29,6 +29,21 @@ public final class ReceiptRecipients {
 
   private ReceiptRecipients() {}
 
+  /**
+   * Perf 3a (spec §3.1): whom a flush is planned for. DM and group: the current members (cached list, at most 500). A
+   * channel: only the readers of this flush, never its follower list. They were members when their marks were taken
+   * ({@link MarkValidator}), and a channel flush tells nobody but each reader their own read mark, so one who left in
+   * the meantime learns nothing new.
+   */
+  public static List<Member> audience(ReceiptAggregator.Flush f, MemberLookup members) {
+    if (f.kind() != ConversationKind.CONVERSATION_KIND_CHANNEL) {
+      return members.of(f.convId());
+    }
+    List<Member> out = new ArrayList<>(f.byUser().size());
+    f.byUser().keySet().forEach(u -> out.add(new Member(u, com.pangate.chat.core.ChatStores.Role.MEMBER)));
+    return out;
+  }
+
   public static List<PushRequest> plan(ReceiptAggregator.Flush f, List<Member> members,
       Function<String, Privacy> privacy, int listedMax) {
     Set<String> current = members.stream().map(Member::userId).collect(Collectors.toSet());

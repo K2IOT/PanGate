@@ -35,7 +35,8 @@ class MuteControllerTest {
       }
       return new ConnectTokenVerifier.Caller(token, "d1", "J1");
     });
-    mvc = MockMvcBuilders.standaloneSetup(new MuteController(stores, stores, () -> 1_800_000_000_000L)).setControllerAdvice(new ProblemHandler()).addFilters(auth).build();
+    mvc = MockMvcBuilders.standaloneSetup(new MuteController(stores, stores, () -> 1_800_000_000_000L,
+        new com.pangate.chat.core.ApiLimits(com.pangate.chat.config.ChatProperties.Api.DEFAULTS, () -> 0L))).setControllerAdvice(new ProblemHandler()).addFilters(auth).build();
   }
 
   org.springframework.test.web.servlet.ResultActions mute(String user, String c, String body) throws Exception {
@@ -66,5 +67,18 @@ class MuteControllerTest {
   @Test
   void badConversationIs400() throws Exception {
     mute("u1", "nope", "{\"until\":null}").andExpect(status().isBadRequest());
+  }
+
+  /** Perf 3a (spec §3.2): mute shares the "other" bucket, 10/s burst 30. */
+  @Test
+  void muteIsLimited() throws Exception {
+    String c = com.pangate.chat.core.Ids.next();
+    for (int i = 0; i < 30; i++) {
+      mvc.perform(put("/v1/conversations/" + c + "/mute").header("Authorization", "Bearer ulim")
+          .contentType(org.springframework.http.MediaType.APPLICATION_JSON).content("{}"));
+    }
+    mvc.perform(put("/v1/conversations/" + c + "/mute").header("Authorization", "Bearer ulim")
+        .contentType(org.springframework.http.MediaType.APPLICATION_JSON).content("{}"))
+        .andExpect(status().isTooManyRequests());
   }
 }

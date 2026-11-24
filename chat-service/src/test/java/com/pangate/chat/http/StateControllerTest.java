@@ -1,6 +1,7 @@
 package com.pangate.chat.http;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -57,7 +58,7 @@ class StateControllerTest {
         java.time.Duration.ofMinutes(5), 200);
     mvc = MockMvcBuilders.standaloneSetup(new StateController(state, new com.pangate.chat.core.StateService(stores,
         new MemberLookup(stores, stores), stores, stores, stores, privacy, 50, () -> 0L, System::currentTimeMillis),
-        stores, privacy, watch)).setControllerAdvice(new ProblemHandler())
+        stores, privacy, watch, com.pangate.chat.core.ApiLimits.unlimited())).setControllerAdvice(new ProblemHandler())
         .addFilters(auth).build();
   }
 
@@ -106,5 +107,31 @@ class StateControllerTest {
     String tooMany = String.join(",", java.util.Collections.nCopies(101, "u2"));
     mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/v1/presence?ids=" + tooMany
         + "&conversationId=" + conv).header("Authorization", "Bearer u1")).andExpect(status().isBadRequest());
+  }
+
+  /** Perf 3a (spec §3.2): GET /v1/presence is limited per user before any lookup. */
+  @Test
+  void presenceIsLimitedBeforeLookup() throws Exception {
+    com.pangate.chat.core.PrivacyCache privacy = new com.pangate.chat.core.PrivacyCache(stores, () -> 0L);
+    com.pangate.chat.core.PresenceWatch watch = new com.pangate.chat.core.PresenceWatch(stores,
+        new MemberLookup(stores, stores), stores, new com.pangate.chat.core.FakeWatchers(System::currentTimeMillis),
+        presence, stores, privacy, r -> new java.util.concurrent.CompletableFuture<>(), System::currentTimeMillis,
+        java.time.Duration.ofMinutes(5), 200);
+    StateIngest state = new StateIngest(new MarkValidator(new MemberLookup(stores, stores),
+        new LastSeqCache(stores, () -> 0L), new TokenBucketLimiter(1, 1, () -> 0L), r -> { }), published::add);
+    org.springframework.test.web.servlet.MockMvc limited = MockMvcBuilders.standaloneSetup(new StateController(state,
+        new com.pangate.chat.core.StateService(stores, new MemberLookup(stores, stores), stores, stores, stores,
+            privacy, 50, () -> 0L, System::currentTimeMillis), stores, privacy, watch,
+        new com.pangate.chat.core.ApiLimits(com.pangate.chat.config.ChatProperties.Api.DEFAULTS, () -> 0L)))
+        .setControllerAdvice(new ProblemHandler()).addFilters(new AuthFilter(t -> new ConnectTokenVerifier.Caller(t,
+            "d1", "J1"))).build();
+    for (int i = 0; i < 10; i++) {
+      limited.perform(get("/v1/presence").param("ids", "u2").param("conversationId", conv)
+          .header("Authorization", "Bearer u1")).andExpect(status().isOk());
+    }
+    int gets = stores.getCalls.get();
+    limited.perform(get("/v1/presence").param("ids", "u2").param("conversationId", conv)
+        .header("Authorization", "Bearer u1")).andExpect(status().isTooManyRequests());
+    assertThat(stores.getCalls.get()).isEqualTo(gets);
   }
 }

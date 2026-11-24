@@ -137,4 +137,20 @@ class SendControllerTest {
         .setControllerAdvice(new ProblemHandler()).addFilters(new AuthFilter(token -> new ConnectTokenVerifier.Caller(
             "u1", "d1", "J1"))).build();
   }
+
+  /** Final review I3 (perf 3a §3.2): the user's send limit comes before the prior-send lookup. */
+  @Test
+  void strangerIsLimitedBeforeThePriorSendLookup() throws Exception {
+    for (int i = 0; i < 40; i++) {
+      mvc.perform(post("/v1/conversations/" + Ids.next() + "/messages").header("Authorization", "Bearer u1")
+          .header("Idempotency-Key", Ids.next()).contentType(MediaType.APPLICATION_JSON).content("{\"text\":\"x\"}"));
+    }
+    int finds = stores.findCalls.get();
+    int gets = stores.getCalls.get();
+    mvc.perform(post("/v1/conversations/" + Ids.next() + "/messages").header("Authorization", "Bearer u1")
+        .header("Idempotency-Key", Ids.next()).contentType(MediaType.APPLICATION_JSON).content("{\"text\":\"x\"}"))
+        .andExpect(status().isTooManyRequests());
+    assertThat(stores.findCalls.get()).isEqualTo(finds);
+    assertThat(stores.getCalls.get()).isEqualTo(gets);
+  }
 }

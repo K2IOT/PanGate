@@ -1,13 +1,15 @@
 package com.pangate.chat.core;
 
-import com.pangate.chat.core.ChatStores.Member;
 import com.pangate.contracts.testkit.ChatTopics;
 import com.pangate.contracts.v1.ConversationKind;
 import com.pangate.contracts.v1.PresenceUpdate;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
@@ -56,15 +58,16 @@ public final class PresenceWatch {
     List<com.pangate.contracts.v1.PresenceWatch.Entry> valid = new ArrayList<>();
     Set<String> open = new LinkedHashSet<>();
     int seen = 0;
+    Map<String, Optional<Set<String>>> looked = new HashMap<>();
     for (com.pangate.contracts.v1.PresenceWatch.Entry e : msg.getEntriesList()) {
       if (seen++ >= max) {
         break;
       }
       // Codex review of PR #6: the conversation is open for typing even when no entry in it may show presence
-      if (!open.contains(e.getConversationId()) && openable(viewer, e.getConversationId())) {
+      if (!open.contains(e.getConversationId()) && openable(looked, viewer, e.getConversationId()).isPresent()) {
         open.add(e.getConversationId());
       }
-      if (open.contains(e.getConversationId()) && allowed(viewer, e.getUserId(), e.getConversationId())) {
+      if (open.contains(e.getConversationId()) && allowed(looked, viewer, e.getUserId(), e.getConversationId())) {
         valid.add(e);
       }
     }
@@ -85,29 +88,40 @@ public final class PresenceWatch {
   public List<PresenceUpdate.State> states(String viewer, String convId, List<String> ids) {
     long now = wallMs.getAsLong();
     List<PresenceUpdate.State> out = new ArrayList<>();
+    Map<String, Optional<Set<String>>> looked = new HashMap<>();
     for (String id : new LinkedHashSet<>(ids)) {
-      if (allowed(viewer, id, convId)) {
+      if (allowed(looked, viewer, id, convId)) {
         out.add(stateFor(id, viewer, now));
       }
     }
     return out;
   }
 
-  /** A DM or group (not a channel) the viewer is a member of. */
-  private boolean openable(String viewer, String convId) {
-    if (!Ids.isUlid(convId)) {
-      return false;
-    }
-    Optional<ChatStores.Conversation> c = conversations.get(convId);
-    return c.isPresent() && c.get().kind() != ConversationKind.CONVERSATION_KIND_CHANNEL
-        && members.of(convId).stream().anyMatch(m -> m.userId().equals(viewer));
+  /**
+   * The members of a DM or group (not a channel) the viewer is a member of, else empty. Perf 3a (spec §3.1): looked up
+   * once per conversation per command in {@code looked}, however many entries point at it.
+   */
+  private Optional<Set<String>> openable(Map<String, Optional<Set<String>>> looked, String viewer, String convId) {
+    return looked.computeIfAbsent(convId, id -> {
+      if (!Ids.isUlid(id)) {
+        return Optional.empty();
+      }
+      Optional<ChatStores.Conversation> c = conversations.get(id);
+      if (c.isEmpty() || c.get().kind() == ConversationKind.CONVERSATION_KIND_CHANNEL) {
+        return Optional.empty();
+      }
+      Set<String> ids = new HashSet<>();
+      members.of(id).forEach(m -> ids.add(m.userId()));
+      return ids.contains(viewer) ? Optional.of(ids) : Optional.empty();
+    });
   }
 
-  boolean allowed(String viewer, String user, String convId) {
-    if (user.isEmpty() || user.equals(viewer) || !openable(viewer, convId)) {
+  private boolean allowed(Map<String, Optional<Set<String>>> looked, String viewer, String user, String convId) {
+    if (user.isEmpty() || user.equals(viewer)) {
       return false;
     }
-    if (members.of(convId).stream().noneMatch(m -> m.userId().equals(user))) {
+    Optional<Set<String>> ms = openable(looked, viewer, convId);
+    if (ms.isEmpty() || !ms.get().contains(user)) {
       return false;
     }
     // owner decision 2026-11-17: a DM or group proves a relationship only once the watched user sent a message in it

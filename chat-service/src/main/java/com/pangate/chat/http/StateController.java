@@ -1,5 +1,6 @@
 package com.pangate.chat.http;
 
+import com.pangate.chat.core.ApiLimits;
 import com.pangate.chat.core.MarkValidator;
 import com.pangate.chat.core.StateIngest;
 import com.pangate.contracts.v1.ChatMark;
@@ -33,12 +34,14 @@ public class StateController {
   private final com.pangate.chat.core.ChatStores.SettingsStore settings;
   private final com.pangate.chat.core.PrivacyCache privacy;
   private final com.pangate.chat.core.PresenceWatch presence;
+  private final ApiLimits limits;
 
   static final int MAX_PRESENCE_IDS = 100;
 
   public StateController(StateIngest state, com.pangate.chat.core.StateService views,
       com.pangate.chat.core.ChatStores.SettingsStore settings, com.pangate.chat.core.PrivacyCache privacy,
-      com.pangate.chat.core.PresenceWatch presence) {
+      com.pangate.chat.core.PresenceWatch presence, ApiLimits limits) {
+    this.limits = limits;
     this.presence = presence;
     this.state = state;
     this.views = views;
@@ -53,6 +56,7 @@ public class StateController {
     if (cursor != null && !cursor.isEmpty() && !cursor.matches("\\d{1,19}:[0-9A-Z]{26}")) {
       throw new ChatHttpException(400, "invalid_request", "bad cursor");
     }
+    limits.check(ApiLimits.Bucket.STATE, AuthFilter.caller(req).userId());
     var page = views.state(AuthFilter.caller(req).userId(), since == null ? OptionalLong.empty()
         : OptionalLong.of(since), cursor);
     Map<String, Object> body = new LinkedHashMap<>();
@@ -69,6 +73,7 @@ public class StateController {
     if (seq < 1) {
       throw new ChatHttpException(400, "invalid_request", "seq must be at least 1");
     }
+    limits.check(ApiLimits.Bucket.OTHER, AuthFilter.caller(req).userId());
     return views.receipts(AuthFilter.caller(req).userId(), id, seq);
   }
 
@@ -81,6 +86,7 @@ public class StateController {
     if (list.isEmpty() || list.size() > MAX_PRESENCE_IDS) {
       throw new ChatHttpException(400, "invalid_request", "1 to " + MAX_PRESENCE_IDS + " ids");
     }
+    limits.check(ApiLimits.Bucket.PRESENCE, AuthFilter.caller(req).userId());
     java.util.List<Map<String, Object>> out = new java.util.ArrayList<>();
     for (var st : presence.states(AuthFilter.caller(req).userId(), conversationId, list)) {
       Map<String, Object> m = new LinkedHashMap<>();
@@ -97,6 +103,7 @@ public class StateController {
   /** CH3 spec §8. */
   @GetMapping("/v1/me/privacy")
   public Map<String, Object> getPrivacy(HttpServletRequest req) {
+    limits.check(ApiLimits.Bucket.OTHER, AuthFilter.caller(req).userId());
     var p = settings.privacy(AuthFilter.caller(req).userId());
     return Map.of("hidePresence", p.hidePresence(), "hideRead", p.hideRead(), "hidePreview", p.hidePreview(),
         "whoCanAdd", p.refuseAdds() ? "nobody" : "everyone");
@@ -114,6 +121,7 @@ public class StateController {
       default -> throw new ChatHttpException(400, "invalid_request", "whoCanAdd is everyone or nobody");
     };
     String user = AuthFilter.caller(req).userId();
+    limits.check(ApiLimits.Bucket.OTHER, user);
     // Codex review of PR #6: only the fields given are written, with no read first, so concurrent PUTs both stick
     settings.updatePrivacy(user, body.hidePresence(), body.hideRead(), body.hidePreview(), refuseAdds,
         System.currentTimeMillis());

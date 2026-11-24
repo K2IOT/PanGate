@@ -106,4 +106,41 @@ class MarkValidatorTest {
     assertThat(mark("u2", 11, true)).get().extracting(ReceiptCommand::getReadSeq).isEqualTo(11L);
     assertThat(mark("u2", 15, true)).get().extracting(ReceiptCommand::getReadSeq).isEqualTo(11L);
   }
+
+  /** Perf 3a (spec §4): a mark in a channel of 100 000 reads one member row. */
+  @Test
+  void channelMarkReadsNoMemberList() {
+    String c = Ids.next();
+    FakeStores big = FakeStores.withChannel(c, 100_000);
+    big.lastSeq.put(c, 3L);
+    MarkValidator mv = new MarkValidator(new MemberLookup(big, big), new LastSeqCache(big, () -> 0),
+        new TokenBucketLimiter(50, 100, nanos::get), rejected::add);
+    assertThat(mv.validate("f5", "d1", ChatMark.newBuilder().setConversationId(c).setUpToSeq(2).build(), true, 1)
+        .command()).isPresent();
+    assertThat(big.membersCalls.get()).isZero();
+    assertThat(big.cachedMembersCalls.get()).isZero();
+    assertThat(big.memberCalls.get()).isEqualTo(1);
+  }
+
+  /** Perf 3a (spec §3.2): the user limit comes before the member lookup. */
+  @Test
+  void strangerIsLimitedBeforeAnyLookup() {
+    for (int i = 0; i < 100; i++) {
+      v.validate("x", "d1", ChatMark.newBuilder().setConversationId(Ids.next()).setUpToSeq(1).build(), false, 1);
+    }
+    int before = stores.memberCalls.get();
+    assertThat(v.validate("x", "d1", ChatMark.newBuilder().setConversationId(Ids.next()).setUpToSeq(1).build(), false,
+        1).reason()).isEqualTo(MarkValidator.RATE_LIMITED);
+    assertThat(stores.memberCalls.get()).isEqualTo(before);
+  }
+
+  /** Perf 3a (spec §1 anti-goal): no cached list keeps a removed member's right to mark. */
+  @Test
+  void removedMemberIsRefusedAtOnce() {
+    assertThat(mark("u2", 5, true)).isPresent();
+    stores.cache.put(conv, List.of(new Member("u1", Role.OWNER), new Member("u2", Role.MEMBER)));
+    stores.members.get(conv).remove("u2");
+    assertThat(v.validate("u2", "d1", ChatMark.newBuilder().setConversationId(conv).setUpToSeq(5).build(), true, 1)
+        .reason()).isEqualTo(MarkValidator.NOT_MEMBER);
+  }
 }

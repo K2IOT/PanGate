@@ -35,6 +35,7 @@ public final class Conversations {
   private final java.util.function.BiConsumer<String, String> leftChannel;
   private final UserDirectory users;
   private final java.util.function.Function<String, ChatStores.Privacy> privacy;
+  private final BadgeUpdates badges;
 
   public Conversations(ChatStores.ConversationStore conversations, ChatStores.MemberStore members,
       MemberLookup lookup, ChatProperties.Limits limits) {
@@ -58,6 +59,14 @@ public final class Conversations {
   public Conversations(ChatStores.ConversationStore conversations, ChatStores.MemberStore members,
       MemberLookup lookup, ChatProperties.Limits limits, java.util.function.BiConsumer<String, String> leftChannel,
       UserDirectory users, java.util.function.Function<String, ChatStores.Privacy> privacy) {
+    this(conversations, members, lookup, limits, leftChannel, users, privacy, BadgeUpdates.NONE);
+  }
+
+  /** {@code badges}: perf 3a (spec §3.3), the badge counters follow joins and leaves of DMs and groups. */
+  public Conversations(ChatStores.ConversationStore conversations, ChatStores.MemberStore members,
+      MemberLookup lookup, ChatProperties.Limits limits, java.util.function.BiConsumer<String, String> leftChannel,
+      UserDirectory users, java.util.function.Function<String, ChatStores.Privacy> privacy, BadgeUpdates badges) {
+    this.badges = badges;
     this.privacy = privacy;
     this.users = users;
     this.conversations = conversations;
@@ -196,6 +205,10 @@ public final class Conversations {
       throw ChatRefusal.invalid("a group has at most " + limits.maxGroupMembers() + " members");
     }
     changeMembers(convId, () -> members.add(convId, new Member(userId, Role.MEMBER)));
+    if (c.kind() != ConversationKind.CONVERSATION_KIND_CHANNEL) {
+      // perf 3a: the history before the join is not unread (F1), whichever of this and a new message lands first
+      badges.join(userId, convId, c.lastSeq());
+    }
   }
 
   /**
@@ -234,6 +247,8 @@ public final class Conversations {
     changeMembers(convId, () -> members.remove(convId, userId));
     if (c.kind() == ConversationKind.CONVERSATION_KIND_CHANNEL) {
       leftChannel.accept(userId, convId);   // its open subscriptions end now, not at the next reconnect
+    } else {
+      badges.drop(userId, convId);   // perf 3a: its unread leave the badge
     }
   }
 

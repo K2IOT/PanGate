@@ -98,13 +98,25 @@ public class ChatConfig {
         p.kafka().dlqTopic(), p.kafka().receiptsTopic());
   }
 
+  /** Perf 3a (spec §3.2): per-user limits of the HTTP API. */
+  @Bean
+  com.pangate.chat.core.ApiLimits apiLimits(ChatProperties p) {
+    return new com.pangate.chat.core.ApiLimits(p.limits().api(), System::nanoTime);
+  }
+
+  /** A conversation's last seq, cached 5 s per pod: marks are clamped to it, channel views show it (perf 3a). */
+  @Bean
+  com.pangate.chat.core.LastSeqCache lastSeqCache(ScyllaChatStore store) {
+    return new com.pangate.chat.core.LastSeqCache(store, () -> System.nanoTime() / 1_000_000);
+  }
+
   /** CH3 spec §3.3: delivered / read marks into chat.receipts. */
   @Bean
   com.pangate.chat.core.StateIngest stateIngest(ScyllaChatStore store, RedisChatCache cache, CommandProducer producer,
       ChatProperties p, MeterRegistry meters, com.pangate.chat.core.TypingRelay typing,
-      com.pangate.chat.core.PresenceWatch watch, RecentCount watchers) {
+      com.pangate.chat.core.PresenceWatch watch, RecentCount watchers, com.pangate.chat.core.LastSeqCache lastSeq) {
     return new com.pangate.chat.core.StateIngest(new com.pangate.chat.core.MarkValidator(
-        new MemberLookup(store, cache), new com.pangate.chat.core.LastSeqCache(store, () -> System.nanoTime() / 1_000_000),
+        new MemberLookup(store, cache), lastSeq,
         new com.pangate.chat.core.TokenBucketLimiter(p.state().markRate(), p.state().markBurst(), System::nanoTime),
         reason -> meters.counter("chat.receipts.rejected", "reason", reason).increment()), producer,
         System::currentTimeMillis, typing, r -> {
@@ -116,10 +128,13 @@ public class ChatConfig {
         }, watch, r -> {
           if (r.equals("unavailable")) {
             meters.counter("chat.presence.unavailable").increment();
+          } else if (r.equals("rate_limited")) {
+            meters.counter("chat.presence.rate_limited").increment();
           } else {
             watchers.add(r);
           }
-        });
+        }, new com.pangate.chat.core.TokenBucketLimiter(p.state().watchRate(), p.state().watchBurst(),
+            System::nanoTime));
   }
 
   /** chat.presence.watchers: watch calls this pod took in the last watch TTL (an estimate, spec §9). */
@@ -191,7 +206,8 @@ public class ChatConfig {
       ChatProperties p, com.pangate.chat.store.RedisPresence presence) {
     return new com.pangate.chat.core.TypingRelay(store, new MemberLookup(store, cache), pusher,
         presence, () -> System.nanoTime() / 1_000_000,
-        p.state().listedReceiptsMax());
+        p.state().listedReceiptsMax(), new com.pangate.chat.core.TokenBucketLimiter(p.state().typingRate(),
+            p.state().typingBurst(), System::nanoTime));
   }
 
   @Bean
@@ -236,12 +252,24 @@ public class ChatConfig {
     };
   }
 
+  /** Perf 3a (spec §3.3): badge counters in Redis. */
+  @Bean(destroyMethod = "close")
+  com.pangate.chat.store.RedisBadges redisBadges(ChatProperties p) {
+    return new com.pangate.chat.store.RedisBadges(p.redis());
+  }
+
+  /** Perf 3a (spec §3.3): the badge, read by offline notifications and kept up to date by fan-out, receipts, members. */
+  @Bean
+  com.pangate.chat.core.Badge badge(ScyllaChatStore store, com.pangate.chat.store.RedisBadges counters) {
+    return new com.pangate.chat.core.Badge(store, counters, System::currentTimeMillis);
+  }
+
   @Bean
   Conversations conversations(ScyllaChatStore store, RedisChatCache cache, ChatProperties p,
-      ChannelSubscriptions channels, UserDirectory users) {
+      ChannelSubscriptions channels, UserDirectory users, com.pangate.chat.core.Badge badge) {
     // F7: whoCanAdd read from the store, not the 60 s privacy cache
     return new Conversations(store, store, new MemberLookup(store, cache), p.limits(), channels::revoke, users,
-        store::privacy);
+        store::privacy, badge);
   }
 
   /** account spec §8: users known from account.users. */
@@ -306,9 +334,9 @@ public class ChatConfig {
 
   @Bean(destroyMethod = "")
   FanOutLoop fanOutLoop(ChatProperties p, ScyllaChatStore store, RedisChatCache cache, PushApiClient pusher,
-      MeterRegistry meters) {
+      MeterRegistry meters, com.pangate.chat.core.Badge badge) {
     return new FanOutLoop(FanOutLoop.consumer(p.kafka().bootstrap(), FanOutLoop.GROUP), p.kafka().eventsTopic(),
-        new MemberLookup(store, cache), store, store, pusher, meters);
+        new MemberLookup(store, cache), store, store, pusher, meters, badge);
   }
 
   @Bean(destroyMethod = "")
@@ -377,9 +405,9 @@ public class ChatConfig {
   /** CH3 spec §4, §7.2, §3.4 lookups. */
   @Bean
   com.pangate.chat.core.StateService stateService(ScyllaChatStore store, RedisChatCache cache,
-      com.pangate.chat.core.PrivacyCache privacy, ChatProperties p) {
+      com.pangate.chat.core.PrivacyCache privacy, ChatProperties p, com.pangate.chat.core.LastSeqCache lastSeq) {
     return new com.pangate.chat.core.StateService(store, new MemberLookup(store, cache), store, store, store, privacy,
-        p.state().listedReceiptsMax(), () -> System.nanoTime() / 1_000_000, System::currentTimeMillis);
+        p.state().listedReceiptsMax(), () -> System.nanoTime() / 1_000_000, System::currentTimeMillis, lastSeq);
   }
 
   /** CH3 spec §6.1: connection sets in Redis. */
@@ -417,9 +445,9 @@ public class ChatConfig {
 
   @Bean
   com.pangate.chat.core.OfflineNotifications offlineNotifications(ScyllaChatStore store,
-      com.pangate.chat.core.PrivacyCache privacy, ChatProperties p) {
-    return new com.pangate.chat.core.OfflineNotifications(store, store, privacy, store,
-        new com.pangate.chat.core.Badge(store), p.notifications().maxAge());
+      com.pangate.chat.core.PrivacyCache privacy, ChatProperties p, com.pangate.chat.core.Badge badge) {
+    return new com.pangate.chat.core.OfflineNotifications(store, store, privacy, store, badge,
+        p.notifications().maxAge());
   }
 
   /** CH4 spec §3.1: cN.push.offline → cN.notify.requests. */
@@ -476,10 +504,11 @@ public class ChatConfig {
   /** CH3 spec §3.4: chat.receipts → marks → receipt pushes. */
   @Bean(destroyMethod = "")
   com.pangate.chat.kafka.ReceiptWorkerLoop receiptWorkerLoop(ChatProperties p, ScyllaChatStore store,
-      RedisChatCache cache, com.pangate.chat.core.PrivacyCache privacy, PushApiClient pusher, MeterRegistry meters) {
+      RedisChatCache cache, com.pangate.chat.core.PrivacyCache privacy, PushApiClient pusher, MeterRegistry meters,
+      com.pangate.chat.core.Badge badge) {
     return new com.pangate.chat.kafka.ReceiptWorkerLoop(com.pangate.chat.kafka.ReceiptWorkerLoop.consumer(
         p.kafka().bootstrap(), com.pangate.chat.kafka.ReceiptWorkerLoop.GROUP), p.kafka().receiptsTopic(), store,
-        new MemberLookup(store, cache), store, privacy, pusher, p.state(), meters);
+        new MemberLookup(store, cache), store, privacy, pusher, p.state(), meters, badge);
   }
 
   @Bean

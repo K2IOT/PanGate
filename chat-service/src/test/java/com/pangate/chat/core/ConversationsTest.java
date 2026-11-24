@@ -286,4 +286,33 @@ class ConversationsTest {
     assertThat(code(() -> convs.addMember(stores.members(c.id()).stream().filter(m -> m.role() == Role.OWNER)
         .findFirst().orElseThrow().userId(), c.id(), "d"))).isEmpty();
   }
+
+  /** Perf 3a (spec §3.3): joining a group with history counts nothing unread; the counter moves after the row. */
+  @Test
+  void addMemberRaisesBadgeAtLastSeq() {
+    RecordingBadges b = new RecordingBadges();
+    Conversations c = new Conversations(stores, stores, new MemberLookup(stores, stores), FakeStores.LIMITS,
+        (user, conv) -> { }, UserDirectory.ANY, u -> ChatStores.Privacy.OPEN, b);
+    Conversation g = c.create("u1", ConversationKind.CONVERSATION_KIND_GROUP, "g", List.of("u2"), false);
+    stores.lastSeq.put(g.id(), 100L);
+    b.onCall = call -> assertThat(stores.members.get(g.id())).containsKey("u3");
+    c.addMember("u1", g.id(), "u3");
+    assertThat(b.calls).containsExactly("join u3 " + g.id() + " 100");
+  }
+
+  @Test
+  void leavingDropsBadge() {
+    RecordingBadges b = new RecordingBadges();
+    Conversations c = new Conversations(stores, stores, new MemberLookup(stores, stores), FakeStores.LIMITS,
+        (user, conv) -> { }, UserDirectory.ANY, u -> ChatStores.Privacy.OPEN, b);
+    Conversation g = c.create("u1", ConversationKind.CONVERSATION_KIND_GROUP, "g", List.of("u2", "u3"), false);
+    c.removeMember("u2", g.id(), "u2");
+    c.removeMember("u1", g.id(), "u3");
+    assertThat(b.calls).containsExactly("drop u2 " + g.id(), "drop u3 " + g.id());
+    Conversation ch = c.create("u1", ConversationKind.CONVERSATION_KIND_CHANNEL, "c", List.of("u2"), true);
+    stores.lastSeq.put(ch.id(), 5L);
+    c.addMember("u1", ch.id(), "u4");
+    c.removeMember("u2", ch.id(), "u2");
+    assertThat(b.calls).hasSize(2);
+  }
 }

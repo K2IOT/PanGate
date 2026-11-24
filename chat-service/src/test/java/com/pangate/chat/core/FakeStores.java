@@ -18,7 +18,8 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
     ChatStores.SettingsStore, ChatStores.LastSeenStore, ChatStores.MuteStore, ChatStores.ChannelProgressStore {
 
   public static final com.pangate.chat.config.ChatProperties.Limits LIMITS =
-      new com.pangate.chat.config.ChatProperties.Limits(20, 40, 50, 100, 500, 4096, 50);
+      new com.pangate.chat.config.ChatProperties.Limits(20, 40, 50, 100, 500, 4096, 50,
+          com.pangate.chat.config.ChatProperties.Api.DEFAULTS);
 
   public final Map<String, Conversation> convs = new ConcurrentHashMap<>();
   public final Map<String, Map<String, Member>> members = new ConcurrentHashMap<>();
@@ -40,6 +41,29 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
   public final Map<String, Long> joined = new ConcurrentHashMap<>();
   private final java.util.concurrent.atomic.AtomicLong joins = new java.util.concurrent.atomic.AtomicLong();
   public int reserveCalls;
+  /** Perf 3a: calls of members(), member(), cachedMembers(), get(), lastSeq(). */
+  public final java.util.concurrent.atomic.AtomicInteger membersCalls = new java.util.concurrent.atomic.AtomicInteger();
+  public final java.util.concurrent.atomic.AtomicInteger memberCalls = new java.util.concurrent.atomic.AtomicInteger();
+  public final java.util.concurrent.atomic.AtomicInteger cachedMembersCalls =
+      new java.util.concurrent.atomic.AtomicInteger();
+  public final java.util.concurrent.atomic.AtomicInteger getCalls = new java.util.concurrent.atomic.AtomicInteger();
+  public final java.util.concurrent.atomic.AtomicInteger lastSeqCalls = new java.util.concurrent.atomic.AtomicInteger();
+
+  /** A channel with owner {@code "owner"} and followers {@code f0 .. f<n-1>}. */
+  public static FakeStores withChannel(String convId, int followers) {
+    FakeStores s = new FakeStores();
+    List<Member> ms = new ArrayList<>(followers + 1);
+    ms.add(new Member("owner", ChatStores.Role.OWNER));
+    for (int i = 0; i < followers; i++) {
+      ms.add(new Member("f" + i, ChatStores.Role.MEMBER));
+    }
+    s.convs.put(convId, new Conversation(convId, com.pangate.contracts.v1.ConversationKind.CONVERSATION_KIND_CHANNEL,
+        "c", "owner", 0, true, 0));
+    Map<String, Member> byId = new ConcurrentHashMap<>();
+    ms.forEach(m -> byId.put(m.userId(), m));
+    s.members.put(convId, byId);
+    return s;
+  }
   public boolean fail;
   /** Fail this many message writes / inbox touches (then succeed). */
   public int failWrites;
@@ -60,6 +84,7 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
   }
 
   @Override public Optional<Conversation> get(String id) {
+    getCalls.incrementAndGet();
     check();
     Conversation c = convs.get(id);
     return c == null ? Optional.empty() : Optional.of(new Conversation(c.id(), c.kind(), c.title(), c.createdBy(),
@@ -95,16 +120,18 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
     lastSeq.put(convId, known + n);
     return true;
   }
-  @Override public long lastSeq(String convId) { check(); return lastSeq.getOrDefault(convId, 0L); }
+  @Override public long lastSeq(String convId) { lastSeqCalls.incrementAndGet(); check(); return lastSeq.getOrDefault(convId, 0L); }
   @Override public Optional<String> dm(String a, String b) { return Optional.ofNullable(dms.get(pair(a, b))); }
   @Override public String createDm(String a, String b, String id) { return dms.computeIfAbsent(pair(a, b), k -> id); }
   static String pair(String a, String b) { return a.compareTo(b) <= 0 ? a + "|" + b : b + "|" + a; }
 
   @Override public List<Member> members(String convId) {
+    membersCalls.incrementAndGet();
     check();
     return new ArrayList<>(members.getOrDefault(convId, Map.of()).values());
   }
   @Override public Optional<Member> member(String convId, String userId) {
+    memberCalls.incrementAndGet();
     check();
     return Optional.ofNullable(members.getOrDefault(convId, Map.of()).get(userId));
   }
@@ -309,13 +336,15 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
   }
 
   static String dk(String c, String s, String k) { return c + "|" + s + "|" + k; }
+  public final java.util.concurrent.atomic.AtomicInteger findCalls = new java.util.concurrent.atomic.AtomicInteger();
   @Override public Optional<StoredMessage> find(String c, String s, String k) {
+    findCalls.incrementAndGet();
     check();
     return Optional.ofNullable(dedup.get(dk(c, s, k)));
   }
   @Override public void put(StoredMessage m) { check(); dedup.put(dk(m.convId(), m.senderId(), m.clientMsgId()), m); }
 
-  @Override public Optional<List<Member>> cachedMembers(String convId) { return Optional.ofNullable(cache.get(convId)); }
+  @Override public Optional<List<Member>> cachedMembers(String convId) { cachedMembersCalls.incrementAndGet(); return Optional.ofNullable(cache.get(convId)); }
   @Override public void putMembers(String convId, List<Member> ms) { cache.put(convId, List.copyOf(ms)); }
   @Override public boolean evictMembers(String convId) {
     if (evictFails) {

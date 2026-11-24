@@ -58,6 +58,7 @@ public final class ReceiptWorkerLoop implements AutoCloseable {
   private final String topic;
   private final ChatStores.ConversationStore conversations;
   private final MemberLookup members;
+  private final com.pangate.chat.core.BadgeUpdates badges;
   private final ChatStores.MarkStore marks;
   private final PrivacyCache privacy;
   private final Pusher pusher;
@@ -77,6 +78,16 @@ public final class ReceiptWorkerLoop implements AutoCloseable {
   public ReceiptWorkerLoop(Consumer<String, byte[]> consumer, String topic,
       ChatStores.ConversationStore conversations, MemberLookup members, ChatStores.MarkStore marks,
       PrivacyCache privacy, Pusher pusher, ChatProperties.State cfg, MeterRegistry meters) {
+    this(consumer, topic, conversations, members, marks, privacy, pusher, cfg, meters,
+        com.pangate.chat.core.BadgeUpdates.NONE);
+  }
+
+  /** {@code badges}: perf 3a (spec §3.3), a reader's counter moves after their marks are written. */
+  public ReceiptWorkerLoop(Consumer<String, byte[]> consumer, String topic,
+      ChatStores.ConversationStore conversations, MemberLookup members, ChatStores.MarkStore marks,
+      PrivacyCache privacy, Pusher pusher, ChatProperties.State cfg, MeterRegistry meters,
+      com.pangate.chat.core.BadgeUpdates badges) {
+    this.badges = badges;
     this.consumer = consumer;
     this.topic = topic;
     this.conversations = conversations;
@@ -205,7 +216,7 @@ public final class ReceiptWorkerLoop implements AutoCloseable {
     for (ReceiptAggregator.Flush f : agg.due()) {
       List<Member> to;
       try {
-        to = members.of(f.convId());
+        to = com.pangate.chat.core.ReceiptRecipients.audience(f, members);   // perf 3a: no channel list
         long now = System.currentTimeMillis();
         for (Map.Entry<String, Marks> e : f.byUser().entrySet()) {
           marks.advance(f.convId(), e.getKey(), e.getValue().deliveredSeq(), e.getValue().readSeq(),
@@ -222,6 +233,13 @@ public final class ReceiptWorkerLoop implements AutoCloseable {
         meters.counter("chat.receipts.store.failures").increment();
         log.warn("receipt marks of {} not written: {}", f.convId(), e.toString());
         return false;
+      }
+      if (f.kind() != ConversationKind.CONVERSATION_KIND_CHANNEL) {
+        for (Map.Entry<String, Marks> e : f.byUser().entrySet()) {
+          if (e.getValue().readSeq() > 0) {
+            badges.raise(e.getKey(), f.convId(), 0, e.getValue().readSeq());
+          }
+        }
       }
       flushed.add(f.convId());
       pushes.addAll(ReceiptRecipients.plan(f, to, privacy::of, cfg.listedReceiptsMax()));

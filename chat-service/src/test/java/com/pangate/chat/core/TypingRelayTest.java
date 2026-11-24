@@ -126,4 +126,40 @@ class TypingRelayTest {
     ms.addAndGet(500);
     assertThat(relay.typing("u1", g)).isEqualTo("relayed");
   }
+
+  /** Perf 3a (spec §4): typing in a channel of 100 000 is refused before any member lookup. */
+  @Test
+  void channelTypingReadsNoMemberList() {
+    String c = Ids.next();
+    FakeStores big = FakeStores.withChannel(c, 100_000);
+    TypingRelay r = new TypingRelay(big, new MemberLookup(big, big), x -> null, conv -> open, ms::get, 50,
+        new TokenBucketLimiter(5, 10, () -> 0));
+    assertThat(r.typing("f1", c)).isEqualTo("channel");
+    assertThat(big.membersCalls.get()).isZero();
+    assertThat(big.cachedMembersCalls.get()).isZero();
+    assertThat(big.memberCalls.get()).isZero();
+  }
+
+  /** Perf 3a (spec §3.2): a per-user limit before any lookup. */
+  @Test
+  void strangerIsLimitedBeforeAnyLookup() {
+    TypingRelay r = new TypingRelay(stores, new MemberLookup(stores, stores), x -> null, conv -> open, ms::get, 50,
+        new TokenBucketLimiter(5, 10, () -> 0));
+    for (int i = 0; i < 10; i++) {
+      assertThat(r.typing("x", Ids.next())).isEqualTo("not_member");
+    }
+    int gets = stores.getCalls.get();
+    assertThat(r.typing("x", Ids.next())).isEqualTo("rate_limited");
+    assertThat(stores.getCalls.get()).isEqualTo(gets);
+  }
+
+  @Test
+  void nonMemberOfGroupIsRefusedWithoutTheList() {
+    String g = conv(ConversationKind.CONVERSATION_KIND_GROUP, 3);
+    stores.membersCalls.set(0);
+    stores.cachedMembersCalls.set(0);
+    assertThat(relay.typing("x", g)).isEqualTo("not_member");
+    assertThat(stores.membersCalls.get()).isZero();
+    assertThat(stores.cachedMembersCalls.get()).isZero();
+  }
 }
