@@ -1,6 +1,6 @@
 # Đợt 3c: vòng Kafka thành pipeline theo khoá (ingest, sequencer, fan-out, offline)
 
-- **Trạng thái:** Bản nháp, chờ builder check và chủ dự án duyệt.
+- **Trạng thái:** Bản nháp, đã qua builder check (§7), chờ chủ dự án duyệt.
 - **Nguồn:** review toàn bộ chat 2026-11-19: CH1 I3 (độ trễ 1-1 p99 443 ms, "stop-and-wait step loop"), CH1 I1 (ghi inbox nhóm 500 tuần tự), CH3 I5 và cross (lệnh `chat.presence.watch` chạy chung hàng với `chat.send`), CH4 I2 (vòng offline một luồng). Đợt 3 gồm 3a (K2IOT/PanGate#10), 3b (K2IOT/PanGate#11), **3c** (tài liệu này).
 - **Quy mô mục tiêu** (chủ dự án, 2026-11-19): 1 triệu người dùng, kênh 100 000 thành viên.
 - **Quyết định của chủ dự án:** tự viết pipeline cho từng partition, không dùng Confluent Parallel Consumer (2026-11-19); song song **theo hội thoại (khoá Kafka)** bên trong một partition, không chỉ theo partition (2026-11-24).
@@ -32,7 +32,8 @@ Hệ quả, theo review (suy luận từ code, chưa profile):
 
 **Thành công (đo trên máy dev 4 vCPU như CH1, `ChatLoadIT`):**
 - 1-1 qua WebSocket, 100 tin/s: p99 gửi → nhận **< 300 ms**.
-- Nhóm 500 người, **20 tin/s** trong 10 s: mọi tin tới đủ 500 người, lag không tăng dần (số đo trước 3c ghi lại để so).
+- Nhóm 500 người, **10 tin/s** trong 10 s: mọi tin tới đủ 500 người, lag không tăng dần (trước 3c: khoảng 2–4 tin/s; số đo trước và sau ghi lại để so).
+- **5 nhóm 500 người cùng lúc, mỗi nhóm 5 tin/s:** như trên. Sức chứa tăng theo số hội thoại, không bị một hội thoại giới hạn.
 - Test: một hội thoại mà store luôn lỗi **không** làm chậm hội thoại khác cùng partition; một lệnh watch chậm không làm chậm `chat.send` của cùng người.
 
 **Không làm:**
@@ -70,10 +71,11 @@ Một lớp Java thuần, dùng lại cho bốn vòng. Mỗi vòng đưa vào m�
 **Làn (virtual thread):**
 - Lấy tối đa `max-batch` record đầu hàng của làn (mặc định 100, fan-out và offline dùng 1), gọi handler, xong thì báo các offset là đã xong. Hết việc thì làn kết thúc (làn mới tạo lại khi có record).
 - Thứ tự trong làn giữ nguyên; các làn chạy song song, tối đa `max-concurrency` làn đang gọi handler cùng lúc trên một pipeline (mặc định 256, semaphore) để bảo vệ store.
-- **Lỗi:** handler ném lỗi thì **thử lại chính mẻ đó tại chỗ** sau một khoảng chờ tăng dần 100 ms → 5 s; không tua lại partition, làn khác không bị ảnh hưởng. Lỗi tất định lặp lại `PoisonGuard.MAX_ATTEMPTS` lần liên tiếp (theo record đầu mẻ) thì lần cuối gọi handler ở chế độ **"lần cuối"**: handler xử lý từng record một và tự đưa record lỗi vào DLQ, như hôm nay. Lỗi tạm thời (store, Kafka, Push API, fence) thử lại mãi, có metric.
+- **Lỗi:** handler ném lỗi thì **thử lại chính mẻ đó tại chỗ** (mẻ đóng băng: không thêm record mới vào mẻ đang thử lại) sau một khoảng chờ tăng dần 100 ms → 5 s; không tua lại partition, làn khác không bị ảnh hưởng. Trước mỗi lần thử lại, làn kiểm partition còn được giao và pipeline chưa đóng; nếu không thì bỏ mẻ (chủ mới chạy lại).
+- **Record độc (tuỳ pipeline):** pipeline nào bật DLQ (sequencer, ingest, state) thì lỗi tất định lặp lại `PoisonGuard.MAX_ATTEMPTS` lần liên tiếp (theo record đầu mẻ) làm lần sau gọi handler ở chế độ **"lần cuối"**: handler xử lý từng record một và tự đưa record lỗi vào `chat.commands.dlq`, như hôm nay. Fan-out và offline **không có** DLQ, như hôm nay: lỗi nào cũng thử lại mãi (quyết định CH1 đã ghi: lỗi ở đó thực tế là tạm thời); hội thoại kẹt lộ ra qua `chat.pipeline.oldest`. Lỗi tạm thời (store, Kafka, Push API, fence) thử lại mãi ở mọi pipeline, có metric.
 - Một hội thoại kẹt mãi: các làn khác tiếp tục tới khi partition đạt `max-pending-per-partition`, rồi partition dừng. Đây là giới hạn có chủ đích (hôm nay partition dừng ngay).
 
-**Rebalance:** `onPartitionsRevoked`: làn của các partition bị thu hồi không lấy mẻ mới; chờ tối đa `revoke-wait` (5 s) cho các mẻ đang chạy; `commitSync` mốc của các partition đó; bỏ hàng đợi; gọi hook của vòng (sequencer: `Sequencer.forget()`). Mẻ còn chạy quá hạn vẫn chạy nốt nhưng kết quả không được commit (chủ mới chạy lại, dedup lo phần trùng).
+**Rebalance:** `onPartitionsRevoked`: làn của các partition bị thu hồi không lấy mẻ mới; chờ tối đa `revoke-wait` (5 s) cho các mẻ đang chạy; `commitSync` mốc của các partition đó; bỏ hàng đợi; gọi hook của vòng (sequencer: `Sequencer.forget()`). Mẻ còn chạy quá hạn vẫn chạy nốt nhưng kết quả không được commit (chủ mới chạy lại, dedup lo phần trùng). **Không bao giờ có hai mẻ cùng khoá chạy cùng lúc trên một pod:** nếu partition được giao lại cho chính pod này khi mẻ cũ của một khoá còn chạy, làn mới của khoá đó chờ mẻ cũ xong rồi mới bắt đầu. Assignor giữ mặc định của client Kafka.
 
 **Đóng:** dừng poll, chờ các làn tối đa `revoke-wait`, `commitSync`, đóng consumer.
 
@@ -87,7 +89,7 @@ Một lớp Java thuần, dùng lại cho bốn vòng. Mỗi vòng đưa vào m�
 
 - Handler nhận **một** event mỗi lần (thứ tự push theo người nhận phụ thuộc vào thứ tự gửi vào client Push API).
 - Push: như hôm nay (mọi request cùng lúc, chỉ thử lại cái lỗi; 3b đã thêm ưu tiên MUST).
-- **Inbox theo lô:** thêm `ChatStores.MemberStore.touchUserConvs(List<String> users, String convId, long seq, long sentAtMs)` trả về danh sách người **chưa ghi được**. Bản ScyllaDB dùng `executeAsync`, tối đa `chat.fanout.inbox-concurrency` (mặc định 64) câu đang chờ. Fan-out thử lại riêng những người chưa ghi, với khoảng chờ như hôm nay. Bản fake trong test giữ cùng hợp đồng.
+- **Inbox theo lô:** thêm `ChatStores.MemberStore.touchUserConvs(List<String> users, String convId, long seq, long sentAtMs)` trả về danh sách người **chưa ghi được**. Bản ScyllaDB dùng `executeAsync`, giới hạn bằng **một semaphore chung của store** `chat.fanout.inbox-concurrency` (mặc định 256 câu đang chờ cho cả pod, không phải mỗi lần gọi), để 256 làn fan-out không thành 256 × 64 câu. Fan-out thử lại riêng những người chưa ghi, với khoảng chờ như hôm nay. Bản fake trong test giữ cùng hợp đồng.
 - Mark của người gửi, badge: như hôm nay, sau dòng inbox.
 - **Bỏ** `GIVE_UP` (30 s) và `STEP_BUDGET`: bước nào lỗi thì thử lại đúng bước đó, không gửi lại push đã xong; poll không bao giờ bị giữ, nên `max.poll.interval` không còn là rủi ro.
 
@@ -112,7 +114,7 @@ Một lớp Java thuần, dùng lại cho bốn vòng. Mỗi vòng đưa vào m�
 | `commit-interval` | 200ms | chu kỳ commit mốc |
 | `revoke-wait` | 5s | chờ mẻ đang chạy khi thu hồi partition hoặc đóng |
 
-Thêm `chat.fanout.inbox-concurrency` (64) và `chat.kafka.state-group` (`chat-state`). `max.poll.records` của các consumer giữ như hôm nay.
+Thêm `chat.fanout.inbox-concurrency` (256, cho cả pod) và `chat.kafka.state-group` (`chat-state`). `max.poll.records` của các consumer giữ như hôm nay.
 
 ### 4.7 Metric
 
@@ -135,9 +137,19 @@ Các metric cũ giữ (`chat.sequencer.lag`, `chat.fanout.lag`, `chat.send.laten
   - `max-concurrency` không bị vượt.
 - **Vòng:** test hiện có của sequencer, fan-out, ingest, offline, poison chuyển sang pipeline, giữ nguyên ý (dedup khi chạy lại, mark người gửi, DLQ). Test mới: fan-out ghi inbox 500 người đồng thời và chỉ thử lại người lỗi; ingest bỏ qua lệnh trạng thái, `chat-state` bỏ qua `chat.send`.
 - **IT:** một hội thoại mà store lỗi (ScyllaDB fake hoặc hook lỗi theo hội thoại) không làm chậm hội thoại khác cùng partition; lệnh watch chậm không làm chậm `chat.send` của cùng người. Các IT hiện có xanh.
-- **Đo:** `ChatLoadIT` thêm ca 1-1 100 tin/s và nhóm 500 ở 20 tin/s; ghi số trước và sau vào README chat-service.
+- **Đo:** `ChatLoadIT` thêm ca 1-1 100 tin/s, nhóm 500 ở 10 tin/s và 5 nhóm 500 mỗi nhóm 5 tin/s; ghi số trước và sau vào README chat-service.
 - `make smoke` xanh.
 
 ## 6. Để người xây dựng tự quyết
 
 Cấu trúc dữ liệu cho tập offset đang chờ; dọn làn rảnh; tên lớp phụ; cách chia handler từng vòng thành lớp; cách gắn hook lỗi theo hội thoại cho IT.
+
+## 7. Sau builder check (2026-11-24)
+
+Builder check (một người xây dựng đọc tài liệu mà không hỏi được ai) hỏi ba điều; cả ba là quyết định của người viết, không đổi điều chủ dự án muốn:
+
+- **Mục tiêu nhóm 500 ở 20 tin/s không đạt được nếu fan-out giữ thứ tự từng event trong một hội thoại** (mỗi event phải xong trong 50 ms, trong khi CH1 đo "event → Push API trả lời" khoảng 77 ms riêng cho 1-1). Giữ thứ tự chặt (phản mục tiêu §2), hạ mục tiêu một nhóm xuống **10 tin/s** và thêm ca **5 nhóm cùng lúc**: điều cần chứng minh là hội thoại chậm không chặn hội thoại khác và sức chứa tăng theo số hội thoại. Một nhóm 500 người hiếm khi vượt vài tin/s. Nếu đo cho thấy 10 tin/s cũng không đạt, ghi số và hỏi chủ dự án trước khi cho các event của một hội thoại chồng nhau.
+- **Record độc ở fan-out và offline:** hôm nay hai vòng này không có DLQ và thử lại mãi. Giữ như vậy (§4.1), không thêm topic DLQ mới; `chat.pipeline.oldest` cho thấy hội thoại kẹt.
+- **Mẻ thử lại** đóng băng cho tới khi xong hoặc bị đưa vào DLQ (§4.1).
+
+Thêm vào thiết kế từ các điểm nhỏ của builder check: hai mẻ cùng khoá không bao giờ chạy cùng lúc trên một pod khi partition được giao lại (§4.1); làn ngừng thử lại khi mất partition hay pipeline đóng (§4.1); giới hạn ghi inbox là chung cho cả pod (§4.3); assignor giữ mặc định.
