@@ -46,4 +46,18 @@ class ChatPropertiesTest {
     assertThat(p.redis().memberCacheTtl()).isEqualTo(Duration.ofSeconds(60));
     assertThat(p.managementPort()).isEqualTo(8081);
   }
+
+  /** Perf 3c (spec §4.6). */
+  @Test
+  void pipelineDefaultsMatchSpec() {
+    ChatProperties p = new Binder(new MapConfigurationPropertySource(Map.of("chat.cell", "c1")))
+        .bind("chat", ChatProperties.class).get();
+    assertThat(p.pipeline().maxPendingPerPartition()).isEqualTo(1000);
+    assertThat(p.pipeline().maxBatch()).isEqualTo(100);
+    assertThat(p.pipeline().maxConcurrency()).isEqualTo(256);
+    assertThat(p.pipeline().commitInterval()).isEqualTo(Duration.ofMillis(200));
+    assertThat(p.pipeline().revokeWait()).isEqualTo(Duration.ofSeconds(5));
+    assertThat(p.fanout().inboxConcurrency()).isEqualTo(256);
+    assertThat(p.kafka().stateGroup()).isEqualTo("chat-state");
+  }
 }

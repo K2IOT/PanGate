@@ -18,7 +18,17 @@ public record ChatProperties(
     @DefaultValue Limits limits,
     @DefaultValue Http http,
     @DefaultValue State state,
-    @DefaultValue Notify notifications) {
+    @DefaultValue Notify notifications,
+    @DefaultValue Pipeline pipeline,
+    @DefaultValue Fanout fanout) {
+
+  /** Perf 3c (spec §4.6): the keyed Kafka pipelines of ingest, state, sequencer, fan-out and offline. */
+  public record Pipeline(@DefaultValue("1000") int maxPendingPerPartition, @DefaultValue("100") int maxBatch,
+      @DefaultValue("256") int maxConcurrency, @DefaultValue("200ms") Duration commitInterval,
+      @DefaultValue("5s") Duration revokeWait) {}
+
+  /** Perf 3c (spec §4.3): inbox rows being written at once, for the whole pod. */
+  public record Fanout(@DefaultValue("256") int inboxConcurrency) {}
 
   /** CH4 spec §3, §4: offline notifications. */
   public record Notify(@DefaultValue("true") boolean enabled,
@@ -32,7 +42,8 @@ public record ChatProperties(
       @DefaultValue("chat.commands") String commandsTopic, @DefaultValue("chat.events") String eventsTopic,
       @DefaultValue("chat.commands.dlq") String dlqTopic, @DefaultValue("c1.gw.upstream.cmd") String upstreamTopic,
       @DefaultValue("5s") Duration produceTimeout,
-      @DefaultValue("chat.receipts") String receiptsTopic) {}
+      @DefaultValue("chat.receipts") String receiptsTopic,
+      @DefaultValue("chat-state") String stateGroup) {}
 
   public record Scylla(@DefaultValue("scylla:9042") List<String> contactPoints,
       @DefaultValue("datacenter1") String localDc, @DefaultValue("chat") String keyspace,
