@@ -14,6 +14,8 @@ Design: `docs/superpowers/specs/2026-11-19-perf-3a-hot-lookups-design.md`.
 - chat-service (final review): a conversation left keeps a mark so late raises do not count its history; a Redis
   failure pauses the counters 5 s instead of slowing every message; HTTP sends and presence watches are limited
   before any lookup.
+- chat-service (Codex review of #10): a badge rebuild racing a join or leave refuses and retries (membership version
+  `_mv`), and writes during the snapshot read land in a placeholder hash instead of being lost.
 
 ### account-service
 - Registration limits per IP raised to 200 attempts and 50 accounts per hour (were 20 / 5): many users share one

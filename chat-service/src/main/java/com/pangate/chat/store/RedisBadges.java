@@ -79,18 +79,23 @@ public final class RedisBadges implements ChatStores.BadgeStore, AutoCloseable {
       return tonumber(redis.call('HGET', KEYS[1], '_total') or '0')
       """;
 
-  /** ARGV: conv, last, ttlMs. Nothing when the hash is missing; a left mark is cleared first. */
+  /**
+   * ARGV: conv, last, ttlMs. Nothing when the hash is missing; a left mark is cleared first; the membership version
+   * {@code _mv} moves (Codex review of PR #10).
+   */
   static final String JOIN = LIB + """
       if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+      redis.call('HINCRBY', KEYS[1], '_mv', 1)
       if redis.call('HGET', KEYS[1], ARGV[1]) == 'L' then redis.call('HDEL', KEYS[1], ARGV[1]) end
       raise(KEYS[1], ARGV[1], tonumber(ARGV[2]), tonumber(ARGV[2]))
       redis.call('PEXPIRE', KEYS[1], ARGV[3])
       return 0
       """;
 
-  /** ARGV: conv, ttlMs. The field becomes a left mark (final review I1). */
+  /** ARGV: conv, ttlMs. The field becomes a left mark (final review I1); the membership version moves. */
   static final String DROP = LIB + """
       if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+      redis.call('HINCRBY', KEYS[1], '_mv', 1)
       local l, r = parse(redis.call('HGET', KEYS[1], ARGV[1]))
       redis.call('HSET', KEYS[1], ARGV[1], 'L')
       redis.call('HINCRBY', KEYS[1], '_total', string.format('%d', -math.max(0, l - r)))
@@ -98,14 +103,23 @@ public final class RedisBadges implements ChatStores.BadgeStore, AutoCloseable {
       return 0
       """;
 
+  /** ARGV: ttlMs. A placeholder that reads as stale when missing; answers the membership version. */
+  static final String PREPARE = """
+      redis.call('HSETNX', KEYS[1], '_built_at', '0')
+      redis.call('PEXPIRE', KEYS[1], ARGV[1])
+      return tonumber(redis.call('HGET', KEYS[1], '_mv') or '0')
+      """;
+
   /**
-   * ARGV: nowMs, ttlMs, then (conv, last, read) per inbox row. Each row is merged by max (a left mark counts as
+   * ARGV: nowMs, ttlMs, expected membership version (-2 and nothing changed when it moved), then (conv, last, read)
+   * per inbox row. Each row is merged by max (a left mark counts as
    * nothing), fields of conversations no longer in the inbox become left marks, the total is counted again. ARGV is
    * walked, never unpacked (10 000 rows).
    */
   static final String REBUILD = LIB + """
+      if tonumber(redis.call('HGET', KEYS[1], '_mv') or '0') ~= tonumber(ARGV[3]) then return -2 end
       local keep = {}
-      for i = 3, #ARGV, 3 do
+      for i = 4, #ARGV, 3 do
         keep[ARGV[i]] = true
         local l, r = parse(redis.call('HGET', KEYS[1], ARGV[i]))
         redis.call('HSET', KEYS[1], ARGV[i], string.format('%d:%d', math.max(l, tonumber(ARGV[i + 1])),
@@ -188,16 +202,22 @@ public final class RedisBadges implements ChatStores.BadgeStore, AutoCloseable {
   }
 
   @Override
-  public void rebuild(String user, List<ChatStores.BadgeRow> snapshot, long nowMs) {
-    List<String> args = new ArrayList<>(2 + snapshot.size() * 3);
+  public long prepareRebuild(String user) {
+    return eval(PREPARE, user, ttl());
+  }
+
+  @Override
+  public boolean rebuild(String user, List<ChatStores.BadgeRow> snapshot, long nowMs, long version) {
+    List<String> args = new ArrayList<>(3 + snapshot.size() * 3);
     args.add(Long.toString(nowMs));
     args.add(ttl());
+    args.add(Long.toString(version));
     for (ChatStores.BadgeRow r : snapshot) {
       args.add(r.convId());
       args.add(Long.toString(r.lastSeq()));
       args.add(Long.toString(r.readSeq()));
     }
-    eval(REBUILD, user, args.toArray(String[]::new));
+    return eval(REBUILD, user, args.toArray(String[]::new)) >= 0;
   }
 
   @Override

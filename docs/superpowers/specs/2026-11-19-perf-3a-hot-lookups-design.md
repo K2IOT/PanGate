@@ -125,5 +125,7 @@ Reviewer độc lập đọc toàn bộ nhánh: 0 Critical, 4 Important (đã s�
 - **I3:** gửi tin qua HTTP đọc kết quả gửi trước (Redis, rồi ScyllaDB) trước giới hạn: nay lấy lượt của người dùng trước.
 - **I4:** lệnh theo dõi online không có giới hạn: nay 1/s, burst 5 mỗi người (`chat.state.watch-rate`, `watch-burst`), trước mọi lần tra.
 
-Để lại: dựng lại có thể bỏ lỡ một lần ghi chen giữa lúc đọc ảnh chụp (M1); `join` dùng `lastSeq` đọc trước khi chèn thành viên (M2); `EVAL` gửi cả script mỗi lần, nên dùng `EVALSHA` (M3); mặc định `chat.limits.api` lặp hai nơi, chưa có test bind (M4); một lỗi `raiseAll` quên hash của mọi người nhận (M5).
+Để lại: `join` dùng `lastSeq` đọc trước khi chèn thành viên (M2); `EVAL` gửi cả script mỗi lần, nên dùng `EVALSHA` (M3); mặc định `chat.limits.api` lặp hai nơi, chưa có test bind (M4); một lỗi `raiseAll` quên hash của mọi người nhận (M5).
+
+**Review của Codex trên K2IOT/PanGate#10 (P2), đã sửa:** một người rời nhóm giữa lúc đọc ảnh chụp và lúc chạy script dựng lại bị ảnh chụp cũ ghi đè dấu `L`, nên badge đếm thừa tới 24 giờ. Nay `join` / `drop` tăng số phiên bản thành viên `_mv` trong hash; trước khi đọc ảnh chụp, `Badge` tạo sẵn hash tạm (`_built_at = 0`, đọc như đã cũ) để mọi `raise` / `join` / `drop` trong lúc đó ghi vào; script dựng lại nhận `_mv` đọc trước ảnh chụp và từ chối, không đổi gì, nếu nó đã đổi; `Badge` thử lại một lần, rồi quét inbox. Cùng cách này sửa luôn M1 (lần ghi chen giữa lúc hash đang thiếu) và trường hợp vào nhóm đúng lúc dựng lại.
 

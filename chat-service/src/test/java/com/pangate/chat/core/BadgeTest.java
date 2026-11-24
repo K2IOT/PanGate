@@ -160,4 +160,52 @@ class BadgeTest {
     assertThat(badge.total("u", null, 0)).isEqualTo(3);
     assertThat(counters.hashes.get("u")).containsEntry("g", "L");   // final review I1: left, raises ignored
   }
+
+  // --- Codex review of PR #10: changes landing between the snapshot read and the rebuild script ---
+
+  @Test
+  void leaveDuringRebuildIsNotOverwritten() {
+    row("u", "dm", com.pangate.contracts.v1.ConversationKind.CONVERSATION_KIND_DIRECT, 7, 4);
+    row("u", "g", com.pangate.contracts.v1.ConversationKind.CONVERSATION_KIND_GROUP, 10, 0);
+    assertThat(badge.total("u", null, 0)).isEqualTo(13);
+    wall.addAndGet(24 * H + 1);   // stale: the next read rebuilds
+    counters.beforeRebuild = () -> {
+      inbox.userConvs.get("u").remove("g");   // u leaves g after the snapshot was read
+      badge.drop("u", "g");
+    };
+    assertThat(badge.total("u", null, 0)).isEqualTo(3);
+    assertThat(counters.hashes.get("u")).containsEntry("g", "L");
+  }
+
+  @Test
+  void joinDuringRebuildCounts() {
+    row("u", "dm", com.pangate.contracts.v1.ConversationKind.CONVERSATION_KIND_DIRECT, 7, 4);
+    counters.beforeRebuild = () -> {
+      row("u", "g", com.pangate.contracts.v1.ConversationKind.CONVERSATION_KIND_GROUP, 100, 100);   // u joins g
+      badge.join("u", "g", 100);
+    };
+    assertThat(badge.total("u", null, 0)).isEqualTo(3);
+    badge.raiseAll(java.util.List.of("u"), "g", 101);
+    assertThat(badge.total("u", null, 0)).as("one new message, not g's history").isEqualTo(4);
+  }
+
+  @Test
+  void readMarkWhileHashIsMissingIsKept() {
+    row("u", "g", com.pangate.contracts.v1.ConversationKind.CONVERSATION_KIND_GROUP, 50, 40);
+    counters.beforeRebuild = () -> {
+      row("u", "g", com.pangate.contracts.v1.ConversationKind.CONVERSATION_KIND_GROUP, 50, 50);   // the receipt worker
+      badge.raise("u", "g", 0, 50);
+    };
+    assertThat(badge.total("u", null, 0)).isZero();
+  }
+
+  @Test
+  void rebuildThatKeepsLosingTheRaceFallsBackToScan() {
+    row("u", "g", com.pangate.contracts.v1.ConversationKind.CONVERSATION_KIND_GROUP, 10, 0);
+    counters.beforeRebuild = () -> {
+      badge.drop("u", "x");
+      counters.beforeRebuild = () -> badge.drop("u", "y");
+    };
+    assertThat(badge.total("u", null, 0)).isEqualTo(10);
+  }
 }

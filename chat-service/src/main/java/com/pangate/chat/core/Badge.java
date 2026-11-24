@@ -20,6 +20,8 @@ public final class Badge implements BadgeUpdates {
   static final long REBUILD_AFTER_MS = 24L * 3_600_000L;
   /** Final review I2: after a Redis failure, how long the counters are left alone. */
   static final long PAUSE_MS = 5_000;
+  /** A rebuild racing joins and leaves this many times in a row gives way to summing the inbox. */
+  static final int REBUILD_TRIES = 2;
   static final int MAX_DIRTY = 100_000;
 
   private final ChatStores.MemberStore inbox;
@@ -52,9 +54,12 @@ public final class Badge implements BadgeUpdates {
       try {
         long now = wallMs.getAsLong();
         long t = counters.totalWith(userId, convId, convSeq, now - REBUILD_AFTER_MS);
-        if (t < 0) {
-          counters.rebuild(userId, snapshot(userId), now);
-          t = counters.totalWith(userId, convId, convSeq, now - REBUILD_AFTER_MS);
+        // Codex review of PR #10: a join or leave between the snapshot read and the script makes the rebuild refuse
+        for (int i = 0; t < 0 && i < REBUILD_TRIES; i++) {
+          long version = counters.prepareRebuild(userId);
+          if (counters.rebuild(userId, snapshot(userId), now, version)) {
+            t = counters.totalWith(userId, convId, convSeq, now - REBUILD_AFTER_MS);
+          }
         }
         if (t >= 0) {
           return (int) Math.min(Integer.MAX_VALUE, t);

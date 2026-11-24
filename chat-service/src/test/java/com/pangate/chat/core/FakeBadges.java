@@ -14,6 +14,8 @@ public final class FakeBadges implements ChatStores.BadgeStore {
   static final String BUILT = "_built_at";
   /** Final review I1: the field of a conversation the user left; raises ignore it until a join. */
   static final String LEFT = "L";
+  /** Codex review of PR #10: the membership version, bumped by every join and drop. */
+  static final String MV = "_mv";
 
   /** user → field → value, like {@code badge:{user}}. */
   public final Map<String, Map<String, String>> hashes = new ConcurrentHashMap<>();
@@ -22,6 +24,8 @@ public final class FakeBadges implements ChatStores.BadgeStore {
   /** The next N calls fail, then they work again. */
   public int failNext;
   public final List<String> forgotten = new java.util.concurrent.CopyOnWriteArrayList<>();
+  /** Runs once inside the next rebuild, before it applies: a change landing between the snapshot and the script. */
+  public volatile Runnable beforeRebuild;
   /** Calls that reached this store (failed ones included). */
   public final java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
 
@@ -79,9 +83,25 @@ public final class FakeBadges implements ChatStores.BadgeStore {
   }
 
   @Override
-  public synchronized void rebuild(String user, List<ChatStores.BadgeRow> snapshot, long nowMs) {
+  public synchronized long prepareRebuild(String user) {
     call();
     Map<String, String> h = hashes.computeIfAbsent(user, k -> new ConcurrentHashMap<>());
+    h.putIfAbsent(BUILT, "0");
+    return Long.parseLong(h.getOrDefault(MV, "0"));
+  }
+
+  @Override
+  public synchronized boolean rebuild(String user, List<ChatStores.BadgeRow> snapshot, long nowMs, long version) {
+    call();
+    Runnable hook = beforeRebuild;
+    beforeRebuild = null;
+    if (hook != null) {
+      hook.run();
+    }
+    Map<String, String> h = hashes.computeIfAbsent(user, k -> new ConcurrentHashMap<>());
+    if (Long.parseLong(h.getOrDefault(MV, "0")) != version) {
+      return false;
+    }
     Set<String> keep = new HashSet<>();
     for (ChatStores.BadgeRow r : snapshot) {
       keep.add(r.convId());
@@ -98,6 +118,7 @@ public final class FakeBadges implements ChatStores.BadgeStore {
     }
     h.put(TOTAL, Long.toString(total));
     h.put(BUILT, Long.toString(nowMs));
+    return true;
   }
 
   @Override
@@ -129,6 +150,7 @@ public final class FakeBadges implements ChatStores.BadgeStore {
         h.remove(convId);
       }
       apply(h, convId, last, last);
+      h.merge(MV, "1", (a, b) -> Long.toString(Long.parseLong(a) + 1));
     }
   }
 
@@ -137,6 +159,7 @@ public final class FakeBadges implements ChatStores.BadgeStore {
     call();
     Map<String, String> h = hashes.get(user);
     if (h != null) {
+      h.merge(MV, "1", (a, b) -> Long.toString(Long.parseLong(a) + 1));
       long[] cur = parse(h.put(convId, LEFT));
       h.put(TOTAL, Long.toString(Long.parseLong(h.getOrDefault(TOTAL, "0")) - Math.max(0, cur[0] - cur[1])));
     }

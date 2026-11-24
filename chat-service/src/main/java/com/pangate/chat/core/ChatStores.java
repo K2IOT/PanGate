@@ -286,10 +286,18 @@ public final class ChatStores {
     long totalWith(String user, String convId, long seq, long builtAfterMs);
 
     /**
-     * Merges an inbox snapshot: each conversation's values become the max of both, conversations not in it are
-     * marked left, the total is counted again and the build time set.
+     * Codex review of PR #10: before an inbox snapshot is read. Makes sure the user has counters (a placeholder that
+     * reads as stale), so raises, joins and leaves while the snapshot is read land in them, and answers the
+     * membership version that {@link #rebuild} expects.
      */
-    void rebuild(String user, List<BadgeRow> snapshot, long nowMs);
+    long prepareRebuild(String user);
+
+    /**
+     * Merges an inbox snapshot: each conversation's values become the max of both, conversations not in it are
+     * marked left, the total is counted again and the build time set. False, changing nothing, when a join or leave
+     * moved the membership version since {@link #prepareRebuild} (the snapshot may be older than it).
+     */
+    boolean rebuild(String user, List<BadgeRow> snapshot, long nowMs, long version);
 
     /** Joined at {@code last}: nothing before it is unread; clears a left mark. */
     void join(String user, String convId, long last);
