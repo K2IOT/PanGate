@@ -86,7 +86,15 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
   private final PreparedStatement selectUser;
   private final PreparedStatement upsertUser;
 
+  /** Perf 3c (spec §4.3): inbox rows being written at once by {@link #touchUserConvs}, for the whole store. */
+  private final java.util.concurrent.Semaphore inboxSlots;
+
   public ScyllaChatStore(CqlSession s, String ks) {
+    this(s, ks, 256);
+  }
+
+  public ScyllaChatStore(CqlSession s, String ks, int inboxConcurrency) {
+    this.inboxSlots = new java.util.concurrent.Semaphore(inboxConcurrency);
     this.s = s;
     insertConv = s.prepare("INSERT INTO " + ks + ".conversations (conv_id, kind, title, created_by, created_at, "
         + "last_seq, last_msg_at, member_count, is_public) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
@@ -357,6 +365,43 @@ public final class ScyllaChatStore implements ChatStores.ConversationStore, Chat
         com.datastax.oss.driver.api.core.cql.DefaultBatchType.UNLOGGED,
         touchUserConv.bind(seq, seq, atMs, userId, convId),
         stamp(userId, convId, System.currentTimeMillis())));   // final review I5: state_at = when written
+  }
+
+  /**
+   * Perf 3c (spec §4.3): every row written asynchronously, at most {@code inboxConcurrency} at once for this store;
+   * each statement ends by the driver's request timeout. Returns the users whose row was not written.
+   */
+  @Override
+  public List<String> touchUserConvs(List<String> userIds, String convId, long seq, long atMs) {
+    List<java.util.concurrent.CompletableFuture<?>> sent = new ArrayList<>(userIds.size());
+    long now = System.currentTimeMillis();
+    try {
+      for (String u : userIds) {
+        inboxSlots.acquire();
+        java.util.concurrent.CompletableFuture<?> f;
+        try {
+          f = s.executeAsync(com.datastax.oss.driver.api.core.cql.BatchStatement.newInstance(
+              com.datastax.oss.driver.api.core.cql.DefaultBatchType.UNLOGGED,
+              touchUserConv.bind(seq, seq, atMs, u, convId), stamp(u, convId, now))).toCompletableFuture();
+        } catch (RuntimeException e) {
+          f = java.util.concurrent.CompletableFuture.failedFuture(e);
+        }
+        f.whenComplete((r, e) -> inboxSlots.release());
+        sent.add(f);
+      }
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new StoreUnavailableException("scylla: interrupted", e);
+    }
+    List<String> failed = new ArrayList<>();
+    for (int i = 0; i < sent.size(); i++) {
+      try {
+        sent.get(i).join();
+      } catch (RuntimeException e) {
+        failed.add(userIds.get(i));
+      }
+    }
+    return failed;
   }
 
   // --- CH4 mute per conversation (§3.3) ----------------------------------------------------------------------

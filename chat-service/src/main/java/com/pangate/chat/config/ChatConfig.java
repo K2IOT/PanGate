@@ -84,7 +84,7 @@ public class ChatConfig {
 
   @Bean
   ScyllaChatStore scyllaChatStore(CqlSession s, ChatProperties p) {
-    return new ScyllaChatStore(s, p.scylla().keyspace());
+    return new ScyllaChatStore(s, p.scylla().keyspace(), p.fanout().inboxConcurrency());
   }
 
   @Bean(destroyMethod = "")
@@ -337,7 +337,8 @@ public class ChatConfig {
   FanOutLoop fanOutLoop(ChatProperties p, ScyllaChatStore store, RedisChatCache cache, PushApiClient pusher,
       MeterRegistry meters, com.pangate.chat.core.Badge badge) {
     return new FanOutLoop(FanOutLoop.consumer(p.kafka().bootstrap(), FanOutLoop.GROUP), p.kafka().eventsTopic(),
-        new MemberLookup(store, cache), store, store, pusher, meters, badge);
+        new MemberLookup(store, cache), store, store, pusher, meters, badge,
+        com.pangate.chat.kafka.KeyedPipeline.Settings.of(p.pipeline(), 1, false));
   }
 
   @Bean(destroyMethod = "")

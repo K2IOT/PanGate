@@ -326,44 +326,36 @@ class FanOutIT {
     }
   }
 
-  /** Final review I3: a long backlog commits what it delivered and goes back to poll before the budget runs out. */
+  /**
+   * Perf 3c (spec §2): a conversation whose inbox writes keep failing holds only itself; another conversation on the
+   * same partition is delivered, and the commit stays before the stuck event until it gets through.
+   */
   @Test
-  void stepBudgetCommitsProgressAndDeliversEachEventOnce() throws Exception {
-    String t = "events-budget-" + (++topicNo);
+  void stuckConversationDoesNotDelayAnotherOnTheSamePartition() throws Exception {
+    String t = "events-stuck-" + (++topicNo);
     try (Admin a = Admin.create(Map.of("bootstrap.servers", kafka.getBootstrapServers()))) {
       a.createTopics(List.of(new NewTopic(t, 1, (short) 1))).all().get();
     }
-    FakeStores stores = new FakeStores();
-    Map<String, java.util.concurrent.atomic.AtomicInteger> perConv = new ConcurrentHashMap<>();
-    com.pangate.chat.core.Pusher slow = (r, prio) -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-      try {
-        Thread.sleep(300);
-        perConv.computeIfAbsent(ChatMessage.parseFrom(r.getPayload()).getConversationId(),
-            k -> new java.util.concurrent.atomic.AtomicInteger()).incrementAndGet();
-      } catch (Exception e) {
-        throw new IllegalStateException(e);
-      }
-      return PushResponse.newBuilder().setRequestId(r.getRequestId()).setOk(true)
-          .setCode(PushResponse.Code.CODE_OK).build();
-    });
-    List<com.pangate.contracts.v1.ChatEvent> batch = new java.util.ArrayList<>();
-    for (int i = 0; i < 8; i++) {
-      String c = Ids.next();
-      stores.create(new Conversation(c, ConversationKind.CONVERSATION_KIND_DIRECT, "", "u", 0, false, 1),
-          List.of(new Member("u" + i, Role.MEMBER)));
-      batch.add(SequencerLoop.event(msg(c, 1), ConversationKind.CONVERSATION_KIND_DIRECT));
-    }
-    SimpleMeterRegistry meters = new SimpleMeterRegistry();
-    try (EventProducer events = EventProducer.create(kafka.getBootstrapServers(), t, Duration.ofSeconds(5))) {
-      events.sendAll(batch);   // all in one partition, before the loop's first poll
-    }
-    try (FanOutLoop loop = new FanOutLoop(FanOutLoop.consumer(kafka.getBootstrapServers(), "budget-" + t), t,
-        new MemberLookup(stores, stores), stores, stores, slow, meters, Duration.ofMillis(700))) {
-      loop.start();
-      await().atMost(Duration.ofSeconds(30)).until(() -> perConv.size() == 8);
-      Thread.sleep(1_000);
-      assertThat(perConv.values()).allMatch(n -> n.get() == 1);
-      assertThat(meters.counter("chat.fanout.budget").count()).isPositive();
+    try (Rig r = rig(t); EventProducer events = EventProducer.create(kafka.getBootstrapServers(), t,
+        Duration.ofSeconds(5))) {
+      String stuck = Ids.next();
+      String fine = Ids.next();
+      r.stores().create(new Conversation(stuck, ConversationKind.CONVERSATION_KIND_DIRECT, "", "s1", 0, false, 2),
+          List.of(new Member("s1", Role.MEMBER), new Member("s2", Role.MEMBER)));
+      r.stores().create(new Conversation(fine, ConversationKind.CONVERSATION_KIND_DIRECT, "", "f1", 0, false, 2),
+          List.of(new Member("f1", Role.MEMBER), new Member("f2", Role.MEMBER)));
+      r.stores().failTouchFor.put("s2", 1_000_000);
+      r.loop().start();
+      StoredMessage s = new StoredMessage(stuck, 1, Ids.next(), "s1", Ids.next(), "x", "", List.of(), 1_001);
+      StoredMessage f = new StoredMessage(fine, 1, Ids.next(), "f1", Ids.next(), "y", "", List.of(), 1_001);
+      events.send(SequencerLoop.event(s, ConversationKind.CONVERSATION_KIND_DIRECT));
+      events.send(SequencerLoop.event(f, ConversationKind.CONVERSATION_KIND_DIRECT));
+      await().atMost(Duration.ofSeconds(10)).until(() -> r.stores().userConvs.containsKey("f2")
+          && r.stores().userConvs.get("f2").get(fine).lastSeq() == 1);
+      Thread.sleep(500);
+      assertThat(committed(t, r.group())).as("the commit waits for the stuck event").isZero();
+      r.stores().failTouchFor.clear();
+      await().atMost(Duration.ofSeconds(20)).until(() -> committed(t, r.group()) == 2);
     }
   }
 

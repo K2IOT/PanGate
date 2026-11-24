@@ -220,6 +220,22 @@ public final class ChatStores {
     /** Raises the user's last_seq / last_msg_at for the conversation; a lower seq never wins. */
     void touchUserConv(String userId, String convId, long seq, long atMs);
 
+    /**
+     * Perf 3c (spec §4.3): {@link #touchUserConv} for every user, together; returns the users whose row was not
+     * written (to retry). This default writes them one by one.
+     */
+    default List<String> touchUserConvs(List<String> userIds, String convId, long seq, long atMs) {
+      List<String> failed = new java.util.ArrayList<>();
+      for (String u : userIds) {
+        try {
+          touchUserConv(u, convId, seq, atMs);
+        } catch (StoreUnavailableException e) {
+          failed.add(u);
+        }
+      }
+      return failed;
+    }
+
     /** Members, earliest joined first (owner succession, account spec §8). */
     default List<Member> membersByJoin(String convId) {
       return members(convId);
