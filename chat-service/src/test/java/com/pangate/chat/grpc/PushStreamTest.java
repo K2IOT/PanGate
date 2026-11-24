@@ -60,6 +60,14 @@ class PushStreamTest {
     return s;
   }
 
+  PushStream stream(PushStream.Limits limits,
+      java.util.function.Function<io.grpc.stub.StreamObserver<PushResponse>,
+          io.grpc.stub.StreamObserver<PushRequest>> opener) {
+    PushStream s = new PushStream(opener, limits, System::nanoTime, timers, meters, 0);
+    made.add(s);
+    return s;
+  }
+
   static PushRequest req(String principal) {
     return PushRequest.newBuilder().setRequestId(Ids.next()).setKind(PushRequest.Kind.KIND_MESSAGE)
         .setPrincipalId(principal).build();
@@ -221,5 +229,68 @@ class PushStreamTest {
       api.answerReceived(i);
     }
     await().until(() -> api.received.size() == 15);
+  }
+
+  // --- Task 3: the stream's life (spec §4.2) ---
+
+  @Test
+  void endedStreamFailsInFlightAndResendsQueued() {
+    PushStream s = stream(Duration.ofSeconds(5));
+    List<CompletableFuture<PushResponse>> written = new ArrayList<>();
+    for (int i = 0; i < 10; i++) {
+      written.add(s.send(req("p" + i), Priority.MUST));
+    }
+    for (int i = 0; i < 5; i++) {
+      s.send(req("q" + i), Priority.MUST);
+    }
+    await().until(() -> api.received.size() == 10);
+    api.endAll();
+    await().until(() -> written.stream().allMatch(CompletableFuture::isDone));
+    assertThat(written).allSatisfy(f -> assertThat(cause(f)).isInstanceOf(PushUnavailableException.class));
+    await().until(() -> api.received.stream().filter(r -> r.stream() == 2).count() == 5);
+    assertThat(meters.counter("chat.push.stream.restarts").count()).isPositive();
+  }
+
+  @Test
+  void mustFailsAfterMustWaitWhenNoStreamOpens() {
+    PushStream s = stream(new PushStream.Limits(10, 0.2, Duration.ofMillis(300), 5, Duration.ofMillis(300),
+        Duration.ofSeconds(5)), obs -> {
+          throw new IllegalStateException("no push-api");
+        });
+    long t0 = System.nanoTime();
+    CompletableFuture<PushResponse> f = s.send(req("p"), Priority.MUST);
+    assertThat(cause(f)).isInstanceOf(PushUnavailableException.class);
+    assertThat(Duration.ofNanos(System.nanoTime() - t0)).isBetween(Duration.ofMillis(250), Duration.ofMillis(1_500));
+    assertThat(meters.counter("chat.push.dropped", "priority", "must", "reason", "must_wait").count()).isEqualTo(1);
+  }
+
+  @Test
+  void reopenBacksOff() throws Exception {
+    java.util.concurrent.atomic.AtomicInteger opens = new java.util.concurrent.atomic.AtomicInteger();
+    PushStream s = stream(new PushStream.Limits(10, 0.2, Duration.ofMillis(300), 5, Duration.ofSeconds(10),
+        Duration.ofSeconds(5)), obs -> {
+          opens.incrementAndGet();
+          throw new IllegalStateException("no push-api");
+        });
+    s.send(req("p"), Priority.MUST);
+    for (int i = 0; i < 200; i++) {
+      s.send(req("x" + i), Priority.DROPPABLE);   // every send would try to open
+      Thread.sleep(10);
+    }
+    assertThat(opens.get()).isBetween(2, 6);
+  }
+
+  @Test
+  void idleStreamIsNotReopenedUntilNeeded() throws Exception {
+    PushStream s = stream(Duration.ofSeconds(5));
+    CompletableFuture<PushResponse> f = s.send(req("p"), Priority.MUST);
+    await().until(() -> api.received.size() == 1);
+    api.answerReceived(0);
+    f.get();
+    api.endAll();
+    Thread.sleep(300);
+    assertThat(api.streams.get()).isEqualTo(1);
+    s.send(req("q"), Priority.MUST);
+    await().until(() -> api.streams.get() == 2);
   }
 }

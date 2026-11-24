@@ -36,6 +36,9 @@ import java.util.function.LongSupplier;
  */
 final class PushStream implements AutoCloseable {
 
+  static final long MIN_BACKOFF_MS = 100;
+  static final long MAX_BACKOFF_MS = 5_000;
+
   /** The limits of one stream (spec §4.5). */
   record Limits(int window, double lowShare, Duration lowWait, int queueMax, Duration mustWait, Duration timeout) {
     int lowSlots() {
@@ -67,6 +70,8 @@ final class PushStream implements AutoCloseable {
   /** One open call; replaced when it ends. */
   private final class Call implements ClientResponseObserver<PushRequest, PushResponse> {
     ClientCallStreamObserver<PushRequest> requests;
+    /** Whether the server ever answered on this call: one that ends without an answer counts as a failed open. */
+    volatile boolean answeredOnce;
 
     @Override
     public void beforeStart(ClientCallStreamObserver<PushRequest> requestStream) {
@@ -75,6 +80,7 @@ final class PushStream implements AutoCloseable {
 
     @Override
     public void onNext(PushResponse v) {
+      answeredOnce = true;
       answered(this, v);
     }
 
@@ -104,6 +110,10 @@ final class PushStream implements AutoCloseable {
   private final ArrayDeque<Item> mustQueue = new ArrayDeque<>();
   private final ArrayDeque<Item> lowQueue = new ArrayDeque<>();
   private boolean closed;
+  /** Reopen backoff (spec §4.2): 0 while healthy, else 100 ms doubling to 5 s. */
+  private long backoffMs;
+  private long nextOpenNanos;
+  private boolean reopenScheduled;
 
   /** {@code opener} starts a new {@code SendStream} call with the given response observer. */
   PushStream(Function<StreamObserver<PushResponse>, StreamObserver<PushRequest>> opener, Limits limits,
@@ -140,6 +150,7 @@ final class PushStream implements AutoCloseable {
       } else {
         admit(item, after);
         drain(after);
+        armWaits(item);
       }
     }
     after.forEach(Runnable::run);
@@ -161,7 +172,6 @@ final class PushStream implements AutoCloseable {
           drop(item, PushDroppedException.QUEUE_FULL, after);
         } else {
           lowQueue.add(item);
-          timers.schedule(() -> expireLow(item), limits.lowWait().toNanos(), TimeUnit.NANOSECONDS);
         }
       }
       case MUST -> {
@@ -176,6 +186,29 @@ final class PushStream implements AutoCloseable {
     }
   }
 
+  /** A request still queued after the first drain gets its wait limit: low-wait or must-wait. */
+  private void armWaits(Item item) {
+    if (item.wireId != null || item.reply.isDone()) {
+      return;
+    }
+    if (item.priority == Priority.BEST_EFFORT) {
+      timers.schedule(() -> expireLow(item), limits.lowWait().toNanos(), TimeUnit.NANOSECONDS);
+    } else if (item.priority == Priority.MUST) {
+      timers.schedule(() -> expireMust(item), limits.mustWait().toNanos(), TimeUnit.NANOSECONDS);
+    }
+  }
+
+  private void expireMust(Item item) {
+    synchronized (this) {
+      if (!mustQueue.remove(item)) {
+        return;
+      }
+      count("must", "must_wait");
+    }
+    item.reply.completeExceptionally(new PushUnavailableException(
+        "no push stream for " + limits.mustWait() + " (push-api down?)", null));
+  }
+
   private boolean canWrite(boolean low) {
     if (inFlight.size() >= limits.window() || (low && lowInFlight >= limits.lowSlots())) {
       return false;
@@ -185,18 +218,40 @@ final class PushStream implements AutoCloseable {
     return open() != null;
   }
 
-  /** The open call, opening one when there is none. Null when it cannot be opened now. */
+  /** The open call, opening one when there is none. Null when it cannot be opened now (backing off). */
   private Call open() {
-    if (call == null && !closed) {
+    if (call == null && !closed && nanos.getAsLong() >= nextOpenNanos) {
       Call c = new Call();
       try {
         opener.apply(c);
         call = c;
       } catch (RuntimeException e) {
-        return null;
+        backOff();
       }
     }
     return call;
+  }
+
+  /** A failed open or a call that ended before any answer: wait longer before the next open. */
+  private void backOff() {
+    backoffMs = backoffMs == 0 ? MIN_BACKOFF_MS : Math.min(MAX_BACKOFF_MS, backoffMs * 2);
+    nextOpenNanos = nanos.getAsLong() + TimeUnit.MILLISECONDS.toNanos(backoffMs);
+    reopenSoon();
+  }
+
+  /** Queued requests get a new call as soon as one may be opened. */
+  private void reopenSoon() {
+    if (reopenScheduled || closed || (mustQueue.isEmpty() && lowQueue.isEmpty())) {
+      return;
+    }
+    reopenScheduled = true;
+    long delay = Math.max(0, nextOpenNanos - nanos.getAsLong());
+    timers.schedule(() -> {
+      synchronized (this) {
+        reopenScheduled = false;
+      }
+      drainAndComplete();
+    }, delay, TimeUnit.NANOSECONDS);
   }
 
   /** Moves queued requests onto the stream while there is room: MUST first, then BEST_EFFORT within its share. */
@@ -309,6 +364,14 @@ final class PushStream implements AutoCloseable {
       }
       inFlight.clear();
       lowInFlight = 0;
+      meters.counter("chat.push.stream.restarts").increment();
+      if (c.answeredOnce) {
+        backoffMs = 0;
+        nextOpenNanos = 0;
+        reopenSoon();
+      } else {
+        backOff();
+      }
     }
     after.forEach(Runnable::run);
   }
