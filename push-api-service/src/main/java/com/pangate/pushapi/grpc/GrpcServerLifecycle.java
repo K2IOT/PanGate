@@ -33,6 +33,8 @@ public final class GrpcServerLifecycle implements SmartLifecycle {
   public void start() {
     NettyServerBuilder b = NettyServerBuilder.forPort(cfg.port()).executor(executor)
         .permitKeepAliveTime(10, TimeUnit.SECONDS).permitKeepAliveWithoutCalls(true)
+        .maxConnectionAge(cfg.maxConnectionAge().toMillis(), TimeUnit.MILLISECONDS)
+        .maxConnectionAgeGrace(cfg.maxConnectionAgeGrace().toMillis(), TimeUnit.MILLISECONDS)
         .addService(ServerInterceptors.intercept(service, new SpiffeInterceptor(cfg.allowedSpiffe(), cfg.plaintext())));
     try {
       if (!cfg.plaintext()) {

@@ -46,6 +46,8 @@ class PushApiPropertiesTest {
     assertThat(p.grpc().port()).isEqualTo(9443);
     assertThat(p.grpc().plaintext()).isFalse();
     assertThat(p.grpc().maxInFlightPerStream()).isEqualTo(1000);
+    assertThat(p.grpc().maxConnectionAge()).isEqualTo(java.time.Duration.ofMinutes(30));
+    assertThat(p.grpc().maxConnectionAgeGrace()).isEqualTo(java.time.Duration.ofSeconds(30));
     assertThat(p.grpc().allowedSpiffe())
         .containsExactly("spiffe://pangate/cell-1/gateway", "spiffe://pangate/cell-1/push-router");
     assertThat(p.http().maxBody()).isEqualTo(DataSize.ofKilobytes(128));

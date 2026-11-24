@@ -2,6 +2,7 @@ package com.pangate.chat.grpc;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.pangate.chat.config.ChatProperties;
 import com.pangate.chat.core.FanOutPlanner;
 import com.pangate.chat.core.Ids;
 import com.pangate.chat.core.ChatStores.Member;
@@ -60,6 +61,8 @@ class PushApiClientIT {
         "--push-api.grpc.port=" + grpc, "--push-api.kafka.bootstrap=" + kafka.getBootstrapServers(),
         "--push-api.redis.uri=redis://" + redis.getHost() + ":" + redis.getMappedPort(6379),
         "--push-api.auth.jwks-uri=http://127.0.0.1:1/none",
+        // perf 3b: a short connection age, so the reconnect test sees GOAWAY within seconds
+        "--push-api.grpc.max-connection-age=2s", "--push-api.grpc.max-connection-age-grace=1s",
         // chat-service's ScyllaDB driver is on this classpath; Push API has no use for it
         "--spring.autoconfigure.exclude=org.springframework.boot.autoconfigure.cassandra.CassandraAutoConfiguration");
   }
@@ -99,6 +102,38 @@ class PushApiClientIT {
           assertThat(r.getCode()).isEqualTo(PushResponse.Code.CODE_INVALID);
         }
       }
+    }
+  }
+
+  /** Perf 3b (spec §4.2): the connection age ends the streams; the client reconnects and pushes keep going. */
+  @Test
+  void connectionAgeEndsStreamsAndClientReconnects() throws Exception {
+    io.micrometer.core.instrument.simple.SimpleMeterRegistry meters =
+        new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+    ChatProperties.PushApi cfg = new ChatProperties.PushApi("", true, Duration.ofSeconds(5), 4, 1_000, 0.2,
+        Duration.ofSeconds(2), 10_000, Duration.ofSeconds(10));
+    try (PushApiClient c = new PushApiClient(NettyChannelBuilder.forAddress("127.0.0.1", grpc).usePlaintext()
+        .build(), cfg, meters)) {
+      long end = System.nanoTime() + Duration.ofSeconds(6).toNanos();
+      int ok = 0;
+      while (System.nanoTime() < end) {
+        PushRequest r = FanOutPlanner.rejected("u" + (ok % 50), com.pangate.contracts.v1.ChatRejected.newBuilder()
+            .setReason("too_long").build());
+        PushResponse res = null;
+        for (int attempt = 0; attempt < 5 && res == null; attempt++) {   // as FanOutLoop: retry a failed send
+          try {
+            res = c.send(r).get(10, TimeUnit.SECONDS);
+          } catch (java.util.concurrent.ExecutionException e) {
+            Thread.sleep(100);
+          }
+        }
+        assertThat(res).as("push %d", ok).isNotNull();
+        assertThat(res.getCode()).isEqualTo(PushResponse.Code.CODE_OK);
+        ok++;
+        Thread.sleep(20);
+      }
+      assertThat(ok).isGreaterThan(50);
+      assertThat(meters.counter("chat.push.stream.restarts").count()).isPositive();
     }
   }
 }

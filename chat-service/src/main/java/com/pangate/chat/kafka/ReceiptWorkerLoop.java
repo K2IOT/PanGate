@@ -46,7 +46,11 @@ public final class ReceiptWorkerLoop implements AutoCloseable {
 
   public static final String GROUP = "chat-receipts";
   static final int PUSH_TRIES = 3;
-  static final Duration ROUND_DEADLINE = Duration.ofSeconds(3);
+  /**
+   * Perf 3b (spec §4.1): a receipt push may wait {@code low-wait} (2 s) for room, then {@code timeout} (8 s) for its
+   * answer; the round waits that long plus a second, so nothing still queued or in flight is resent.
+   */
+  static final Duration ROUND_DEADLINE = Duration.ofSeconds(11);
   /** Codex review of PR #6: at most this long is waited for a Push API {@code retry_after_ms} between rounds. */
   static final long MAX_RETRY_AFTER_MS = 2_000;
   static final long MAX_BACKOFF_MS = 5_000;
@@ -264,8 +268,10 @@ public final class ReceiptWorkerLoop implements AutoCloseable {
       long deadline = System.nanoTime() + ROUND_DEADLINE.toNanos();
       List<PushRequest> retry = new java.util.ArrayList<>();
       long retryAfter = 0;
+      int dropped = 0;
       for (int i = 0; i < pending.size(); i++) {
         boolean ok = false;
+        boolean final_ = false;
         try {
           PushResponse res = sent.get(i).get(Math.max(1, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
           String code = res.getCode().name();
@@ -276,15 +282,21 @@ public final class ReceiptWorkerLoop implements AutoCloseable {
         } catch (InterruptedException e) {
           Thread.currentThread().interrupt();
           return;
+        } catch (java.util.concurrent.ExecutionException e) {
+          // perf 3b: the client dropped it for lack of room: final, as a resend would only add load
+          final_ = e.getCause() instanceof com.pangate.chat.core.PushDroppedException;
         } catch (Exception e) {
           // timed out or failed: retried next round
         }
         if (ok) {
           meters.counter("chat.receipts.pushes", "result", "ok").increment();
+        } else if (final_) {
+          dropped++;
         } else {
           retry.add(pending.get(i));
         }
       }
+      meters.counter("chat.receipts.pushes", "result", "dropped").increment(dropped);
       pending = retry;
       if (!pending.isEmpty() && retryAfter > 0 && round + 1 < PUSH_TRIES) {
         try {
