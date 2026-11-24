@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Perf 3b (Push API client)
+Design: `docs/superpowers/specs/2026-11-24-perf-3b-push-api-client-design.md`.
+- chat-service: pushes go over a pool of 4 SendStreams spread by round-robin over every Push API pod (`push-api` must
+  be a headless service), each push on the stream of its recipient. Each stream keeps the server's window (1 000)
+  and queues the rest by priority: messages, channel posts and channel control first and never dropped for lack of
+  room; receipts wait 2 s then are dropped; typing and presence are dropped at once when there is no room.
+- chat-service: the push timeout (now 8 s) starts when a request is written, and a request that timed out keeps its
+  slot until answered: no more retry storms from requests that were only queued.
+- push-api-service: `grpc.max-connection-age` (30 min): clients reconnect and find new pods.
+
 ### Perf 3a (hot lookups; target 1 million users, channels of 100 000)
 Design: `docs/superpowers/specs/2026-11-19-perf-3a-hot-lookups-design.md`.
 - chat-service: membership is one ScyllaDB row read per command (sends, marks, typing), never a channel's member list;
