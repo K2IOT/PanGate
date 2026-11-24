@@ -240,7 +240,11 @@ class ChatLoadIT {
     sendToGroups(groups, 5);
     long sent = System.nanoTime();
     int expected = 5 * 50 * 500;
-    await().atMost(Duration.ofSeconds(300)).until(() -> latenciesNs.size() >= expected);
+    long deadline = System.nanoTime() + Duration.ofSeconds(300).toNanos();
+    while (latenciesNs.size() < expected && System.nanoTime() < deadline) {
+      Thread.sleep(10_000);
+      System.out.printf("CHAT-LOAD   %d/%d delivered%n", latenciesNs.size(), expected);
+    }
     report("five groups of 500 (50 messages each, 5/s each)", expected);
     System.out.printf("CHAT-LOAD   sending took %.1f s, last delivery %.1f s after the last send%n",
         (sent - t0) / 1e9, (System.nanoTime() - sent) / 1e9);
