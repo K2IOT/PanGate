@@ -94,7 +94,7 @@ class UpstreamCommandListenerIT {
             new Ingest(stores, stores, stores, producer, FakeStores.LIMITS, System::nanoTime,
                 System::currentTimeMillis),
             (sender, r) -> rejected.add(r), producer, outcome -> { },
-            new ChannelSubscriptions(stores, stores, r -> new CompletableFuture<>()))) {
+            new ChannelSubscriptions(stores, stores, (r, prio) -> new CompletableFuture<>()))) {
       listener.start();
       ChatSend ok = ChatSend.newBuilder().setConversationId(conv).setClientMsgId(Ids.next()).setText("hi").build();
       ChatSend notMine = ChatSend.newBuilder().setConversationId(Ids.next()).setClientMsgId(Ids.next())
@@ -149,7 +149,7 @@ class UpstreamCommandListenerIT {
         UpstreamCommandListener listener = new UpstreamCommandListener(consumerFor(kafka.getBootstrapServers()),
             upstream, new Ingest(stores, stores, stores, producer, FakeStores.LIMITS, System::nanoTime,
                 System::currentTimeMillis), (sender, r) -> rejected.add(r), producer, outcome -> { },
-            new ChannelSubscriptions(stores, stores, r -> {
+            new ChannelSubscriptions(stores, stores, (r, prio) -> {
               controls.add(r);
               return new CompletableFuture<>();
             }))) {
@@ -215,7 +215,7 @@ class UpstreamCommandListenerIT {
         UpstreamCommandListener listener = new UpstreamCommandListener(consumerFor(kafka.getBootstrapServers()),
             upstream, new Ingest(stores, stores, stores, slow, FakeStores.LIMITS, System::nanoTime,
                 System::currentTimeMillis), (sender, r) -> { }, producer, outcome -> { },
-            new ChannelSubscriptions(stores, stores, r -> new CompletableFuture<>()))) {
+            new ChannelSubscriptions(stores, stores, (r, prio) -> new CompletableFuture<>()))) {
       listener.start();
       Thread.sleep(3_000);   // joined the group
       long t0 = System.nanoTime();
@@ -254,7 +254,7 @@ class UpstreamCommandListenerIT {
             new Ingest(stores, stores, stores, producer, FakeStores.LIMITS, System::nanoTime,
                 System::currentTimeMillis),
             (sender, r) -> { }, producer, outcome -> { },
-            new ChannelSubscriptions(stores, stores, r -> new CompletableFuture<>()),
+            new ChannelSubscriptions(stores, stores, (r, prio) -> new CompletableFuture<>()),
             new com.pangate.chat.core.StateIngest(new com.pangate.chat.core.MarkValidator(
                 new com.pangate.chat.core.MemberLookup(stores, stores),
                 new com.pangate.chat.core.LastSeqCache(stores, System::currentTimeMillis),

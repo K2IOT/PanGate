@@ -45,7 +45,11 @@ public record PushApiProperties(
       @DefaultValue("1000") int maxInFlightPerStream,
       @DefaultValue({"spiffe://pangate/cell-1/gateway", "spiffe://pangate/cell-1/push-router"})
       List<String> allowedSpiffe,
-      @DefaultValue Tls tls) {}
+      @DefaultValue Tls tls,
+      // perf 3b (chat spec): GOAWAY after this age (grpc-java adds ±10%), so clients reconnect and find new pods
+      @DefaultValue("30m") java.time.Duration maxConnectionAge,
+      // above chat-service's stream-max-age (5 min ±20%): its rotated calls finish before the cut
+      @DefaultValue("10m") java.time.Duration maxConnectionAgeGrace) {}
 
   public record Tls(@DefaultValue("push-api.crt") Path cert, @DefaultValue("push-api.key") Path key,
       @DefaultValue("spiffe-bundle.pem") Path trust) {}

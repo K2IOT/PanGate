@@ -79,7 +79,7 @@ public final class PresenceWatch {
       PresenceUpdate.Builder u = PresenceUpdate.newBuilder();
       users.forEach(user -> u.addStates(stateFor(user, viewer, now)));
       pusher.send(StatePushes.ephemeral(viewer, device, ChatTopics.TYPE_PRESENCE, u.build().toByteString(),
-          StatePushes.PRESENCE_TTL_SEC));
+          StatePushes.PRESENCE_TTL_SEC), Pusher.Priority.DROPPABLE);
     }
     return valid.size();
   }

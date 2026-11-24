@@ -77,7 +77,7 @@ class ReceiptWorkerIT {
     List<PushRequest> pushed = new CopyOnWriteArrayList<>();
     ReceiptWorkerLoop loop = new ReceiptWorkerLoop(ReceiptWorkerLoop.consumer(kafka.getBootstrapServers(),
         "rw-" + topic), topic, stores, new MemberLookup(stores, stores), stores, new PrivacyCache(stores,
-        System::currentTimeMillis), r -> {
+        System::currentTimeMillis), (r, prio) -> {
           pushed.add(r);
           return CompletableFuture.completedFuture(PushResponse.getDefaultInstance());
         }, STATE, new SimpleMeterRegistry(), badges);
@@ -163,7 +163,7 @@ class ReceiptWorkerIT {
     FakeStores stores = new FakeStores();
     ReceiptWorkerLoop loop = new ReceiptWorkerLoop(ReceiptWorkerLoop.consumer(kafka.getBootstrapServers(),
         "rw-" + t), t, stores, new MemberLookup(stores, stores), stores, new PrivacyCache(stores,
-        System::currentTimeMillis), r -> new CompletableFuture<>(), STATE, new SimpleMeterRegistry());
+        System::currentTimeMillis), (r, prio) -> new CompletableFuture<>(), STATE, new SimpleMeterRegistry());
     try (loop) {
       List<String> groups = new java.util.ArrayList<>();
       for (int i = 0; i < 3; i++) {
@@ -201,7 +201,7 @@ class ReceiptWorkerIT {
     FakeStores stores = new FakeStores();
     ReceiptWorkerLoop loop = new ReceiptWorkerLoop(ReceiptWorkerLoop.consumer(kafka.getBootstrapServers(),
         "rw-" + t), t, stores, new MemberLookup(stores, stores), stores, new PrivacyCache(stores,
-        System::currentTimeMillis), r -> new CompletableFuture<>(), STATE, new SimpleMeterRegistry());
+        System::currentTimeMillis), (r, prio) -> new CompletableFuture<>(), STATE, new SimpleMeterRegistry());
     try (loop) {
       List<String> groups = new java.util.ArrayList<>();
       for (int i = 0; i < 8; i++) {
@@ -255,7 +255,7 @@ class ReceiptWorkerIT {
     List<Long> attempts = new CopyOnWriteArrayList<>();
     ReceiptWorkerLoop loop = new ReceiptWorkerLoop(ReceiptWorkerLoop.consumer(kafka.getBootstrapServers(),
         "rw-" + t), t, stores, new MemberLookup(stores, stores), stores, new PrivacyCache(stores,
-        System::currentTimeMillis), r -> {
+        System::currentTimeMillis), (r, prio) -> {
           if (!r.getPrincipalId().equals("chat:ra")) {
             return CompletableFuture.completedFuture(PushResponse.getDefaultInstance());
           }
@@ -300,6 +300,56 @@ class ReceiptWorkerIT {
       await().atMost(Duration.ofSeconds(20)).until(() -> r.stores().own("f", ch).readSeq() == 3);
       Thread.sleep(500);
       assertThat(b.calls).isEmpty();
+    }
+  }
+
+  /** Perf 3b (spec §4.1): a receipt push the client dropped is final, not resent. */
+  @Test
+  void droppedPushIsNotResent() throws Exception {
+    String t = topic();
+    FakeStores stores = new FakeStores();
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    java.util.Map<String, java.util.concurrent.atomic.AtomicInteger> calls = new java.util.concurrent.ConcurrentHashMap<>();
+    ReceiptWorkerLoop loop = new ReceiptWorkerLoop(ReceiptWorkerLoop.consumer(kafka.getBootstrapServers(),
+        "rw-" + t), t, stores, new MemberLookup(stores, stores), stores, new PrivacyCache(stores,
+        System::currentTimeMillis), (r, prio) -> {
+          calls.computeIfAbsent(r.getRequestId(), k -> new java.util.concurrent.atomic.AtomicInteger())
+              .incrementAndGet();
+          return CompletableFuture.failedFuture(new com.pangate.chat.core.PushDroppedException("window_full"));
+        }, STATE, meters);
+    try (loop) {
+      String g = conv(stores, ConversationKind.CONVERSATION_KIND_GROUP, "da", "db", "dc");
+      loop.start();
+      send(t, read(g, "db", 2));
+      await().atMost(Duration.ofSeconds(20)).until(() ->
+          meters.counter("chat.receipts.pushes", "result", "dropped").count() > 0);
+      Thread.sleep(3_000);
+      assertThat(calls).isNotEmpty();
+      assertThat(calls.values()).allSatisfy(n -> assertThat(n.get()).isEqualTo(1));
+      assertThat(meters.counter("chat.receipts.pushes", "result", "dropped").count()).isEqualTo(calls.size());
+    }
+  }
+
+  /** Perf 3b: an answer saying the Push API is busy is still retried, as before. */
+  @Test
+  void unavailableIsStillRetried() throws Exception {
+    String t = topic();
+    FakeStores stores = new FakeStores();
+    java.util.Map<String, java.util.concurrent.atomic.AtomicInteger> calls = new java.util.concurrent.ConcurrentHashMap<>();
+    ReceiptWorkerLoop loop = new ReceiptWorkerLoop(ReceiptWorkerLoop.consumer(kafka.getBootstrapServers(),
+        "rw-" + t), t, stores, new MemberLookup(stores, stores), stores, new PrivacyCache(stores,
+        System::currentTimeMillis), (r, prio) -> {
+          int n = calls.computeIfAbsent(r.getRequestId(), k -> new java.util.concurrent.atomic.AtomicInteger())
+              .incrementAndGet();
+          return CompletableFuture.completedFuture(PushResponse.newBuilder().setRequestId(r.getRequestId())
+              .setCode(n == 1 ? PushResponse.Code.CODE_UNAVAILABLE : PushResponse.Code.CODE_OK).build());
+        }, STATE, new SimpleMeterRegistry());
+    try (loop) {
+      String g = conv(stores, ConversationKind.CONVERSATION_KIND_GROUP, "ua", "ub");
+      loop.start();
+      send(t, read(g, "ub", 2));
+      await().atMost(Duration.ofSeconds(20)).until(() -> !calls.isEmpty()
+          && calls.values().stream().allMatch(n -> n.get() == 2));
     }
   }
 }

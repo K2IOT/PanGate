@@ -175,9 +175,9 @@ public class ChatConfig {
   com.pangate.chat.core.PresenceWatch presenceWatch(ScyllaChatStore store, RedisChatCache cache,
       com.pangate.chat.store.RedisPresence presence, com.pangate.chat.core.PrivacyCache privacy, PushApiClient pusher,
       ChatProperties p, MeterRegistry meters) {
-    com.pangate.chat.core.Pusher counted = r -> {
+    com.pangate.chat.core.Pusher counted = (r, priority) -> {
       meters.counter("chat.presence.pushes").increment();
-      return pusher.send(r);
+      return pusher.send(r, priority);   // perf 3b: the caller's priority (droppable) goes through
     };
     return new com.pangate.chat.core.PresenceWatch(store, new MemberLookup(store, cache), store, presence,
         presence, store,
@@ -323,8 +323,8 @@ public class ChatConfig {
   }
 
   @Bean(destroyMethod = "")
-  PushApiClient pushApiClient(ChatProperties p) {
-    return PushApiClient.create(p.pushApi());
+  PushApiClient pushApiClient(ChatProperties p, MeterRegistry meters) {
+    return PushApiClient.create(p.pushApi(), meters);
   }
 
   @Bean
