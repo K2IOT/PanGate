@@ -473,7 +473,7 @@ public class ChatConfig {
       MeterRegistry meters) {
     return new com.pangate.chat.kafka.OfflineNotifierLoop(com.pangate.chat.kafka.OfflineNotifierLoop.consumer(
         p.kafka().bootstrap(), com.pangate.chat.kafka.OfflineNotifierLoop.GROUP), p.notifications().offlineTopic(),
-        notifications, sink, meters);
+        notifications, sink, meters, com.pangate.chat.kafka.KeyedPipeline.Settings.of(p.pipeline(), 1, false));
   }
 
   /** CH4 spec §4: channel posts on chat.events → NotifyRequests for offline followers. */
