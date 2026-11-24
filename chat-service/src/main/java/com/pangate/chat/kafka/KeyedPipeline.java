@@ -76,8 +76,16 @@ public final class KeyedPipeline implements AutoCloseable {
   private final Counter poisonRetries;
   /** Partitions assigned now; read by gauges. */
   private final Map<TopicPartition, Part> parts = new ConcurrentHashMap<>();
-  /** The latest lane of each (partition, key), kept across a rebalance until it finishes. */
+  /** The latest lane of each (partition, key), where new records of the key are queued. */
   private final Map<LaneId, Lane> lanes = new ConcurrentHashMap<>();
+  /**
+   * Final review C1: the lane holding each key, from before its first batch until it ends, across any number of
+   * rebalances: a lane runs batches only while it holds its key, so two batches of one key never overlap.
+   */
+  private final Map<LaneId, Lane> holders = new ConcurrentHashMap<>();
+  /** Final review: retry warnings at most once a second per pipeline; the counters carry the volume. */
+  private final java.util.concurrent.atomic.AtomicLong nextWarnNanos = new java.util.concurrent.atomic.AtomicLong(System.nanoTime());
+  private final java.util.concurrent.atomic.AtomicLong unloggedFailures = new java.util.concurrent.atomic.AtomicLong();
   private final ConcurrentLinkedQueue<Done> done = new ConcurrentLinkedQueue<>();
   private volatile boolean running = true;
   private volatile int pausedCount;
@@ -115,16 +123,14 @@ public final class KeyedPipeline implements AutoCloseable {
   private final class Lane implements Runnable {
     final LaneId id;
     final Part part;
-    final Lane previous;
     final ArrayDeque<ConsumerRecord<String, byte[]>> queue = new ArrayDeque<>();
     final CountDownLatch finished = new CountDownLatch(1);
     boolean ending;
     volatile Thread worker;
 
-    Lane(LaneId id, Part part, Lane previous) {
+    Lane(LaneId id, Part part) {
       this.id = id;
       this.part = part;
-      this.previous = previous;
     }
 
     synchronized boolean offer(ConsumerRecord<String, byte[]> r) {
@@ -150,17 +156,19 @@ public final class KeyedPipeline implements AutoCloseable {
     @Override
     public void run() {
       worker = Thread.currentThread();
+      boolean held = false;
       try {
-        if (previous != null) {
-          while (!previous.finished.await(50, TimeUnit.MILLISECONDS)) {
-            if (part.gone() || !running) {
-              synchronized (this) {
-                ending = true;
-              }
-              return;
+        Lane holder;
+        while ((holder = holders.putIfAbsent(id, this)) != null) {
+          holder.finished.await(50, TimeUnit.MILLISECONDS);
+          if (part.gone() || !running) {
+            synchronized (this) {
+              ending = true;
             }
+            return;
           }
         }
+        held = true;
         List<ConsumerRecord<String, byte[]>> batch;
         while ((batch = take()) != null) {
           if (!handleUntilDone(batch)) {
@@ -177,6 +185,9 @@ public final class KeyedPipeline implements AutoCloseable {
         }
       } finally {
         lanes.remove(id, this);
+        if (held) {
+          holders.remove(id, this);
+        }
         finished.countDown();
       }
     }
@@ -197,15 +208,15 @@ public final class KeyedPipeline implements AutoCloseable {
           return true;
         } catch (InterruptedException e) {
           throw e;
-        } catch (Exception e) {
+        } catch (Throwable e) {
+          // final review I1: an Error too (a bug, a class that failed to load) is retried, never skipped
           if (PoisonGuard.isTransient(e)) {
             transientRetries.increment();
           } else {
             failures++;
             poisonRetries.increment();
           }
-          log.warn("{}: batch at {}@{} failed: {}; retrying", name, id.tp(), batch.getFirst().offset(),
-              e.toString());
+          warn(batch, e);
         } finally {
           batchTimer.record(System.nanoTime() - t0, TimeUnit.NANOSECONDS);
           slots.release();
@@ -216,6 +227,19 @@ public final class KeyedPipeline implements AutoCloseable {
         backoff = Math.min(MAX_BACKOFF_MS, backoff * 2);
       }
     }
+  }
+
+  private void warn(List<ConsumerRecord<String, byte[]>> batch, Throwable e) {
+    long now = System.nanoTime();
+    long next = nextWarnNanos.get();
+    if (now - next < 0 || !nextWarnNanos.compareAndSet(next, now + TimeUnit.SECONDS.toNanos(1))) {
+      unloggedFailures.incrementAndGet();
+      return;
+    }
+    long more = unloggedFailures.getAndSet(0);
+    ConsumerRecord<String, byte[]> r = batch.getFirst();
+    log.warn("{}: batch at {}-{}@{} failed: {}; retrying ({} more failures since the last warning)", name,
+        r.topic(), r.partition(), r.offset(), e.toString(), more);
   }
 
   public KeyedPipeline(String name, Consumer<String, byte[]> consumer, String topic, Settings settings,
@@ -351,7 +375,7 @@ public final class KeyedPipeline implements AutoCloseable {
     if (current != null && current.part == p && current.offer(r)) {
       return;
     }
-    Lane lane = new Lane(id, p, current);
+    Lane lane = new Lane(id, p);
     lane.offer(r);
     lanes.put(id, lane);
     Thread.ofVirtual().name("chat-" + name + "-lane").start(lane);

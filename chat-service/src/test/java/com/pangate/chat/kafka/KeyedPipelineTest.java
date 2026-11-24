@@ -377,4 +377,99 @@ class KeyedPipelineTest {
     assertThat(Duration.ofNanos(System.nanoTime() - t0)).isLessThan(Duration.ofSeconds(2));
     await().until(interrupted::get);
   }
+
+  /** Final review C1: a straggler from two assignments ago still blocks its key after a second rebalance. */
+  @Test
+  void keyNeverRunsTwiceAcrossTwoRebalances() {
+    CountDownLatch release = new CountDownLatch(1);
+    AtomicInteger calls = new AtomicInteger();
+    AtomicInteger running = new AtomicInteger();
+    AtomicInteger most = new AtomicInteger();
+    pipeline = new KeyedPipeline("test", c, T, new KeyedPipeline.Settings(100, 1, 16, Duration.ofMillis(50),
+        Duration.ofMillis(200), true), (batch, last) -> {
+          most.accumulateAndGet(running.incrementAndGet(), Math::max);
+          if (calls.incrementAndGet() == 1) {
+            boolean done = false;
+            while (!done) {
+              try {
+                release.await();
+                done = true;
+              } catch (InterruptedException ignored) {
+                // an old batch that does not stop when told (an uninterruptible store call)
+              }
+            }
+          }
+          running.decrementAndGet();
+        }, revoked::incrementAndGet, meters);
+    c.schedulePollTask(() -> {
+      c.rebalance(List.of(p0, p1));
+      c.updateBeginningOffsets(new HashMap<>(Map.of(p0, 0L, p1, 0L)));
+    });
+    pipeline.start();
+    await().until(() -> c.assignment().size() == 2);
+    add(p0, 0, "a");
+    await().until(() -> calls.get() == 1);
+    c.schedulePollTask(() -> c.rebalance(List.of(p1)));
+    await().until(() -> revoked.get() == 1);
+    c.schedulePollTask(() -> {
+      c.rebalance(List.of(p0, p1));
+      add(p0, 0, "a");
+    });
+    await().pollDelay(Duration.ofMillis(200)).until(() -> true);
+    c.schedulePollTask(() -> c.rebalance(List.of(p1)));
+    await().until(() -> revoked.get() == 2);
+    c.schedulePollTask(() -> {
+      c.rebalance(List.of(p0, p1));
+      add(p0, 0, "a");
+      add(p0, 1, "a");
+    });
+    await().pollDelay(Duration.ofMillis(400)).until(() -> true);
+    assertThat(calls.get()).as("no second batch of key a while the first still runs").isEqualTo(1);
+    release.countDown();
+    await().until(() -> calls.get() >= 2);
+    assertThat(most.get()).isEqualTo(1);
+  }
+
+  /** Final review I1: an Error from the handler is retried like any failure, never skipped. */
+  @Test
+  void handlerErrorIsRetriedNotSkipped() {
+    List<Long> seen = Collections.synchronizedList(new ArrayList<>());
+    AtomicBoolean thrown = new AtomicBoolean();
+    start(settings(100, 1, 16, true), (batch, last) -> {
+      seen.addAll(offsets(batch));
+      if (!thrown.getAndSet(true)) {
+        throw new AssertionError("a bug");
+      }
+    });
+    add(p0, 0, "a");
+    add(p0, 1, "a");
+    add(p0, 2, "a");
+    await().until(() -> c.commits.getOrDefault(p0, 0L) == 3L);
+    assertThat(seen).containsExactly(0L, 0L, 1L, 2L);
+  }
+
+  /** Final review (log flood): with every lane failing, retry warnings are rate-limited per pipeline. */
+  @Test
+  void failureWarningsAreRateLimited() throws Exception {
+    ch.qos.logback.classic.Logger logger =
+        (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(KeyedPipeline.class);
+    ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> logs =
+        new ch.qos.logback.core.read.ListAppender<>();
+    logs.start();
+    logger.addAppender(logs);
+    try {
+      start(settings(100, 1, 64, true), (batch, last) -> {
+        throw new StoreUnavailableException("down", null);
+      });
+      for (int i = 0; i < 40; i++) {
+        add(p0, i, "k" + i);
+      }
+      await().until(() -> meters.get("chat.pipeline.retries").tag("pipeline", "test").tag("reason", "transient")
+          .counter().count() >= 120);
+      long warnings = logs.list.stream().filter(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN).count();
+      assertThat(warnings).as("about one a second, not one per failure").isLessThan(10);
+    } finally {
+      logger.detachAppender(logs);
+    }
+  }
 }

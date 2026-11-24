@@ -127,8 +127,7 @@ public final class UpstreamCommandListener implements AutoCloseable {
           continue;
         }
         onOutcome.accept("error");
-        log.warn("command at {}@{} not handled: {}", r.topic(), r.offset(), e.toString());
-        throw e;
+        throw e;   // retried in place; the pipeline logs it, rate-limited
       }
     }
   }
