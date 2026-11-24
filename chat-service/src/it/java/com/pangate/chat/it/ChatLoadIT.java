@@ -141,6 +141,77 @@ class ChatLoadIT {
     h.closeClients();
   }
 
+  /** Perf 3c (spec §2): users of a new group of 500, all connected and listening; returns the group id. */
+  static String groupOfConnected(String prefix) throws Exception {
+    String run = prefix + UUID.randomUUID().toString().substring(0, 6);
+    List<String> users = new ArrayList<>();
+    for (int i = 0; i < 500; i++) {
+      users.add(run + "-" + i);
+    }
+    com.pangate.chat.support.KnownUsers.add(h.bootstrap(), h.chat, users.toArray(String[]::new));
+    connectAll(users).forEach(ChatLoadIT::listen);
+    return h.json(h.call("POST", "/v1/conversations", users.getFirst(), Map.of("kind", "group", "title", "load",
+        "memberIds", users.subList(1, users.size())), Map.of())).get("id").asText() + " " + run;
+  }
+
+  /** Sends {@code perSecond} messages a second for 10 s to every group (one sender thread per group). */
+  static void sendToGroups(List<String> groups, int perSecond) throws Exception {
+    long t0 = System.nanoTime();
+    try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
+      List<Future<?>> fs = new ArrayList<>();
+      for (String g : groups) {
+        String[] idAndRun = g.split(" ");
+        fs.add(pool.submit(() -> {
+          for (int i = 0; i < perSecond * 10; i++) {
+            long due = t0 + i * 1_000_000_000L / perSecond;
+            long wait = due - System.nanoTime();
+            if (wait > 0) {
+              Thread.sleep(wait / 1_000_000, (int) (wait % 1_000_000));
+            }
+            sendTimed(idAndRun[1] + "-" + (i % 500), idAndRun[0]);
+          }
+          return null;
+        }));
+      }
+      for (Future<?> f : fs) {
+        f.get();
+      }
+    }
+  }
+
+  @Test
+  void groupOf500At10PerSecond() throws Exception {
+    List<String> groups = List.of(groupOfConnected("ga"));
+    latenciesNs.clear();
+    long t0 = System.nanoTime();
+    sendToGroups(groups, 10);
+    long sent = System.nanoTime();
+    int expected = 100 * 500;
+    await().atMost(Duration.ofSeconds(300)).until(() -> latenciesNs.size() >= expected);
+    report("group 500 (100 messages, 10/s)", expected);
+    System.out.printf("CHAT-LOAD   sending took %.1f s, last delivery %.1f s after the last send%n",
+        (sent - t0) / 1e9, (System.nanoTime() - sent) / 1e9);
+    h.closeClients();
+  }
+
+  @Test
+  void fiveGroupsOf500At5PerSecond() throws Exception {
+    List<String> groups = new ArrayList<>();
+    for (int i = 0; i < 5; i++) {
+      groups.add(groupOfConnected("g" + i));
+    }
+    latenciesNs.clear();
+    long t0 = System.nanoTime();
+    sendToGroups(groups, 5);
+    long sent = System.nanoTime();
+    int expected = 5 * 50 * 500;
+    await().atMost(Duration.ofSeconds(300)).until(() -> latenciesNs.size() >= expected);
+    report("five groups of 500 (50 messages each, 5/s each)", expected);
+    System.out.printf("CHAT-LOAD   sending took %.1f s, last delivery %.1f s after the last send%n",
+        (sent - t0) / 1e9, (System.nanoTime() - sent) / 1e9);
+    h.closeClients();
+  }
+
   /**
    * Normal load: {@code chat.load.chats} (default 50) one-to-one chats over WebSocket, each sender sending one message
    * every 500 ms for 10 s.
