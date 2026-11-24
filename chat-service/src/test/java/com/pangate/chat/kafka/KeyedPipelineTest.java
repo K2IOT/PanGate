@@ -186,7 +186,7 @@ class KeyedPipelineTest {
       }
     });
     add(p0, 0, "a");
-    await().until(() -> calls.size() == 1);
+    await().pollInterval(Duration.ofMillis(5)).until(() -> calls.size() >= 1);
     c.seeks.set(0);   // MockConsumer seeks once itself, to set the first position
     await().until(() -> calls.size() == 4);
     assertThat(calls).containsOnly(List.of(0L));
@@ -233,7 +233,7 @@ class KeyedPipelineTest {
       }
     });
     add(p0, 0, "a");
-    await().until(() -> calls.size() == 1);
+    await().pollInterval(Duration.ofMillis(5)).until(() -> calls.size() >= 1);
     add(p0, 1, "a");
     await().until(() -> calls.stream().anyMatch(b -> b.contains(1L)));
     assertThat(calls.subList(0, 3)).containsOnly(List.of(0L));
