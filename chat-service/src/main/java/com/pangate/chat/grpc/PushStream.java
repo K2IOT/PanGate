@@ -30,7 +30,7 @@ import java.util.function.LongSupplier;
  * {@code window} requests wait for an answer (the server's own window, so nothing piles up in gRPC buffers); the rest
  * wait in a queue per priority. MUST may use the whole window and leaves the queue first; BEST_EFFORT and DROPPABLE
  * together use at most {@code lowShare} of it. A DROPPABLE that finds no room is dropped at once, a BEST_EFFORT that
- * waited {@code lowWait} is dropped. The timeout starts when a request is written; one that timed out keeps its slot
+ * waited {@code lowWait} is dropped. What sits in gRPC's own buffers is bounded by the window. The timeout starts when a request is written; one that timed out keeps its slot
  * until the server answers it (the server still counts it). Every write carries a fresh request id on the wire, so a
  * late answer to an earlier try never completes a retry.
  */
@@ -42,8 +42,6 @@ final class PushStream implements AutoCloseable {
       return Math.max(1, (int) Math.floor(window * lowShare));
     }
   }
-
-  static final long RETRY_DRAIN_MS = 50;
 
   private static final class Item {
     final PushRequest request;
@@ -69,16 +67,10 @@ final class PushStream implements AutoCloseable {
   /** One open call; replaced when it ends. */
   private final class Call implements ClientResponseObserver<PushRequest, PushResponse> {
     ClientCallStreamObserver<PushRequest> requests;
-    /** gRPC reports not ready until the call has started; writes before that are buffered (within the window). */
-    volatile boolean wasReady;
 
     @Override
     public void beforeStart(ClientCallStreamObserver<PushRequest> requestStream) {
       this.requests = requestStream;
-      requestStream.setOnReadyHandler(() -> {
-        wasReady = true;
-        drainAndComplete();
-      });
     }
 
     @Override
@@ -112,7 +104,6 @@ final class PushStream implements AutoCloseable {
   private final ArrayDeque<Item> mustQueue = new ArrayDeque<>();
   private final ArrayDeque<Item> lowQueue = new ArrayDeque<>();
   private boolean closed;
-  private boolean drainScheduled;
 
   /** {@code opener} starts a new {@code SendStream} call with the given response observer. */
   PushStream(Function<StreamObserver<PushResponse>, StreamObserver<PushRequest>> opener, Limits limits,
@@ -189,15 +180,9 @@ final class PushStream implements AutoCloseable {
     if (inFlight.size() >= limits.window() || (low && lowInFlight >= limits.lowSlots())) {
       return false;
     }
-    Call c = open();
-    if (c == null) {
-      return false;
-    }
-    if (c.requests == null || !c.wasReady || c.requests.isReady()) {
-      return true;
-    }
-    retryDrainSoon();   // gRPC calls onReady when the transport is ready again; this is the safety net
-    return false;
+    // gRPC's isReady() is not consulted: the window already bounds what can sit in gRPC's buffers to `window`
+    // requests, and the Push API requests its whole window up front (PushGrpcService), so it never holds them back
+    return open() != null;
   }
 
   /** The open call, opening one when there is none. Null when it cannot be opened now. */
@@ -326,18 +311,6 @@ final class PushStream implements AutoCloseable {
       lowInFlight = 0;
     }
     after.forEach(Runnable::run);
-  }
-
-  private void retryDrainSoon() {
-    if (!drainScheduled && !closed) {
-      drainScheduled = true;
-      timers.schedule(() -> {
-        synchronized (this) {
-          drainScheduled = false;
-        }
-        drainAndComplete();
-      }, RETRY_DRAIN_MS, TimeUnit.MILLISECONDS);
-    }
   }
 
   private void drainAndComplete() {
