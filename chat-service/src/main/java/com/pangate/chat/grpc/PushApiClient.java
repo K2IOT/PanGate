@@ -32,7 +32,7 @@ public final class PushApiClient implements Pusher, AutoCloseable {
     this.timers = Executors.newSingleThreadScheduledExecutor(r -> Thread.ofPlatform().daemon().name("push-timers")
         .unstarted(r));
     PushStream.Limits limits = new PushStream.Limits(cfg.window(), cfg.lowShare(), cfg.lowWait(), cfg.queueMax(),
-        cfg.mustWait(), cfg.timeout());
+        cfg.mustWait(), cfg.timeout(), cfg.streamMaxAge());
     this.streams = new PushStream[Math.max(1, cfg.streams())];
     for (int i = 0; i < streams.length; i++) {
       streams[i] = new PushStream(obs -> PushServiceGrpc.newStub(channel).sendStream(obs), limits, System::nanoTime,
@@ -43,12 +43,14 @@ public final class PushApiClient implements Pusher, AutoCloseable {
   /** Tests: the defaults with this {@code timeout}. */
   public PushApiClient(ManagedChannel channel, Duration timeout) {
     this(channel, new ChatProperties.PushApi("", true, timeout, 4, 1_000, 0.2, Duration.ofSeconds(2), 10_000,
-        Duration.ofSeconds(10)), new SimpleMeterRegistry());
+        Duration.ofSeconds(10), Duration.ofMinutes(5)), new SimpleMeterRegistry());
   }
 
   /** Plaintext (local, dev) or TLS verifying the server against the JVM trust store only. */
   public static PushApiClient create(ChatProperties.PushApi cfg, MeterRegistry meters) {
-    NettyChannelBuilder b = NettyChannelBuilder.forTarget(cfg.target()).defaultLoadBalancingPolicy("round_robin");
+    // final review I3: keepalive finds a dead connection in ~30 s instead of the TCP retransmission timeout
+    NettyChannelBuilder b = NettyChannelBuilder.forTarget(cfg.target()).defaultLoadBalancingPolicy("round_robin")
+        .keepAliveTime(20, java.util.concurrent.TimeUnit.SECONDS).keepAliveTimeout(10, java.util.concurrent.TimeUnit.SECONDS);
     if (cfg.plaintext()) {
       b.usePlaintext();
     }

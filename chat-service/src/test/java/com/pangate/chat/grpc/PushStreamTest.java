@@ -54,7 +54,7 @@ class PushStreamTest {
   /** window 10, low share 0.2 (2 slots), low wait 300 ms, queue 5, must wait 10 s, timeout 100 ms. */
   PushStream stream(Duration timeout) {
     PushStream s = new PushStream(obs -> PushServiceGrpc.newStub(channel).sendStream(obs),
-        new PushStream.Limits(10, 0.2, Duration.ofMillis(300), 5, Duration.ofSeconds(10), timeout), System::nanoTime,
+        new PushStream.Limits(10, 0.2, Duration.ofMillis(300), 5, Duration.ofSeconds(10), timeout, Duration.ofMinutes(5)), System::nanoTime,
         timers, meters, 0);
     made.add(s);
     return s;
@@ -122,7 +122,7 @@ class PushStreamTest {
     await().until(() -> first.stream().allMatch(CompletableFuture::isDone));
     assertThat(first).allSatisfy(f -> assertThat(cause(f)).isInstanceOf(PushUnavailableException.class));
     s.send(req("next"), Priority.MUST);
-    Thread.sleep(300);
+    Thread.sleep(120);   // under the stall limit (3 timeouts from the open)
     assertThat(api.received).hasSize(10);   // the server still counts the 10: no write past its window
     api.answerReceived(3);
     await().until(() -> api.received.size() == 11);
@@ -254,7 +254,7 @@ class PushStreamTest {
   @Test
   void mustFailsAfterMustWaitWhenNoStreamOpens() {
     PushStream s = stream(new PushStream.Limits(10, 0.2, Duration.ofMillis(300), 5, Duration.ofMillis(300),
-        Duration.ofSeconds(5)), obs -> {
+        Duration.ofSeconds(5), Duration.ofMinutes(5)), obs -> {
           throw new IllegalStateException("no push-api");
         });
     long t0 = System.nanoTime();
@@ -268,7 +268,7 @@ class PushStreamTest {
   void reopenBacksOff() throws Exception {
     java.util.concurrent.atomic.AtomicInteger opens = new java.util.concurrent.atomic.AtomicInteger();
     PushStream s = stream(new PushStream.Limits(10, 0.2, Duration.ofMillis(300), 5, Duration.ofSeconds(10),
-        Duration.ofSeconds(5)), obs -> {
+        Duration.ofSeconds(5), Duration.ofMinutes(5)), obs -> {
           opens.incrementAndGet();
           throw new IllegalStateException("no push-api");
         });
@@ -292,5 +292,105 @@ class PushStreamTest {
     assertThat(api.streams.get()).isEqualTo(1);
     s.send(req("q"), Priority.MUST);
     await().until(() -> api.streams.get() == 2);
+  }
+
+  // --- final review fixes ---
+
+  PushStream stream(Duration timeout, Duration mustWait, Duration maxAge) {
+    return stream(new PushStream.Limits(10, 0.2, Duration.ofMillis(300), 50, mustWait, timeout, maxAge),
+        obs -> PushServiceGrpc.newStub(channel).sendStream(obs));
+  }
+
+  /** I1: a request queued while the stream backs off is written when the backoff ends, with no other traffic. */
+  @Test
+  void queuedDuringBackoffIsWrittenWhenBackoffEnds() {
+    PushStream s = stream(Duration.ofSeconds(5));
+    s.send(req("a"), Priority.MUST);
+    await().until(() -> api.received.size() == 1);
+    api.endAll();   // ended before any answer: the stream backs off
+    await().until(() -> meters.counter("chat.push.stream.restarts").count() > 0);
+    api.autoAnswer = true;
+    CompletableFuture<PushResponse> b = s.send(req("b"), Priority.MUST);
+    await().atMost(Duration.ofSeconds(3)).until(() -> api.requests().stream()
+        .anyMatch(r -> r.getPrincipalId().equals("b")));
+    await().until(b::isDone);
+    assertThat(cause(b)).isNull();
+  }
+
+  /** I2: the client rotates its call before the server's connection age: nothing in flight fails. */
+  @Test
+  void rotationIsGraceful() throws Exception {
+    api.autoAnswer = true;
+    PushStream s = stream(Duration.ofSeconds(5), Duration.ofSeconds(10), Duration.ofMillis(300));
+    List<CompletableFuture<PushResponse>> all = new ArrayList<>();
+    for (int i = 0; i < 150; i++) {
+      all.add(s.send(req("p" + i), Priority.MUST));
+      Thread.sleep(10);
+    }
+    await().until(() -> all.stream().allMatch(CompletableFuture::isDone));
+    assertThat(all).allSatisfy(f -> assertThat(cause(f)).isNull());
+    assertThat(api.streams.get()).isGreaterThanOrEqualTo(3);
+  }
+
+  /** I3: a call that answers nothing for 3 timeouts while every request on it timed out is cancelled, replaced. */
+  @Test
+  void stalledCallIsCancelledAndReplaced() {
+    PushStream s = stream(Duration.ofMillis(100));
+    for (int i = 0; i < 12; i++) {
+      s.send(req("p" + i), Priority.MUST);
+    }
+    await().until(() -> api.received.size() == 10);
+    await().atMost(Duration.ofSeconds(3)).until(() -> api.received.stream().anyMatch(r -> r.stream() == 2));
+  }
+
+  /** I4: must-wait does not fail requests while the stream keeps answering, however slowly. */
+  @Test
+  void mustDoesNotExpireWhileTheStreamProgresses() throws Exception {
+    PushStream s = stream(Duration.ofSeconds(5), Duration.ofMillis(300), Duration.ofMinutes(5));
+    List<CompletableFuture<PushResponse>> all = new ArrayList<>();
+    for (int i = 0; i < 30; i++) {
+      all.add(s.send(req("p" + i), Priority.MUST));
+    }
+    Thread answerer = Thread.ofPlatform().daemon().start(() -> {
+      while (!Thread.currentThread().isInterrupted()) {
+        api.answerOldest();
+        try {
+          Thread.sleep(50);
+        } catch (InterruptedException e) {
+          return;
+        }
+      }
+    });
+    try {
+      await().atMost(Duration.ofSeconds(10)).until(() -> all.stream().allMatch(CompletableFuture::isDone));
+      assertThat(all).allSatisfy(f -> assertThat(cause(f)).isNull());
+    } finally {
+      answerer.interrupt();
+    }
+  }
+
+  /** I5: with no Push API at all, queued musts wait for must-wait instead of failing on the first dead call. */
+  @Test
+  void deadAddressFailsByMustWaitNotAtOnce() throws Exception {
+    int port;
+    try (java.net.ServerSocket ss = new java.net.ServerSocket(0)) {
+      port = ss.getLocalPort();
+    }
+    ManagedChannel dead = io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder.forAddress("127.0.0.1", port)
+        .usePlaintext().build();
+    try {
+      PushStream s = stream(new PushStream.Limits(10, 0.2, Duration.ofMillis(300), 5, Duration.ofSeconds(1),
+          Duration.ofSeconds(5), Duration.ofMinutes(5)), obs -> PushServiceGrpc.newStub(dead).sendStream(obs));
+      List<CompletableFuture<PushResponse>> all = new ArrayList<>();
+      for (int i = 0; i < 3; i++) {
+        all.add(s.send(req("p" + i), Priority.MUST));
+      }
+      Thread.sleep(600);
+      assertThat(all).noneMatch(CompletableFuture::isDone);
+      await().atMost(Duration.ofSeconds(3)).until(() -> all.stream().allMatch(CompletableFuture::isDone));
+      assertThat(all).allSatisfy(f -> assertThat(cause(f)).isInstanceOf(PushUnavailableException.class));
+    } finally {
+      dead.shutdownNow();
+    }
   }
 }

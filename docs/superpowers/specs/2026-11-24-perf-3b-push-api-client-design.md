@@ -122,3 +122,14 @@ Cấu trúc lớp (một lớp `PushStream` mỗi stream hay gộp), cấu trúc
 
 Câu hỏi của chủ dự án: có gắn `idempotency_key` không → **không** (§3, §4.4). Quyết định của người viết: MUST có hạn chờ `must-wait`; request hết giờ giữ chỗ tới khi server trả lời; id trên dây mới cho mỗi lần ghi; timeout 8 s từ lúc ghi; tuổi kết nối tối đa ở Push API (thay đổi duy nhất phía Push API); mở lại stream có backoff; `ReceiptWorkerLoop` không gửi lại push bị bỏ và nâng hạn vòng; thứ tự chỉ đảm bảo theo đích và theo mức (§4.4b); `Pusher.send(r, p)` là phương thức trừu tượng; lệnh kênh không thêm vòng gửi lại; chấp nhận lỗi hàng loạt khi Push API dừng dưới tải.
 
+## 8. Sau review cuối (2026-11-24)
+
+Reviewer độc lập: 0 Critical, 5 Important (đã sửa, mỗi sửa có test fail trước), 6 Minor (để lại).
+- **I1:** request xếp hàng trong lúc stream đang chờ mở lại (sau một lần mở hỏng) không được ghi khi hết thời gian chờ nếu không có push khác: nay `drain` hẹn mở lại khi còn hàng mà chưa có call dùng được.
+- **I2:** tuổi kết nối của Push API cắt cứng mọi stream mỗi ~30 phút, làm lỗi tới `window` request đang chờ mỗi stream: nay client tự xoay call sau `stream-max-age` (5 phút ±20%), half-close call cũ để server trả lời hết rồi đóng; trả lời từ call đang xoay vẫn giải phóng chỗ; ân hạn của Push API nâng lên 10 phút.
+- **I3:** call còn sống nhưng không trả lời gì giữ chỗ mãi: nay call im lặng 3 lần timeout mà mọi request trên nó đều đã hết giờ bị huỷ (giải phóng chỗ, round-robin đặt call mới chỗ khác); kênh bật keepalive 20 s.
+- **I4:** `must-wait` làm lỗi MUST cả khi stream vẫn đang trả lời (chỉ chậm): nay chỉ lỗi khi stream không trả lời gì trong thời gian chờ.
+- **I5:** Push API sập thật thì gRPC tạo call được rồi mới lỗi, làm lỗi ngay mọi MUST trong hàng: nay chỉ ghi lên call sau khi gRPC báo sẵn sàng lần đầu; các MUST chờ tới `must-wait`.
+
+Để lại (Minor): timer timeout mỗi lần ghi không huỷ; tra meter mỗi lần gọi; `PushNotifier` báo push bị bỏ là "unavailable"; chưa kiểm giá trị cấu hình; chú thích lớp nói quá về giới hạn bộ đệm; chưa cảnh báo khi `timeout + low-wait` chạm `ROUND_DEADLINE` của worker biên nhận.
+

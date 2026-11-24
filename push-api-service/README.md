@@ -54,7 +54,7 @@ Errors are `application/problem+json` with `code`: `invalid_request`, `rule_V1`�
 | `idempotency.ttl`, `pending-ttl`, `wait-for` | 1 h, 30 s, 2 s | `Idempotency-Key` dedup |
 | `seqepochs.refresh` | 5 s | `seqepochs` cache refresh and failover check |
 | `grpc.port`, `grpc.plaintext`, `grpc.allowed-spiffe`, `grpc.tls.*` | 9443, false, gateway + push-router of cell-1 | mTLS server |
-| `grpc.max-connection-age`, `grpc.max-connection-age-grace` | 30m (±10%), 30s | GOAWAY after this age: clients (chat-service's stream pool, the gateway's KICK client) reconnect, re-resolve DNS and so reach new pods; a stream still open after the grace is cut and its in-flight requests fail (callers retry) |
+| `grpc.max-connection-age`, `grpc.max-connection-age-grace` | 30m (±10%), 10m | GOAWAY after this age: clients reconnect, re-resolve DNS and so reach new pods. chat-service rotates its calls every 5 min (±20%), inside the grace, so none is cut; a stream still open after the grace (e.g. the gateway's KICK client) is cut and its in-flight requests fail (callers retry) |
 | `management-port` | 8081 | Second Tomcat connector |
 
 ## Metrics

@@ -32,7 +32,7 @@ class PushApiClientTest {
 
   static ChatProperties.PushApi cfg(String target) {
     return new ChatProperties.PushApi(target, true, Duration.ofSeconds(8), 4, 1_000, 0.2, Duration.ofSeconds(2),
-        10_000, Duration.ofSeconds(10));
+        10_000, Duration.ofSeconds(10), Duration.ofMinutes(5));
   }
 
   static PushRequest req(String principal, String seq) {

@@ -67,8 +67,12 @@ public final class ScriptedPushService extends PushServiceGrpc.PushServiceImplBa
     StreamObserver<PushResponse> out = pending.remove(wireId);
     if (out != null) {
       synchronized (out) {
-        out.onNext(PushResponse.newBuilder().setRequestId(wireId).setOk(true).setCode(PushResponse.Code.CODE_OK)
-            .setMsgId("m-" + wireId).build());
+        try {
+          out.onNext(PushResponse.newBuilder().setRequestId(wireId).setOk(true).setCode(PushResponse.Code.CODE_OK)
+              .setMsgId("m-" + wireId).build());
+        } catch (io.grpc.StatusRuntimeException e) {
+          // the client cancelled the call meanwhile
+        }
       }
     }
   }
@@ -76,6 +80,17 @@ public final class ScriptedPushService extends PushServiceGrpc.PushServiceImplBa
   /** Answers the request received n-th (0-based). */
   public void answerReceived(int n) {
     answer(received.get(n).request().getRequestId());
+  }
+
+  /** Answers the oldest received request not answered yet; false when none waits. */
+  public boolean answerOldest() {
+    for (Received r : received) {
+      if (pending.containsKey(r.request().getRequestId())) {
+        answer(r.request().getRequestId());
+        return true;
+      }
+    }
+    return false;
   }
 
   public int outstanding() {
