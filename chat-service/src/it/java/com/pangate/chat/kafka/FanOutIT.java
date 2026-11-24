@@ -251,7 +251,7 @@ class FanOutIT {
     FakeStores stores = new FakeStores();
     Map<String, Long> delivered = new ConcurrentHashMap<>();
     // every answer takes 300 ms
-    com.pangate.chat.core.Pusher slow = r -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+    com.pangate.chat.core.Pusher slow = (r, prio) -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
       try {
         Thread.sleep(300);
         delivered.put(ChatMessage.parseFrom(r.getPayload()).getConversationId(), System.nanoTime());
@@ -335,7 +335,7 @@ class FanOutIT {
     }
     FakeStores stores = new FakeStores();
     Map<String, java.util.concurrent.atomic.AtomicInteger> perConv = new ConcurrentHashMap<>();
-    com.pangate.chat.core.Pusher slow = r -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+    com.pangate.chat.core.Pusher slow = (r, prio) -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
       try {
         Thread.sleep(300);
         perConv.computeIfAbsent(ChatMessage.parseFrom(r.getPayload()).getConversationId(),

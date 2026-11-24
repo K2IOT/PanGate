@@ -68,7 +68,7 @@ public final class PushApiClient implements Pusher, AutoCloseable {
   }
 
   @Override
-  public CompletableFuture<PushResponse> send(PushRequest r) {
+  public CompletableFuture<PushResponse> send(PushRequest r, Pusher.Priority priority) {
     CompletableFuture<PushResponse> reply = new CompletableFuture<>();
     try {
       synchronized (this) {

@@ -119,7 +119,7 @@ public final class TypingRelay {
 
   private void send(PushRequest r) {
     try {
-      pusher.send(r);   // fire and forget: a lost typing push does not matter
+      pusher.send(r, Pusher.Priority.DROPPABLE);   // fire and forget: a lost typing push does not matter
     } catch (RuntimeException e) {
       // dropped
     }

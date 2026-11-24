@@ -18,7 +18,7 @@ public final class PushNotifier implements Notifier {
 
   @Override
   public void rejected(String senderId, ChatRejected r) {
-    pusher.send(FanOutPlanner.rejected(senderId, r)).whenComplete((res, e) -> onResult.accept(e != null
+    pusher.send(FanOutPlanner.rejected(senderId, r), Pusher.Priority.BEST_EFFORT).whenComplete((res, e) -> onResult.accept(e != null
         ? "unavailable" : res.getCode() == PushResponse.Code.CODE_OK ? "ok" : res.getCode().name()));
   }
 }

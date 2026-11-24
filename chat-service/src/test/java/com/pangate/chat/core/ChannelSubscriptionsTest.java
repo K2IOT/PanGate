@@ -17,7 +17,7 @@ class ChannelSubscriptionsTest {
 
   final FakeStores stores = new FakeStores();
   final List<PushRequest> sent = new CopyOnWriteArrayList<>();
-  final ChannelSubscriptions subs = new ChannelSubscriptions(stores, stores, r -> {
+  final ChannelSubscriptions subs = new ChannelSubscriptions(stores, stores, (r, prio) -> {
     sent.add(r);
     return CompletableFuture.completedFuture(PushResponse.newBuilder().setRequestId(r.getRequestId())
         .setCode(PushResponse.Code.CODE_OK).setOk(true).build());
@@ -78,7 +78,7 @@ class ChannelSubscriptionsTest {
   @Test
   void revokeIsRetriedUntilPushApiAcceptsIt() throws Exception {
     java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
-    ChannelSubscriptions flaky = new ChannelSubscriptions(stores, stores, r -> {
+    ChannelSubscriptions flaky = new ChannelSubscriptions(stores, stores, (r, prio) -> {
       sent.add(r);
       return switch (calls.incrementAndGet()) {
         case 1 -> CompletableFuture.failedFuture(new PushUnavailableException("no stream", null));
@@ -98,7 +98,7 @@ class ChannelSubscriptionsTest {
   @Test
   void openChannelsAreRecorded() throws Exception {
     FakePresence opens = new FakePresence();
-    ChannelSubscriptions tracked = new ChannelSubscriptions(stores, stores, r -> CompletableFuture.completedFuture(
+    ChannelSubscriptions tracked = new ChannelSubscriptions(stores, stores, (r, prio) -> CompletableFuture.completedFuture(
         PushResponse.newBuilder().setRequestId(r.getRequestId()).setCode(PushResponse.Code.CODE_OK).setOk(true)
             .build()), x -> { }, opens);
     String c = conv(ConversationKind.CONVERSATION_KIND_CHANNEL, true);

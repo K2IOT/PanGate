@@ -11,5 +11,18 @@ import java.util.concurrent.CompletableFuture;
  */
 @FunctionalInterface
 public interface Pusher {
-  CompletableFuture<PushResponse> send(PushRequest r);
+
+  /**
+   * Perf 3b (spec §4.1): what happens when the Push API is busy. MUST (messages, channel posts, channel control) is
+   * never dropped by chat for lack of room; BEST_EFFORT (receipts, send rejections) waits a little, then is dropped;
+   * DROPPABLE (typing, presence) is dropped at once. A dropped push fails with {@link PushDroppedException}.
+   */
+  enum Priority { MUST, BEST_EFFORT, DROPPABLE }
+
+  CompletableFuture<PushResponse> send(PushRequest r, Priority p);
+
+  /** A push that must arrive. */
+  default CompletableFuture<PushResponse> send(PushRequest r) {
+    return send(r, Priority.MUST);
+  }
 }

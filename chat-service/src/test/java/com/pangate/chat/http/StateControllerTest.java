@@ -54,7 +54,7 @@ class StateControllerTest {
     stores.sent(conv, "u2", 1, 0);   // the presence rule: u2 took part
     com.pangate.chat.core.PresenceWatch watch = new com.pangate.chat.core.PresenceWatch(stores,
         new MemberLookup(stores, stores), stores, new com.pangate.chat.core.FakeWatchers(System::currentTimeMillis), presence,
-        stores, privacy, r -> new java.util.concurrent.CompletableFuture<>(), System::currentTimeMillis,
+        stores, privacy, (r, prio) -> new java.util.concurrent.CompletableFuture<>(), System::currentTimeMillis,
         java.time.Duration.ofMinutes(5), 200);
     mvc = MockMvcBuilders.standaloneSetup(new StateController(state, new com.pangate.chat.core.StateService(stores,
         new MemberLookup(stores, stores), stores, stores, stores, privacy, 50, () -> 0L, System::currentTimeMillis),
@@ -115,7 +115,7 @@ class StateControllerTest {
     com.pangate.chat.core.PrivacyCache privacy = new com.pangate.chat.core.PrivacyCache(stores, () -> 0L);
     com.pangate.chat.core.PresenceWatch watch = new com.pangate.chat.core.PresenceWatch(stores,
         new MemberLookup(stores, stores), stores, new com.pangate.chat.core.FakeWatchers(System::currentTimeMillis),
-        presence, stores, privacy, r -> new java.util.concurrent.CompletableFuture<>(), System::currentTimeMillis,
+        presence, stores, privacy, (r, prio) -> new java.util.concurrent.CompletableFuture<>(), System::currentTimeMillis,
         java.time.Duration.ofMinutes(5), 200);
     StateIngest state = new StateIngest(new MarkValidator(new MemberLookup(stores, stores),
         new LastSeqCache(stores, () -> 0L), new TokenBucketLimiter(1, 1, () -> 0L), r -> { }), published::add);

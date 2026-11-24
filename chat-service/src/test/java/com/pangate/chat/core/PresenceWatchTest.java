@@ -27,8 +27,10 @@ class PresenceWatchTest {
   final FakeWatchers watchers = new FakeWatchers(now::get);
   final List<PushRequest> pushed = new CopyOnWriteArrayList<>();
   final PrivacyCache privacy = new PrivacyCache(stores, () -> 0L);
-  final Pusher pusher = r -> {
+  final List<Pusher.Priority> priorities = new CopyOnWriteArrayList<>();
+  final Pusher pusher = (r, p) -> {
     pushed.add(r);
+    priorities.add(p);
     return CompletableFuture.completedFuture(PushResponse.getDefaultInstance());
   };
   final com.pangate.chat.core.PresenceWatch watch = new com.pangate.chat.core.PresenceWatch(stores,
@@ -276,5 +278,15 @@ class PresenceWatchTest {
     // one list lookup per conversation (a cache miss reads the cache, then the store)
     assertThat(stores.cachedMembersCalls.get()).isLessThanOrEqualTo(10);
     assertThat(stores.membersCalls.get()).isLessThanOrEqualTo(10);
+  }
+
+  /** Perf 3b (spec §4.1): the watch snapshot and the transitions are droppable. */
+  @Test
+  void snapshotAndTransitionsAreDroppable() {
+    presence.add("a", "n1", 1, "c1");
+    watch.watch("me", "d1", of(g, "a"));
+    fanOut.on(new PresenceTracker.Transition("a", false, now.get()));
+    assertThat(pushed).isNotEmpty();
+    assertThat(priorities).hasSameSizeAs(pushed).containsOnly(Pusher.Priority.DROPPABLE);
   }
 }

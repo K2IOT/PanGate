@@ -136,7 +136,7 @@ class PoisonRecordTest {
     MockProducer<String, byte[]> dlq = producer();
     try (UpstreamCommandListener l = new UpstreamCommandListener(consumer, "c1.gw.upstream.cmd", ingest,
         (sender, r) -> { }, new CommandProducer(dlq, Duration.ofSeconds(1), ChatTopics.COMMANDS), o -> { },
-        new ChannelSubscriptions(stores, stores, r -> new CompletableFuture<>()))) {
+        new ChannelSubscriptions(stores, stores, (r, prio) -> new CompletableFuture<>()))) {
       l.start();
       await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
         assertThat(dlq.history()).singleElement().satisfies(r -> assertThat(reason(r)).startsWith("poison"));

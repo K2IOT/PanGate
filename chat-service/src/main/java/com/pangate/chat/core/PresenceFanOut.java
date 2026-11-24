@@ -61,7 +61,8 @@ public final class PresenceFanOut implements Consumer<PresenceTracker.Transition
       PresenceUpdate.State s = PresenceView.state(t.userId(), t.online(),
           t.online() ? OptionalLong.empty() : OptionalLong.of(t.atMs()), subject, viewer, now);
       pusher.send(StatePushes.ephemeral(parts[0], parts[1], ChatTopics.TYPE_PRESENCE,
-          PresenceUpdate.newBuilder().addStates(s).build().toByteString(), StatePushes.PRESENCE_TTL_SEC));
+          PresenceUpdate.newBuilder().addStates(s).build().toByteString(), StatePushes.PRESENCE_TTL_SEC),
+          Pusher.Priority.DROPPABLE);
       n++;
     }
     return n;

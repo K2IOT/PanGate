@@ -77,7 +77,7 @@ class ReceiptWorkerIT {
     List<PushRequest> pushed = new CopyOnWriteArrayList<>();
     ReceiptWorkerLoop loop = new ReceiptWorkerLoop(ReceiptWorkerLoop.consumer(kafka.getBootstrapServers(),
         "rw-" + topic), topic, stores, new MemberLookup(stores, stores), stores, new PrivacyCache(stores,
-        System::currentTimeMillis), r -> {
+        System::currentTimeMillis), (r, prio) -> {
           pushed.add(r);
           return CompletableFuture.completedFuture(PushResponse.getDefaultInstance());
         }, STATE, new SimpleMeterRegistry(), badges);
@@ -163,7 +163,7 @@ class ReceiptWorkerIT {
     FakeStores stores = new FakeStores();
     ReceiptWorkerLoop loop = new ReceiptWorkerLoop(ReceiptWorkerLoop.consumer(kafka.getBootstrapServers(),
         "rw-" + t), t, stores, new MemberLookup(stores, stores), stores, new PrivacyCache(stores,
-        System::currentTimeMillis), r -> new CompletableFuture<>(), STATE, new SimpleMeterRegistry());
+        System::currentTimeMillis), (r, prio) -> new CompletableFuture<>(), STATE, new SimpleMeterRegistry());
     try (loop) {
       List<String> groups = new java.util.ArrayList<>();
       for (int i = 0; i < 3; i++) {
@@ -201,7 +201,7 @@ class ReceiptWorkerIT {
     FakeStores stores = new FakeStores();
     ReceiptWorkerLoop loop = new ReceiptWorkerLoop(ReceiptWorkerLoop.consumer(kafka.getBootstrapServers(),
         "rw-" + t), t, stores, new MemberLookup(stores, stores), stores, new PrivacyCache(stores,
-        System::currentTimeMillis), r -> new CompletableFuture<>(), STATE, new SimpleMeterRegistry());
+        System::currentTimeMillis), (r, prio) -> new CompletableFuture<>(), STATE, new SimpleMeterRegistry());
     try (loop) {
       List<String> groups = new java.util.ArrayList<>();
       for (int i = 0; i < 8; i++) {
@@ -255,7 +255,7 @@ class ReceiptWorkerIT {
     List<Long> attempts = new CopyOnWriteArrayList<>();
     ReceiptWorkerLoop loop = new ReceiptWorkerLoop(ReceiptWorkerLoop.consumer(kafka.getBootstrapServers(),
         "rw-" + t), t, stores, new MemberLookup(stores, stores), stores, new PrivacyCache(stores,
-        System::currentTimeMillis), r -> {
+        System::currentTimeMillis), (r, prio) -> {
           if (!r.getPrincipalId().equals("chat:ra")) {
             return CompletableFuture.completedFuture(PushResponse.getDefaultInstance());
           }

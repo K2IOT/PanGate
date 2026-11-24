@@ -53,7 +53,7 @@ class StateIngestTest {
   void watchIsLimitedBeforeAnyLookup() {
     List<String> outcomes = new java.util.ArrayList<>();
     PresenceWatch w = new PresenceWatch(stores, new MemberLookup(stores, stores), stores,
-        new FakeWatchers(() -> 0L), new FakePresence(), stores, new PrivacyCache(stores, () -> 0L), r -> null,
+        new FakeWatchers(() -> 0L), new FakePresence(), stores, new PrivacyCache(stores, () -> 0L), (r, prio) -> null,
         () -> 0L, java.time.Duration.ofMinutes(5), 200);
     StateIngest s = new StateIngest(new MarkValidator(new MemberLookup(stores, stores),
         new LastSeqCache(stores, () -> 0L), new TokenBucketLimiter(50, 100, () -> 0L), rejected::add), c -> { },

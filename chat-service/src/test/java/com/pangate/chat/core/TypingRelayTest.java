@@ -26,7 +26,7 @@ class TypingRelayTest {
   final List<PushRequest> pushed = new CopyOnWriteArrayList<>();
   final AtomicLong ms = new AtomicLong(1_000_000);
   Set<String> open = Set.of();
-  final TypingRelay relay = new TypingRelay(stores, new MemberLookup(stores, stores), r -> {
+  final TypingRelay relay = new TypingRelay(stores, new MemberLookup(stores, stores), (r, prio) -> {
     pushed.add(r);
     return CompletableFuture.completedFuture(PushResponse.getDefaultInstance());
   }, conv -> open, ms::get, 50);
@@ -132,7 +132,7 @@ class TypingRelayTest {
   void channelTypingReadsNoMemberList() {
     String c = Ids.next();
     FakeStores big = FakeStores.withChannel(c, 100_000);
-    TypingRelay r = new TypingRelay(big, new MemberLookup(big, big), x -> null, conv -> open, ms::get, 50,
+    TypingRelay r = new TypingRelay(big, new MemberLookup(big, big), (x, prio) -> null, conv -> open, ms::get, 50,
         new TokenBucketLimiter(5, 10, () -> 0));
     assertThat(r.typing("f1", c)).isEqualTo("channel");
     assertThat(big.membersCalls.get()).isZero();
@@ -143,7 +143,7 @@ class TypingRelayTest {
   /** Perf 3a (spec §3.2): a per-user limit before any lookup. */
   @Test
   void strangerIsLimitedBeforeAnyLookup() {
-    TypingRelay r = new TypingRelay(stores, new MemberLookup(stores, stores), x -> null, conv -> open, ms::get, 50,
+    TypingRelay r = new TypingRelay(stores, new MemberLookup(stores, stores), (x, prio) -> null, conv -> open, ms::get, 50,
         new TokenBucketLimiter(5, 10, () -> 0));
     for (int i = 0; i < 10; i++) {
       assertThat(r.typing("x", Ids.next())).isEqualTo("not_member");
@@ -161,5 +161,18 @@ class TypingRelayTest {
     assertThat(relay.typing("x", g)).isEqualTo("not_member");
     assertThat(stores.membersCalls.get()).isZero();
     assertThat(stores.cachedMembersCalls.get()).isZero();
+  }
+
+  /** Perf 3b (spec §4.1): typing is droppable. */
+  @Test
+  void typingIsDroppable() {
+    java.util.List<Pusher.Priority> seen = new java.util.concurrent.CopyOnWriteArrayList<>();
+    TypingRelay r = new TypingRelay(stores, new MemberLookup(stores, stores), (x, p) -> {
+      seen.add(p);
+      return CompletableFuture.completedFuture(PushResponse.getDefaultInstance());
+    }, conv -> open, ms::get, 50);
+    String d = conv(ConversationKind.CONVERSATION_KIND_DIRECT, 2);
+    assertThat(r.typing("u0", d)).isEqualTo("relayed");
+    assertThat(seen).containsOnly(Pusher.Priority.DROPPABLE).isNotEmpty();
   }
 }

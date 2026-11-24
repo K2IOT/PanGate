@@ -256,7 +256,7 @@ public final class ReceiptWorkerLoop implements AutoCloseable {
       List<java.util.concurrent.CompletableFuture<PushResponse>> sent = new java.util.ArrayList<>(pending.size());
       for (PushRequest r : pending) {
         try {
-          sent.add(pusher.send(r));
+          sent.add(pusher.send(r, Pusher.Priority.BEST_EFFORT));
         } catch (RuntimeException e) {
           sent.add(java.util.concurrent.CompletableFuture.failedFuture(e));
         }
