@@ -109,8 +109,23 @@ public final class Badge implements BadgeUpdates {
 
   @Override
   public void raiseAll(List<String> users, String convId, long last) {
-    if (!users.isEmpty()) {
-      write(users, () -> counters.raiseAll(users, convId, last));
+    if (users.isEmpty() || counters == null) {
+      return;
+    }
+    if (!usable()) {
+      lost(users);
+      return;
+    }
+    List<String> failed;
+    try {
+      failed = counters.raiseAll(users, convId, last);
+    } catch (RuntimeException e) {
+      failed = users;
+    }
+    if (!failed.isEmpty()) {
+      // 3a minor M5: only the counters that missed this write are forgotten, not every recipient's
+      pause();
+      lost(failed);
     }
   }
 

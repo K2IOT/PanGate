@@ -13,57 +13,50 @@ import com.pangate.contracts.v1.ChannelOpen;
 import com.pangate.contracts.v1.ChatRejected;
 import com.pangate.contracts.v1.ChatSend;
 import com.pangate.contracts.v1.UpstreamRecord;
-import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.function.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * The WebSocket command path (chat spec §4.1, §6): {@code cN.gw.upstream.cmd} in group {@code chat-ingest}. Only
- * tenant {@code chat} records are taken, with header {@code op} = {@code chat.send}, {@code chat.channel.open} or
- * {@code chat.channel.close}; a record of a {@code chat:} principal (the record key) that does not parse goes
- * to {@code chat.commands.dlq}; a refused command is told to the sender through {@link Notifier}. Offsets are committed after
- * each poll was handled; partitions run in parallel; when the store or Kafka fails, the partition rewinds to the
- * failed record and is retried; a record failing the same deterministic way {@link PoisonGuard#MAX_ATTEMPTS} times in
- * a row is dead-lettered.
+ * The WebSocket command path (chat spec §4.1, §6): {@code cN.gw.upstream.cmd}, on a {@link KeyedPipeline} keyed by
+ * the sender's principal (perf 3c, spec §4.4). Only tenant {@code chat} records are taken. Two roles, each its own
+ * consumer group: {@link Role#INGEST} (group {@code chat-ingest}) takes {@code chat.send}, {@code chat.channel.open} and
+ * {@code chat.channel.close}; {@link Role#STATE} (group {@code chat-state}) takes {@code chat.delivered},
+ * {@code chat.read}, {@code chat.typing} and {@code chat.presence.watch}, so a slow watch never sits in front of a
+ * message. The other role's ops are {@code ignored}. A record of a {@code chat:} principal (the record key) that does
+ * not parse goes to {@code chat.commands.dlq}; a refused command is told to the sender through {@link Notifier}. A
+ * failing record is retried in place; one failing the same deterministic way {@link PoisonGuard#MAX_ATTEMPTS} times
+ * in a row is dead-lettered.
  */
 public final class UpstreamCommandListener implements AutoCloseable {
 
+  /** Perf 3c (spec §4.4): which ops this listener takes. */
+  public enum Role { INGEST, STATE }
+
   public static final String GROUP = "chat-ingest";
+  public static final String STATE_GROUP = "chat-state";
   public static final String OP_SEND = "chat.send";
   public static final String OP_OPEN = "chat.channel.open";
   public static final String OP_CLOSE = "chat.channel.close";
   private static final Logger log = LoggerFactory.getLogger(UpstreamCommandListener.class);
 
-  private final org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer;
-  private final String topic;
   private final Ingest ingest;
   private final Notifier notifier;
   private final CommandProducer dlq;
   private final Consumer<String> onOutcome;
   private final ChannelSubscriptions channels;
   private final com.pangate.chat.core.StateCommands state;
-  private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
-  private final PoisonGuard poison = new PoisonGuard();
-  private volatile boolean running = true;
-  private Thread thread;
+  private final Role role;
+  private final KeyedPipeline pipeline;
 
   /** {@code onOutcome}: accepted, rejected, ignored, malformed, poison or error (metric {@code chat.ingest.records}). */
   public UpstreamCommandListener(org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer, String topic,
@@ -76,112 +69,67 @@ public final class UpstreamCommandListener implements AutoCloseable {
   public UpstreamCommandListener(org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer, String topic,
       Ingest ingest, Notifier notifier, CommandProducer dlq, Consumer<String> onOutcome,
       ChannelSubscriptions channels, com.pangate.chat.core.StateCommands state) {
+    this(consumer, topic, ingest, notifier, dlq, onOutcome, channels, state, Role.INGEST);
+  }
+
+  public UpstreamCommandListener(org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer, String topic,
+      Ingest ingest, Notifier notifier, CommandProducer dlq, Consumer<String> onOutcome,
+      ChannelSubscriptions channels, com.pangate.chat.core.StateCommands state, Role role) {
+    this(consumer, topic, ingest, notifier, dlq, onOutcome, channels, state, role,
+        KeyedPipeline.Settings.defaults(1, true), new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+  }
+
+  public UpstreamCommandListener(org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer, String topic,
+      Ingest ingest, Notifier notifier, CommandProducer dlq, Consumer<String> onOutcome,
+      ChannelSubscriptions channels, com.pangate.chat.core.StateCommands state, Role role,
+      KeyedPipeline.Settings settings, io.micrometer.core.instrument.MeterRegistry meters) {
     this.state = state;
-    this.consumer = consumer;
-    this.topic = topic;
     this.ingest = ingest;
     this.notifier = notifier;
     this.dlq = dlq;
     this.onOutcome = onOutcome;
     this.channels = channels;
+    this.role = role;
+    this.pipeline = new KeyedPipeline(role == Role.INGEST ? "ingest" : "state", consumer, topic, settings,
+        this::handleAll, () -> { }, meters);
   }
 
   public static KafkaConsumer<String, byte[]> consumer(String bootstrap) {
+    return consumer(bootstrap, GROUP, "earliest");
+  }
+
+  /** {@code autoOffsetReset}: {@code latest} for {@code chat-state} (spec §4.4: old state ops are not replayed). */
+  public static KafkaConsumer<String, byte[]> consumer(String bootstrap, String group, String autoOffsetReset) {
     Map<String, Object> cfg = new HashMap<>();
     cfg.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap);
-    cfg.put(ConsumerConfig.GROUP_ID_CONFIG, GROUP);
+    cfg.put(ConsumerConfig.GROUP_ID_CONFIG, group);
     cfg.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
-    cfg.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+    cfg.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, autoOffsetReset);
     cfg.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 500);
     return new KafkaConsumer<>(cfg, new StringDeserializer(), new ByteArrayDeserializer());
   }
 
-  public synchronized void start() {
-    thread = Thread.ofPlatform().daemon().name("chat-ingest").start(this::run);
+  public void start() {
+    pipeline.start();
   }
 
-  private void run() {
-    try {
-      consumer.subscribe(List.of(topic));
-      while (running) {
-        try {
-          step();
-        } catch (WakeupException e) {
-          throw e;
-        } catch (RuntimeException e) {
-          log.warn("ingest listener: {}; going on", e.toString());
-          Thread.sleep(1_000);
-        }
-      }
-    } catch (WakeupException e) {
-      // closing
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-    } finally {
-      workers.shutdownNow();
-      consumer.close(Duration.ofSeconds(2));
-    }
-  }
-
-  /** Partitions run in parallel (one virtual thread each), records in order; seek and commit on the poll thread. */
-  private void step() throws InterruptedException {
-    ConsumerRecords<String, byte[]> batch = consumer.poll(Duration.ofMillis(500));
-    Map<TopicPartition, Future<Long>> work = new HashMap<>();
-    for (TopicPartition tp : batch.partitions()) {
-      List<ConsumerRecord<String, byte[]>> recs = batch.records(tp);
-      work.put(tp, workers.submit(() -> handleAll(tp, recs)));
-    }
-    Map<TopicPartition, OffsetAndMetadata> done = new HashMap<>();
-    boolean failed = false;
-    for (Map.Entry<TopicPartition, Future<Long>> w : work.entrySet()) {
-      TopicPartition tp = w.getKey();
-      List<ConsumerRecord<String, byte[]>> recs = batch.records(tp);
-      long stop;
-      try {
-        stop = w.getValue().get();
-      } catch (ExecutionException e) {
-        stop = recs.getFirst().offset();
-      }
-      if (stop < 0) {
-        done.put(tp, new OffsetAndMetadata(recs.getLast().offset() + 1));
-      } else {
-        // a repeated send is one message (the sequencer dedups), so re-reading from here is safe
-        if (stop > recs.getFirst().offset()) {
-          done.put(tp, new OffsetAndMetadata(stop));
-        }
-        consumer.seek(tp, stop);
-        failed = true;
-      }
-    }
-    if (!done.isEmpty()) {
-      consumer.commitSync(done);
-    }
-    if (failed) {
-      Thread.sleep(500);
-    }
-  }
-
-  /** -1 when every record was handled, else the offset to retry from. */
-  private long handleAll(TopicPartition tp, List<ConsumerRecord<String, byte[]>> recs) {
+  /** One record a batch (the pipeline's {@code max-batch} 1); on the last try a deterministic failure is dead-lettered. */
+  private void handleAll(List<ConsumerRecord<String, byte[]>> recs, boolean lastTry) {
     for (ConsumerRecord<String, byte[]> r : recs) {
       try {
         onOutcome.accept(handle(r));
-        poison.clear(tp);
       } catch (RuntimeException e) {
-        if (poison.failed(tp, r.offset(), e)) {
-          log.error("command at {}@{} failed {} times: {}; dead-lettered", tp, r.offset(), PoisonGuard.MAX_ATTEMPTS,
-              e.toString());
+        if (lastTry && !PoisonGuard.isTransient(e)) {
+          log.error("command at {}@{} failed {} times: {}; dead-lettered", r.topic(), r.offset(),
+              PoisonGuard.MAX_ATTEMPTS, e.toString());
           dlq.deadLetter(r.key(), r.value(), "poison: " + e);
-          poison.clear(tp);
           onOutcome.accept("poison");
           continue;
         }
         onOutcome.accept("error");
-        log.warn("command at {}@{} not handled: {}", tp, r.offset(), e.toString());
-        return r.offset();
+        throw e;   // retried in place; the pipeline logs it, rate-limited
       }
     }
-    return -1;
   }
 
   private String handle(ConsumerRecord<String, byte[]> r) {
@@ -189,8 +137,9 @@ public final class UpstreamCommandListener implements AutoCloseable {
     try {
       u = UpstreamRecord.parseFrom(r.value() == null ? new byte[0] : r.value());
     } catch (InvalidProtocolBufferException e) {
-      if (UserIds.fromPrincipal(r.key()).isEmpty()) {
-        return "ignored";   // the key is the sender's principal: another tenant's record is not ours to dead-letter
+      if (role == Role.STATE || UserIds.fromPrincipal(r.key()).isEmpty()) {
+        // the key is the sender's principal: another tenant's record is not ours to dead-letter; chat-ingest DLQs ours
+        return "ignored";
       }
       dlq.deadLetter(r.key(), r.value(), "malformed UpstreamRecord");
       return "malformed";
@@ -199,12 +148,16 @@ public final class UpstreamCommandListener implements AutoCloseable {
     if (!ChatTopics.TENANT.equals(u.getTenantId())) {
       return "ignored";
     }
+    boolean stateOp = op.equals(ChatTopics.OP_DELIVERED) || op.equals(ChatTopics.OP_READ)
+        || op.equals(ChatTopics.OP_TYPING) || op.equals(ChatTopics.OP_WATCH);
+    if (stateOp != (role == Role.STATE)) {
+      return "ignored";   // perf 3c (spec §4.4): the other role's op, or one neither takes
+    }
+    if (stateOp) {
+      return state(r, u, op);
+    }
     if (op.equals(OP_OPEN) || op.equals(OP_CLOSE)) {
       return channel(r, u, op);
-    }
-    if (op.equals(ChatTopics.OP_DELIVERED) || op.equals(ChatTopics.OP_READ) || op.equals(ChatTopics.OP_TYPING)
-        || op.equals(ChatTopics.OP_WATCH)) {
-      return state(r, u, op);
     }
     if (!OP_SEND.equals(op)) {
       return "ignored";
@@ -273,15 +226,7 @@ public final class UpstreamCommandListener implements AutoCloseable {
   }
 
   @Override
-  public synchronized void close() {
-    running = false;
-    consumer.wakeup();
-    if (thread != null) {
-      try {
-        thread.join(5_000);
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-      }
-    }
+  public void close() {
+    pipeline.close();
   }
 }

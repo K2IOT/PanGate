@@ -12,47 +12,34 @@ import com.pangate.contracts.v1.ChatMessage;
 import com.pangate.contracts.v1.ConversationKind;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
-import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.clients.consumer.OffsetAndMetadata;
-import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * {@code chat.commands} in group {@code chat-sequencer} (chat spec §4.4). Partitions of a poll run in parallel. Per
- * partition: commands grouped by
- * conversation in offset order → {@link Sequencer#process} → events → HTTP results → commit of that partition. A fence
- * or a store / Kafka failure rewinds the partition to the first record of the poll; the retry finds what was already
- * written through dedup, so no message gets a second seq. A command failing the same deterministic way
- * {@link PoisonGuard#MAX_ATTEMPTS} times in a row is dead-lettered on the last try.
+ * {@code chat.commands} in group {@code chat-sequencer} (chat spec §4.4) on a {@link KeyedPipeline} (perf 3c, spec
+ * §4.2): one lane per conversation (the record key), at most {@code max-batch} commands a batch, conversations in
+ * parallel. A batch → {@link Sequencer#process} → events → HTTP results. A fence or a store / Kafka failure retries the
+ * same batch in place; the retry finds what was already written through dedup, so no message gets a second seq. A
+ * command failing the same deterministic way {@link PoisonGuard#MAX_ATTEMPTS} times in a row is dead-lettered on the
+ * last try.
  */
 public final class SequencerLoop implements AutoCloseable {
 
   public static final String GROUP = "chat-sequencer";
   private static final Logger log = LoggerFactory.getLogger(SequencerLoop.class);
 
-  private final Consumer<String, byte[]> consumer;
-  private final String topic;
   private final Sequencer sequencer;
   private final EventProducer events;
   private final SendResults results;
@@ -60,15 +47,15 @@ public final class SequencerLoop implements AutoCloseable {
   private final MeterRegistry meters;
   private final Timer latency;
   private final Timer lag;
-  private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
-  private final PoisonGuard poison = new PoisonGuard();
-  private volatile boolean running = true;
-  private Thread thread;
+  private final KeyedPipeline pipeline;
 
   public SequencerLoop(Consumer<String, byte[]> consumer, String topic, Sequencer sequencer, EventProducer events,
       SendResults results, CommandProducer dlq, MeterRegistry meters) {
-    this.consumer = consumer;
-    this.topic = topic;
+    this(consumer, topic, sequencer, events, results, dlq, meters, KeyedPipeline.Settings.defaults(100, true));
+  }
+
+  public SequencerLoop(Consumer<String, byte[]> consumer, String topic, Sequencer sequencer, EventProducer events,
+      SendResults results, CommandProducer dlq, MeterRegistry meters, KeyedPipeline.Settings settings) {
     this.sequencer = sequencer;
     this.events = events;
     this.results = results;
@@ -76,6 +63,8 @@ public final class SequencerLoop implements AutoCloseable {
     this.meters = meters;
     this.latency = meters.timer("chat.send.latency");
     this.lag = meters.timer("chat.sequencer.lag");
+    this.pipeline = new KeyedPipeline("sequencer", consumer, topic, settings, this::handle, sequencer::forget,
+        meters);
   }
 
   public static KafkaConsumer<String, byte[]> consumer(String bootstrap, String group) {
@@ -95,79 +84,17 @@ public final class SequencerLoop implements AutoCloseable {
         .addAllMentionUserIds(m.mentions()).setSentAtMs(m.sentAtMs())).build();
   }
 
-  public synchronized void start() {
-    thread = Thread.ofPlatform().daemon().name("chat-sequencer").start(this::run);
+  public void start() {
+    pipeline.start();
   }
 
-  private void run() {
+  private void handle(List<ConsumerRecord<String, byte[]>> batch, boolean lastTry) {
     try {
-      consumer.subscribe(List.of(topic), new ConsumerRebalanceListener() {
-        @Override
-        public void onPartitionsRevoked(Collection<TopicPartition> parts) {
-          sequencer.forget();
-        }
-
-        @Override
-        public void onPartitionsAssigned(Collection<TopicPartition> parts) {}
-      });
-      while (running) {
-        try {
-          step();
-        } catch (WakeupException e) {
-          throw e;
-        } catch (RuntimeException e) {
-          log.warn("sequencer: {}; going on", e.toString());
-          Thread.sleep(1_000);
-        }
-      }
-    } catch (WakeupException e) {
-      // closing
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-    } finally {
-      workers.shutdownNow();
-      consumer.close(Duration.ofSeconds(2));
-    }
-  }
-
-  /** Partitions are sequenced in parallel (one virtual thread each); seek and commit stay on the poll thread. */
-  private void step() throws InterruptedException {
-    ConsumerRecords<String, byte[]> batch = consumer.poll(Duration.ofMillis(200));
-    Map<TopicPartition, Future<?>> work = new HashMap<>();
-    for (TopicPartition tp : batch.partitions()) {
-      List<ConsumerRecord<String, byte[]>> recs = batch.records(tp);
-      boolean lastTry = poison.lastTry(tp, recs.getFirst().offset());
-      work.put(tp, workers.submit(() -> {
-        partition(recs, lastTry);
-        return null;
-      }));
-    }
-    Map<TopicPartition, OffsetAndMetadata> done = new HashMap<>();
-    boolean failed = false;
-    for (Map.Entry<TopicPartition, Future<?>> w : work.entrySet()) {
-      TopicPartition tp = w.getKey();
-      List<ConsumerRecord<String, byte[]>> recs = batch.records(tp);
-      try {
-        w.getValue().get();
-        done.put(tp, new OffsetAndMetadata(recs.getLast().offset() + 1));
-        poison.clear(tp);
-      } catch (ExecutionException e) {
-        poison.failed(tp, recs.getFirst().offset(), e.getCause());
-        if (e.getCause() instanceof FencedException f) {
-          meters.counter("chat.lwt.conflicts").increment();
-          log.info("{}: {}; re-reading the partition", tp, f.getMessage());
-        } else {
-          log.warn("{} not sequenced: {}; retrying", tp, String.valueOf(e.getCause()));
-        }
-        consumer.seek(tp, recs.getFirst().offset());
-        failed = true;
-      }
-    }
-    if (!done.isEmpty()) {
-      consumer.commitSync(done);
-    }
-    if (failed) {
-      Thread.sleep(200);
+      partition(batch, lastTry);
+    } catch (FencedException f) {
+      meters.counter("chat.lwt.conflicts").increment();
+      log.info("{}; re-reading the conversation", f.getMessage());
+      throw f;
     }
   }
 
@@ -178,6 +105,8 @@ public final class SequencerLoop implements AutoCloseable {
    * way; a conversation that fails again is sequenced command by command and the command that fails is dead-lettered.
    */
   private void partition(List<ConsumerRecord<String, byte[]>> recs, boolean lastTry) {
+    // 3c minor: dead letters go out only once the batch got through, so a retried batch does not send them again
+    List<Runnable> deadLetters = new ArrayList<>();
     Map<String, List<Cmd>> byConv = new LinkedHashMap<>();
     long now = System.currentTimeMillis();
     for (ConsumerRecord<String, byte[]> r : recs) {
@@ -189,8 +118,10 @@ public final class SequencerLoop implements AutoCloseable {
         c = null;
       }
       if (c == null || !c.hasSend() || c.getSend().getConversationId().isEmpty()) {
-        dlq.deadLetter(r.key(), r.value(), "malformed ChatCommand");
-        meters.counter("chat.sequencer.malformed").increment();
+        deadLetters.add(() -> {
+          dlq.deadLetter(r.key(), r.value(), "malformed ChatCommand");
+          meters.counter("chat.sequencer.malformed").increment();
+        });
         continue;
       }
       byConv.computeIfAbsent(c.getSend().getConversationId(), k -> new ArrayList<>()).add(new Cmd(c, r));
@@ -219,8 +150,10 @@ public final class SequencerLoop implements AutoCloseable {
             }
             log.error("command at {}@{} failed {} times: {}; dead-lettered", c.record().topic(),
                 c.record().offset(), PoisonGuard.MAX_ATTEMPTS, one.toString());
-            dlq.deadLetter(c.record().key(), c.record().value(), "poison: " + one);
-            meters.counter("chat.sequencer.poison").increment();
+            deadLetters.add(() -> {
+              dlq.deadLetter(c.record().key(), c.record().value(), "poison: " + one);
+              meters.counter("chat.sequencer.poison").increment();
+            });
           }
         }
       }
@@ -238,21 +171,14 @@ public final class SequencerLoop implements AutoCloseable {
       }
     }
     events.sendAll(out);
+    deadLetters.forEach(Runnable::run);
     long at = System.currentTimeMillis();
     received.forEach(t -> latency.record(Math.max(0, at - t), TimeUnit.MILLISECONDS));
     replies.forEach(m -> results.publish(m.replyTo(), m.message()));
   }
 
   @Override
-  public synchronized void close() {
-    running = false;
-    consumer.wakeup();
-    if (thread != null) {
-      try {
-        thread.join(10_000);
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-      }
-    }
+  public void close() {
+    pipeline.close();
   }
 }

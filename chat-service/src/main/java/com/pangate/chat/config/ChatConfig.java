@@ -84,7 +84,7 @@ public class ChatConfig {
 
   @Bean
   ScyllaChatStore scyllaChatStore(CqlSession s, ChatProperties p) {
-    return new ScyllaChatStore(s, p.scylla().keyspace());
+    return new ScyllaChatStore(s, p.scylla().keyspace(), p.fanout().inboxConcurrency());
   }
 
   @Bean(destroyMethod = "")
@@ -319,7 +319,8 @@ public class ChatConfig {
   SequencerLoop sequencerLoop(ChatProperties p, Sequencer sequencer, EventProducer events, RedisSendResults results,
       CommandProducer producer, MeterRegistry meters) {
     return new SequencerLoop(SequencerLoop.consumer(p.kafka().bootstrap(), SequencerLoop.GROUP),
-        p.kafka().commandsTopic(), sequencer, events, results, producer, meters);
+        p.kafka().commandsTopic(), sequencer, events, results, producer, meters,
+        com.pangate.chat.kafka.KeyedPipeline.Settings.of(p.pipeline(), p.pipeline().maxBatch(), true));
   }
 
   @Bean(destroyMethod = "")
@@ -336,16 +337,31 @@ public class ChatConfig {
   FanOutLoop fanOutLoop(ChatProperties p, ScyllaChatStore store, RedisChatCache cache, PushApiClient pusher,
       MeterRegistry meters, com.pangate.chat.core.Badge badge) {
     return new FanOutLoop(FanOutLoop.consumer(p.kafka().bootstrap(), FanOutLoop.GROUP), p.kafka().eventsTopic(),
-        new MemberLookup(store, cache), store, store, pusher, meters, badge);
+        new MemberLookup(store, cache), store, store, pusher, meters, badge,
+        com.pangate.chat.kafka.KeyedPipeline.Settings.of(p.pipeline(), 1, false));
   }
 
   @Bean(destroyMethod = "")
   UpstreamCommandListener upstreamCommandListener(ChatProperties p, Ingest ingest, Notifier notifier,
       CommandProducer producer, MeterRegistry meters, ChannelSubscriptions channels,
       com.pangate.chat.core.StateIngest state) {
-    return new UpstreamCommandListener(UpstreamCommandListener.consumer(p.kafka().bootstrap()),
-        p.kafka().upstreamTopic(), ingest, notifier, producer,
-        outcome -> meters.counter("chat.ingest.records", "result", outcome).increment(), channels, state);
+    return new UpstreamCommandListener(UpstreamCommandListener.consumer(p.kafka().bootstrap(),
+        UpstreamCommandListener.GROUP, "earliest"), p.kafka().upstreamTopic(), ingest, notifier, producer,
+        outcome -> meters.counter("chat.ingest.records", "role", "ingest", "result", outcome).increment(), channels,
+        state, UpstreamCommandListener.Role.INGEST,
+        com.pangate.chat.kafka.KeyedPipeline.Settings.of(p.pipeline(), 1, true), meters);
+  }
+
+  /** Perf 3c (spec §4.4): the state ops in their own group, from the end of the topic on its first start. */
+  @Bean(destroyMethod = "")
+  UpstreamCommandListener stateCommandListener(ChatProperties p, Ingest ingest, Notifier notifier,
+      CommandProducer producer, MeterRegistry meters, ChannelSubscriptions channels,
+      com.pangate.chat.core.StateIngest state) {
+    return new UpstreamCommandListener(UpstreamCommandListener.consumer(p.kafka().bootstrap(),
+        p.kafka().stateGroup(), "latest"), p.kafka().upstreamTopic(), ingest, notifier, producer,
+        outcome -> meters.counter("chat.ingest.records", "role", "state", "result", outcome).increment(), channels,
+        state, UpstreamCommandListener.Role.STATE,
+        com.pangate.chat.kafka.KeyedPipeline.Settings.of(p.pipeline(), 1, true), meters);
   }
 
   @Bean
@@ -457,7 +473,7 @@ public class ChatConfig {
       MeterRegistry meters) {
     return new com.pangate.chat.kafka.OfflineNotifierLoop(com.pangate.chat.kafka.OfflineNotifierLoop.consumer(
         p.kafka().bootstrap(), com.pangate.chat.kafka.OfflineNotifierLoop.GROUP), p.notifications().offlineTopic(),
-        notifications, sink, meters);
+        notifications, sink, meters, com.pangate.chat.kafka.KeyedPipeline.Settings.of(p.pipeline(), 1, false));
   }
 
   /** CH4 spec §4: channel posts on chat.events → NotifyRequests for offline followers. */
@@ -506,6 +522,11 @@ public class ChatConfig {
   com.pangate.chat.kafka.ReceiptWorkerLoop receiptWorkerLoop(ChatProperties p, ScyllaChatStore store,
       RedisChatCache cache, com.pangate.chat.core.PrivacyCache privacy, PushApiClient pusher, MeterRegistry meters,
       com.pangate.chat.core.Badge badge) {
+    if (!com.pangate.chat.kafka.ReceiptWorkerLoop.roundCovers(p.pushApi())) {
+      // 3b minor: a receipt push could still be pending when its round ends, and be sent again
+      log.warn("chat.push-api.timeout {} + low-wait {} reach the receipt round deadline {}: receipts may be pushed "
+          + "twice", p.pushApi().timeout(), p.pushApi().lowWait(), com.pangate.chat.kafka.ReceiptWorkerLoop.ROUND_DEADLINE);
+    }
     return new com.pangate.chat.kafka.ReceiptWorkerLoop(com.pangate.chat.kafka.ReceiptWorkerLoop.consumer(
         p.kafka().bootstrap(), com.pangate.chat.kafka.ReceiptWorkerLoop.GROUP), p.kafka().receiptsTopic(), store,
         new MemberLookup(store, cache), store, privacy, pusher, p.state(), meters, badge);
@@ -513,7 +534,11 @@ public class ChatConfig {
 
   @Bean
   SmartLifecycle chatBackground(CqlSession cql, ChatHealth health, ConnectTokenVerifier verifier,
-      RevocationListener revocationListener, UpstreamCommandListener upstream, CommandProducer producer,
+      RevocationListener revocationListener,
+      @org.springframework.beans.factory.annotation.Qualifier("upstreamCommandListener")
+      UpstreamCommandListener upstream,
+      @org.springframework.beans.factory.annotation.Qualifier("stateCommandListener")
+      UpstreamCommandListener stateCommands, CommandProducer producer,
       RedisChatCache redis, MeterRegistry meters, Revocations revocations, SequencerLoop sequencerLoop,
       EventProducer events, RedisSendResults results, FanOutLoop fanOut, PushApiClient pusher,
       AccountsListener accounts, com.pangate.chat.kafka.ReceiptWorkerLoop receipts,
@@ -547,13 +572,14 @@ public class ChatConfig {
         lifecycle.start();
         accounts.start();
         upstream.start();
+        stateCommands.start();
         running = true;
       }
 
       @Override
       public void stop() {
         running = false;
-        closeInOrder(upstream, accounts, lifecycle, sequencerLoop, fanOut, receipts, pusher, revocationListener,
+        closeInOrder(upstream, stateCommands, accounts, lifecycle, sequencerLoop, fanOut, receipts, pusher, revocationListener,
             producer, events, results, timers::shutdownNow, presence, redis, cql);
       }
 

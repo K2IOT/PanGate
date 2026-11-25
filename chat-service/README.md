@@ -88,6 +88,9 @@ can run ahead of what is written for a moment: use it to see that something is n
 | `limits.api.*` | per user: `GET /v1/conversations` 5/s burst 20; `GET /v1/state`, `POST /v1/sync`, `GET /v1/presence` 2/s burst 10 each; history 20/s burst 50; management (create, DM, add / remove / leave, role, owner, join) one shared bucket 5/s burst 20; the rest (`GET /v1/conversations/{id}`, mute, privacy, receipts) one shared bucket 10/s burst 30 | perf 3a; per pod, so behind N pods a user may get up to N times these; `429 rate_limited`, checked before any store read |
 | `http.send-wait` | `3s` | |
 | `kafka.receipts-topic` | `chat.receipts` | |
+| `kafka.state-group` | `chat-state` | perf 3c: the state ops (`chat.delivered`, `chat.read`, `chat.typing`, `chat.presence.watch`) are read from the upstream topic by this group, apart from `chat-ingest` (sends, channel open / close), so a slow watch never sits in front of a message. Starts from the end of the topic the first time (`latest`) |
+| `pipeline.{max-pending-per-partition,max-batch,max-concurrency,commit-interval,revoke-wait}` | 1000, 100, 256, 200ms, 5s | perf 3c: ingest, state, sequencer, fan-out and offline run on a keyed pipeline. One lane per record key (conversation, or sender for the upstream topic), in order within a lane, lanes in parallel (at most `max-concurrency` at once); the poll never waits for the work. A partition with `max-pending-per-partition` unfinished records pauses (resumes below half); each partition commits its oldest unfinished offset every `commit-interval`. A failed batch is retried in place (100 ms → 5 s). `max-batch` is the sequencer's commands per batch (the others take one). On a revoke or at shutdown, running batches get `revoke-wait`, then are interrupted |
+| `fanout.inbox-concurrency` | 256 | perf 3c: inbox rows of a fan-out are written together; at most this many at once for the pod |
 | `state.*` | marks 50/s burst 100, windows DM 500 ms / group 2 s, listed receipts ≤ 50, offline grace 5 s, watch TTL 5 m, ≤ 200 watch entries, typing every 2 s, typing 5/s burst 10 per user (`typing-rate`, `typing-burst`), presence watch 1/s burst 5 per user (`watch-rate`, `watch-burst`) | CH3; perf 3a |
 
 ## Metrics
@@ -98,19 +101,22 @@ can run ahead of what is written for a moment: use it to see that something is n
 `chat.revocations.active`; CH3: `chat.receipts.rejected{reason}`, `chat.receipts.pushes{result}`,
 `chat.receipts.store.failures`, `chat.typing.relayed`, `chat.typing.dropped{reason}`,
 `chat.presence.transitions{to}`, `chat.presence.watchers` (estimate), `chat.presence.pushes`,
-`chat.presence.unavailable`.
+`chat.presence.unavailable`. Perf 3c, tag `pipeline` (`ingest`, `state`, `sequencer`, `fanout`, `offline`):
+`chat.pipeline.pending`, `chat.pipeline.lanes`, `chat.pipeline.paused`, `chat.pipeline.oldest` (ms, the record
+waiting longest: a stuck conversation shows here), `chat.pipeline.batch`, `chat.pipeline.retries{reason}`,
+`chat.kafka.lag`; `chat.ingest.records{role,result}`.
 
 ## Failure behaviour
 
 | Failure | Behaviour |
 |---|---|
 | Kafka down | WebSocket: the gateway answers `ERROR 4500`, the client resends the same `clientMsgId`. HTTP: `503` + `Retry-After`. Sequencer and fan-out do not commit |
-| ScyllaDB down (1 s timeout) | the sequencer rewinds and retries; reads answer `503`; `/ready` turns 503 after 10 s without an answer |
+| ScyllaDB down (1 s timeout) | the sequencer retries the batch in place; reads answer `503`; `/ready` turns 503 after 10 s without an answer |
 | Redis down | dedup reads ScyllaDB, members read ScyllaDB, HTTP sends answer `202` at once |
 | Redis errors on a membership change | the change is stored, the request answers `503` (retry is safe): a cached list must not outlive a removal |
-| Push API down | fan-out retries the failed requests (100 ms → 5 s), rewinds after 30 s; nothing is committed before it was sent |
+| Push API down | fan-out retries the failed requests (100 ms → 5 s) until they get through; only that conversation waits, others go on; nothing is committed past it |
 | ScyllaDB fails after the pushes | fan-out retries only the inbox writes, not the pushes |
-| Long fan-out backlog | polls of ≤ 100 events, a 120 s step budget, progress committed; `max.poll.interval.ms` 10 min |
+| Long fan-out backlog, or one conversation stuck | the poll goes on; a partition with 1 000 unfinished events pauses until they drain; the commit stops at the oldest unfinished event (`chat.pipeline.oldest`) |
 | Rebalance, two sequencers on one partition | the old one's LWT fails; it drops its batch; no `convSeq` is used twice |
 | Malformed record | counted and written to `chat.commands.dlq` |
 | ScyllaDB down under the receipt worker | windows dropped, rewind to the last commit with backoff; replayed marks are harmless |
@@ -168,6 +174,24 @@ At 100 messages/s the 1-1 p99 is above the spec's 300 ms. Where the time goes, a
 
 Everything shares the four cores: seven services, three containers and the clients. Partitions are processed in
 parallel by ingest, sequencer and fan-out; before that change the group p99 was 722 ms and the 1-1 p99 was 981 ms.
+
+### After perf 3c (keyed pipelines), same kind of machine (4 vCPU), 2026-11-24
+
+Measured before and after on the same machine (faster than the CH1 one: the 1-1 baseline was already under 300 ms).
+Groups are built through admins (a create takes at most 200 others since review F7); members connect just before
+the first message.
+
+| Run | Before 3c | After 3c |
+|---|---|---|
+| 1-1 over WebSocket, 50 chats, 100 messages/s | p50 70.6 / p99 194.7 / max 217.1 ms | p50 23.5 / p99 33.3 / max 40.9 ms |
+| group of 500, 20 messages at 5/s | p99 91.4 ms | p99 90.4 ms |
+| group of 500, 100 messages at 10/s (5 000 pushes/s) | all delivered, p99 6 596 ms, last delivery 6.6 s after the last send (fan-out falls behind) | all delivered, p99 1 395 ms, last delivery 0.3 s after the last send (keeps up) |
+| five groups of 500, 50 messages each at 5/s (12 500 pushes/s) | (no valid number: idle test clients were closed) | all 125 000 delivered, p99 8 745 ms, last delivery 10 s after the last send |
+| channel, 10 000 sessions, 10 messages at 2/s | p99 295.8 ms | p99 287.2 ms |
+
+Five groups offer 12 500 pushes/s for 10 s; the whole stack on this machine (seven services, three containers and
+the clients on four cores) delivers about 6 000/s, so that run queues for 10 s and drains. One group of 500 at 10/s
+(5 000 pushes/s) keeps up: a conversation no longer limits itself to 2–4 messages/s.
 
 ## Tests
 

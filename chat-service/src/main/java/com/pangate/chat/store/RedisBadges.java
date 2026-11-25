@@ -181,9 +181,30 @@ public final class RedisBadges implements ChatStores.BadgeStore, AutoCloseable {
     return "badge:" + user;
   }
 
+  /** 3a minor M3: the SHA-1 of each script, so calls send 40 bytes instead of the whole script. */
+  private static final java.util.Map<String, String> SHAS = new java.util.concurrent.ConcurrentHashMap<>();
+
+  static String sha(String script) {
+    return SHAS.computeIfAbsent(script, x -> {
+      try {
+        return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-1")
+            .digest(x.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+      } catch (java.security.NoSuchAlgorithmException e) {
+        throw new IllegalStateException(e);
+      }
+    });
+  }
+
+  /** EVALSHA; when Redis does not know the script (restart, SCRIPT FLUSH), EVAL, which also loads it. */
   private long eval(String script, String user, String... args) {
     try {
-      Long v = connection().sync().eval(script, ScriptOutputType.INTEGER, new String[] {key(user)}, args);
+      String[] keys = {key(user)};
+      Long v;
+      try {
+        v = connection().sync().evalsha(sha(script), ScriptOutputType.INTEGER, keys, args);
+      } catch (io.lettuce.core.RedisNoScriptException e) {
+        v = connection().sync().eval(script, ScriptOutputType.INTEGER, keys, args);
+      }
       return v == null ? 0 : v;
     } catch (StoreUnavailableException e) {
       throw e;
@@ -225,23 +246,49 @@ public final class RedisBadges implements ChatStores.BadgeStore, AutoCloseable {
     eval(RAISE, user, convId, Long.toString(last), Long.toString(read), ttl());
   }
 
-  /** One script per user, all written before any answer is awaited (Lettuce pipelines on one connection). */
+  /**
+   * One script per user, all written before any answer is awaited (Lettuce pipelines on one connection). Returns the
+   * users whose script failed or did not answer within the one Redis timeout (3a minor M5).
+   */
   @Override
-  public void raiseAll(List<String> users, String convId, long last) {
+  public List<String> raiseAll(List<String> users, String convId, long last) {
     RedisAsyncCommands<String, String> async;
     List<RedisFuture<Long>> sent = new ArrayList<>(users.size());
     try {
       async = connection().async();
       for (String u : users) {
-        sent.add(async.eval(RAISE, ScriptOutputType.INTEGER, new String[] {key(u)}, convId, Long.toString(last), "0",
-            ttl()));
+        sent.add(async.evalsha(sha(RAISE), ScriptOutputType.INTEGER, new String[] {key(u)}, convId,
+            Long.toString(last), "0", ttl()));
       }
     } catch (StoreUnavailableException e) {
       throw e;
     } catch (RuntimeException e) {
       throw new StoreUnavailableException("redis: " + e.getMessage(), e);
     }
-    awaitAll(sent, timeout);
+    List<String> failed = new ArrayList<>();
+    List<String> unknownScript = new ArrayList<>();
+    long deadline = System.nanoTime() + timeout.toNanos();
+    for (int i = 0; i < sent.size(); i++) {
+      try {
+        sent.get(i).get(Math.max(1, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        failed.addAll(users.subList(i, users.size()));
+        break;
+      } catch (ExecutionException e) {
+        (e.getCause() instanceof io.lettuce.core.RedisNoScriptException ? unknownScript : failed).add(users.get(i));
+      } catch (TimeoutException e) {
+        failed.add(users.get(i));
+      }
+    }
+    for (String u : unknownScript) {   // Redis forgot the script: EVAL once (which loads it), the rest by SHA again
+      try {
+        raise(u, convId, last, 0);
+      } catch (RuntimeException e) {
+        failed.add(u);
+      }
+    }
+    return failed;
   }
 
   @Override
@@ -265,21 +312,6 @@ public final class RedisBadges implements ChatStores.BadgeStore, AutoCloseable {
       throw e;
     } catch (RuntimeException e) {
       throw new StoreUnavailableException("redis: " + e.getMessage(), e);
-    }
-  }
-
-  /** Final review I2: one Redis timeout for the whole pipeline, however many commands. */
-  private static void awaitAll(List<RedisFuture<Long>> sent, Duration timeout) {
-    long deadline = System.nanoTime() + timeout.toNanos();
-    for (RedisFuture<Long> f : sent) {
-      try {
-        f.get(Math.max(1, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        throw new StoreUnavailableException("redis: interrupted", e);
-      } catch (ExecutionException | TimeoutException e) {
-        throw new StoreUnavailableException("redis: " + e, e);
-      }
     }
   }
 

@@ -220,6 +220,22 @@ public final class ChatStores {
     /** Raises the user's last_seq / last_msg_at for the conversation; a lower seq never wins. */
     void touchUserConv(String userId, String convId, long seq, long atMs);
 
+    /**
+     * Perf 3c (spec §4.3): {@link #touchUserConv} for every user, together; returns the users whose row was not
+     * written (to retry). This default writes them one by one.
+     */
+    default List<String> touchUserConvs(List<String> userIds, String convId, long seq, long atMs) {
+      List<String> failed = new java.util.ArrayList<>();
+      for (String u : userIds) {
+        try {
+          touchUserConv(u, convId, seq, atMs);
+        } catch (StoreUnavailableException e) {
+          failed.add(u);
+        }
+      }
+      return failed;
+    }
+
     /** Members, earliest joined first (owner succession, account spec §8). */
     default List<Member> membersByJoin(String convId) {
       return members(convId);
@@ -305,7 +321,8 @@ public final class ChatStores {
     void raise(String user, String convId, long last, long read);
 
     /** {@code raise(u, convId, last, 0)} for each user, all sent before any answer is awaited. */
-    void raiseAll(List<String> users, String convId, long last);
+    /** 3a minor M5: returns the users whose raise is not known to have landed (failed or no answer in time). */
+    List<String> raiseAll(List<String> users, String convId, long last);
 
     /** Left: its unread leave the total and later raises of it are ignored until a join. */
     void drop(String user, String convId);

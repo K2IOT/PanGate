@@ -1,6 +1,7 @@
 package com.pangate.chat.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
 import java.util.List;
@@ -45,5 +46,41 @@ class ChatPropertiesTest {
     assertThat(p.auth().audience()).isEqualTo("pangate-gw");
     assertThat(p.redis().memberCacheTtl()).isEqualTo(Duration.ofSeconds(60));
     assertThat(p.managementPort()).isEqualTo(8081);
+  }
+
+  /** Perf 3c (spec §4.6). */
+  @Test
+  void pipelineDefaultsMatchSpec() {
+    ChatProperties p = new Binder(new MapConfigurationPropertySource(Map.of("chat.cell", "c1")))
+        .bind("chat", ChatProperties.class).get();
+    assertThat(p.pipeline().maxPendingPerPartition()).isEqualTo(1000);
+    assertThat(p.pipeline().maxBatch()).isEqualTo(100);
+    assertThat(p.pipeline().maxConcurrency()).isEqualTo(256);
+    assertThat(p.pipeline().commitInterval()).isEqualTo(Duration.ofMillis(200));
+    assertThat(p.pipeline().revokeWait()).isEqualTo(Duration.ofSeconds(5));
+    assertThat(p.fanout().inboxConcurrency()).isEqualTo(256);
+    assertThat(p.kafka().stateGroup()).isEqualTo("chat-state");
+  }
+
+  /** 3a minor M4: the bound defaults of chat.limits.api are the ones tests use (Api.DEFAULTS). */
+  @Test
+  void apiLimitDefaultsBindToTheConstant() {
+    ChatProperties p = new Binder(new MapConfigurationPropertySource(Map.of("chat.cell", "c1")))
+        .bind("chat", ChatProperties.class).get();
+    assertThat(p.limits().api()).isEqualTo(ChatProperties.Api.DEFAULTS);
+  }
+
+  /** Codex review of #12: a semaphore with no permits would block every fan-out at its first inbox row. */
+  @Test
+  void inboxConcurrencyBelowOneIsRefused() {
+    for (String bad : List.of("0", "-1")) {
+      assertThatThrownBy(() -> new Binder(new MapConfigurationPropertySource(
+          Map.of("chat.cell", "c1", "chat.fanout.inbox-concurrency", bad))).bind("chat", ChatProperties.class))
+          .rootCause().isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("chat.fanout.inbox-concurrency");
+    }
+    assertThat(new Binder(new MapConfigurationPropertySource(
+        Map.of("chat.cell", "c1", "chat.fanout.inbox-concurrency", "1"))).bind("chat", ChatProperties.class).get()
+        .fanout().inboxConcurrency()).isEqualTo(1);
   }
 }

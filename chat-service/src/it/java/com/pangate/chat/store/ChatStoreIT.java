@@ -94,6 +94,24 @@ class ChatStoreIT {
     assertThat(store.dm(b, a)).contains(first);
   }
 
+  /** Perf 3c (spec §4.3): 500 rows written together, none reported failed, each with the seq and time. */
+  @Test
+  void touchUserConvsWritesEveryRow() {
+    String id = Ids.next();
+    List<String> users = new java.util.ArrayList<>();
+    for (int i = 0; i < 500; i++) {
+      users.add("tb" + i);
+    }
+    assertThat(store.touchUserConvs(users, id, 7, 7_000)).isEmpty();
+    for (String u : users) {
+      assertThat(store.userConvs(u, null, 10)).filteredOn(c -> c.convId().equals(id)).singleElement()
+          .satisfies(c -> {
+            assertThat(c.lastSeq()).isEqualTo(7);
+            assertThat(c.lastMsgAtMs()).isEqualTo(7_000);
+          });
+    }
+  }
+
   @Test
   void touchUserConvKeepsTheHighestSeq() {
     String id = conv(ConversationKind.CONVERSATION_KIND_GROUP, "tu1", "tu2");

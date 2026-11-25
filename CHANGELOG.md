@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Perf 3a–3c minors
+- chat-service (3c): a key holds its lane across rebalances (no two batches of one conversation at once), a
+  handler `Error` is retried, retry warnings are rate-limited; the final commit survives a pending wakeup, a lane
+  that waited for a slot does not run after its partition went, poison counts are in a row, `chat.pipeline.*` is
+  validated, the sequencer dead-letters once; `chat.fanout.inbox-concurrency` below 1 is refused at start-up (Codex
+  review of #12).
+- chat-service (3b): push timers are cancelled when no longer needed, dropped rejections count as `dropped`,
+  `chat.push-api.*` is validated, and a start-up warning names a timeout + low-wait that reaches the receipt round.
+- chat-service (3b, CI of #12): every push stream opens its call at start-up and right after a rotation, so a typing
+  or presence push no longer finds a call that has not started (it was dropped: the first one towards each stream was
+  always lost).
+- chat-service (3a): badge scripts run by SHA (`EVALSHA`), a partial `raiseAll` failure forgets only the failed
+  users' counters, a join reads `last_seq` after the insert.
+
+### Perf 3c (keyed Kafka pipelines)
+Design: `docs/superpowers/specs/2026-11-24-perf-3c-kafka-pipelines-design.md`.
+- chat-service: ingest, sequencer, fan-out and the offline notifier run on one keyed pipeline: one lane per record
+  key (conversation, or sender), in order within a lane, lanes in parallel; the poll never waits for the work, each
+  partition commits its oldest unfinished record, a partition with 1 000 unfinished records pauses. A failed batch
+  is retried in place: a slow or stuck conversation only holds itself (`chat.pipeline.*`, `chat.kafka.lag`).
+- chat-service: state commands (read, delivered, typing, presence watch) are read by their own group `chat-state`,
+  so a slow watch no longer sits in front of a message; it starts from the end of the topic the first time.
+- chat-service: fan-out writes every member's inbox row together (at most 256 at once per pod) and retries only the
+  rows that failed; the 30 s give-up and the 120 s step budget are gone.
+- Measured on a 4 vCPU machine: 1-1 at 100 messages/s p99 194.7 → 33.3 ms; a group of 500 at 10 messages/s now keeps
+  up (p99 6.6 s → 1.4 s).
+
 ### Perf 3b (Push API client)
 Design: `docs/superpowers/specs/2026-11-24-perf-3b-push-api-client-design.md`.
 - chat-service: pushes go over a pool of 4 SendStreams spread by round-robin over every Push API pod (`push-api` must

@@ -131,5 +131,5 @@ Reviewer độc lập: 0 Critical, 5 Important (đã sửa, mỗi sửa có test
 - **I4:** `must-wait` làm lỗi MUST cả khi stream vẫn đang trả lời (chỉ chậm): nay chỉ lỗi khi stream không trả lời gì trong thời gian chờ.
 - **I5:** Push API sập thật thì gRPC tạo call được rồi mới lỗi, làm lỗi ngay mọi MUST trong hàng: nay chỉ ghi lên call sau khi gRPC báo sẵn sàng lần đầu; các MUST chờ tới `must-wait`.
 
-Để lại (Minor): timer timeout mỗi lần ghi không huỷ; tra meter mỗi lần gọi; `PushNotifier` báo push bị bỏ là "unavailable"; chưa kiểm giá trị cấu hình; chú thích lớp nói quá về giới hạn bộ đệm; chưa cảnh báo khi `timeout + low-wait` chạm `ROUND_DEADLINE` của worker biên nhận.
+Minor (sửa 2026-11-25): timer chờ và timer timeout bị huỷ khi không còn cần (executor gỡ timer đã huỷ; request bị từ chối không còn được đặt timer chờ); meter tra một lần; `PushNotifier` đếm push bị bỏ là `dropped`; `chat.push-api.*` không hợp lệ bị từ chối lúc khởi động; chú thích lớp nói rõ giới hạn là số request, không phải số byte; cảnh báo lúc khởi động khi `timeout + low-wait` chạm `ROUND_DEADLINE` (11 s) của worker biên nhận.
 

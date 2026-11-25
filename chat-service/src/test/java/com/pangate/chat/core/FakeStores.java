@@ -135,7 +135,11 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
     check();
     return Optional.ofNullable(members.getOrDefault(convId, Map.of()).get(userId));
   }
+  /** 3a minor: runs at the start of each member insert (a message sequenced meanwhile). */
+  public volatile Runnable beforeAdd = () -> { };
+
   @Override public void add(String convId, Member m) {
+    beforeAdd.run();
     check();
     members.computeIfAbsent(convId, k -> new ConcurrentHashMap<>()).put(m.userId(), m);
     joined.putIfAbsent(convId + "|" + m.userId(), joins.incrementAndGet());
@@ -168,7 +172,27 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
     return userConvs.getOrDefault(userId, Map.of()).values().stream()
         .sorted(Comparator.comparingLong(UserConv::lastMsgAtMs).reversed()).limit(limit).toList();
   }
+  /** Perf 3c: user → how many more inbox touches of theirs fail; every touchUserConvs call, in order. */
+  public final Map<String, Integer> failTouchFor = new ConcurrentHashMap<>();
+  public final List<List<String>> touchBatches = java.util.Collections.synchronizedList(new ArrayList<>());
+
+  @Override public List<String> touchUserConvs(List<String> userIds, String convId, long seq, long atMs) {
+    touchBatches.add(List.copyOf(userIds));
+    List<String> failed = new ArrayList<>();
+    for (String u : userIds) {
+      try {
+        touchUserConv(u, convId, seq, atMs);
+      } catch (StoreUnavailableException e) {
+        failed.add(u);
+      }
+    }
+    return failed;
+  }
+
   @Override public void touchUserConv(String userId, String convId, long seq, long atMs) {
+    if (failTouchFor.computeIfPresent(userId, (k, n) -> n - 1) instanceof Integer left && left >= 0) {
+      throw new StoreUnavailableException("touch down for " + userId, null);
+    }
     synchronized (this) {
       if (failTouches > 0) {
         failTouches--;
@@ -313,7 +337,19 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
     lastSeen.put(userId, atMs);
   }
 
+  /** Perf 3c: a message write of this conversation waits for the latch. */
+  public final Map<String, java.util.concurrent.CountDownLatch> holdWrites = new ConcurrentHashMap<>();
+
   @Override public void write(StoredMessage m) {
+    java.util.concurrent.CountDownLatch hold = holdWrites.get(m.convId());
+    if (hold != null) {
+      try {
+        hold.await();
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new StoreUnavailableException("interrupted", e);
+      }
+    }
     check();
     if (m.clientMsgId().equals(poisonClientMsgId)) {
       throw new IllegalArgumentException("cannot store " + m.clientMsgId());

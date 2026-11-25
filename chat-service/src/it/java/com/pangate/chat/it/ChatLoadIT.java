@@ -53,6 +53,8 @@ class ChatLoadIT {
 
   /** Every chat.message pushed to these clients: latency from the "t=<nanos>" in its text. */
   static final ConcurrentLinkedQueue<Long> latenciesNs = new ConcurrentLinkedQueue<>();
+  static final Map<String, java.util.concurrent.atomic.AtomicInteger> perConversation =
+      new java.util.concurrent.ConcurrentHashMap<>();
 
   static void listen(GatewayClient c) {
     c.onPush(f -> {
@@ -61,7 +63,10 @@ class ChatLoadIT {
       }
       if ("chat.message".equals(f.getHeadersMap().get("type"))) {
         try {
-          String text = ChatMessage.parseFrom(f.getPayload()).getText();
+          ChatMessage cm = ChatMessage.parseFrom(f.getPayload());
+          String text = cm.getText();
+          perConversation.computeIfAbsent(cm.getConversationId(), k -> new java.util.concurrent.atomic.AtomicInteger())
+              .incrementAndGet();
           if (text.startsWith("t=")) {
             latenciesNs.add(System.nanoTime() - Long.parseLong(text.substring(2)));
           }
@@ -127,8 +132,7 @@ class ChatLoadIT {
     }
     com.pangate.chat.support.KnownUsers.add(h.bootstrap(), h.chat, users.toArray(String[]::new));
     connectAll(users).forEach(ChatLoadIT::listen);
-    String g = h.json(h.call("POST", "/v1/conversations", users.getFirst(), Map.of("kind", "group", "title", "load",
-        "memberIds", users.subList(1, users.size())), Map.of())).get("id").asText();
+    String g = createGroup(users);
     latenciesNs.clear();
     int messages = 20;
     for (int i = 0; i < messages; i++) {
@@ -138,6 +142,160 @@ class ChatLoadIT {
     int expected = messages * 500;
     await().atMost(Duration.ofSeconds(120)).until(() -> latenciesNs.size() >= expected);
     report("group 500 (20 messages, 5/s)", expected);
+    h.closeClients();
+  }
+
+  /** Perf 3c (spec §2): users of a new group of 500, all connected and listening; returns the group id. */
+  static String groupOfConnected(String prefix) throws Exception {
+    String g = groupOf(prefix);
+    connectMembers(List.of(g));
+    return g;
+  }
+
+  /** A group of 500 new users, none connected yet; "id run". */
+  static String groupOf(String prefix) throws Exception {
+    String run = prefix + UUID.randomUUID().toString().substring(0, 6);
+    List<String> users = new ArrayList<>();
+    for (int i = 0; i < 500; i++) {
+      users.add(run + "-" + i);
+    }
+    com.pangate.chat.support.KnownUsers.add(h.bootstrap(), h.chat, users.toArray(String[]::new));
+    return createGroup(users) + " " + run;
+  }
+
+  /**
+   * Connects and listens as every member, right before sending: test clients send no heartbeat, so connections
+   * opened while other groups are still being built would be closed as idle before the first message.
+   */
+  static void connectMembers(List<String> groups) throws Exception {
+    List<String> users = new ArrayList<>();
+    for (String g : groups) {
+      String run = g.split(" ")[1];
+      for (int i = 0; i < 500; i++) {
+        users.add(run + "-" + i);
+      }
+    }
+    connectAll(users).forEach(ChatLoadIT::listen);
+  }
+
+  /**
+   * A group of all {@code users}, the first one owning it. Review 2026-11-19 (F7): a create takes at most 200 others,
+   * and only owners and admins add (5/s, burst 20 each), so 15 admins add the rest, 20 each, in parallel.
+   */
+  static String createGroup(List<String> users) throws Exception {
+    String owner = users.getFirst();
+    int first = Math.min(users.size(), 201);
+    HttpResponse<String> created = h.call("POST", "/v1/conversations", owner, Map.of("kind", "group", "title", "load",
+        "memberIds", users.subList(1, first)), Map.of());
+    assertThat(created.statusCode()).as(created.body()).isEqualTo(201);
+    String g = h.json(created).get("id").asText();
+    List<String> rest = users.subList(first, users.size());
+    int admins = (rest.size() + 19) / 20;
+    try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
+      List<Future<?>> fs = new ArrayList<>();
+      for (int a = 0; a < admins; a++) {
+        String admin = users.get(1 + a);
+        HttpResponse<String> r = h.call("PUT", "/v1/conversations/" + g + "/members/" + admin + "/role", owner,
+            Map.of("role", "admin"), Map.of());
+        assertThat(r.statusCode()).as(r.body()).isEqualTo(204);
+        List<String> mine = rest.subList(a * 20, Math.min(rest.size(), a * 20 + 20));
+        fs.add(pool.submit(() -> {
+          for (String u : mine) {
+            HttpResponse<String> add = h.call("POST", "/v1/conversations/" + g + "/members", admin,
+                Map.of("userId", u), Map.of());
+            assertThat(add.statusCode()).as(add.body()).isEqualTo(204);
+          }
+          return null;
+        }));
+      }
+      for (Future<?> f : fs) {
+        f.get();
+      }
+    }
+    return g;
+  }
+
+  /** Sends {@code perSecond} messages a second for 10 s to every group (one sender thread per group). */
+  static void sendToGroups(List<String> groups, int perSecond) throws Exception {
+    long t0 = System.nanoTime();
+    try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
+      List<Future<?>> fs = new ArrayList<>();
+      for (String g : groups) {
+        String[] idAndRun = g.split(" ");
+        fs.add(pool.submit(() -> {
+          for (int i = 0; i < perSecond * 10; i++) {
+            long due = t0 + i * 1_000_000_000L / perSecond;
+            long wait = due - System.nanoTime();
+            if (wait > 0) {
+              Thread.sleep(wait / 1_000_000, (int) (wait % 1_000_000));
+            }
+            sendTimed(idAndRun[1] + "-" + (i % 500), idAndRun[0]);
+          }
+          return null;
+        }));
+      }
+      for (Future<?> f : fs) {
+        f.get();
+      }
+    }
+  }
+
+  @Test
+  void groupOf500At10PerSecond() throws Exception {
+    List<String> groups = List.of(groupOfConnected("ga"));
+    latenciesNs.clear();
+    long t0 = System.nanoTime();
+    sendToGroups(groups, 10);
+    long sent = System.nanoTime();
+    int expected = 100 * 500;
+    await().atMost(Duration.ofSeconds(300)).until(() -> latenciesNs.size() >= expected);
+    report("group 500 (100 messages, 10/s)", expected);
+    System.out.printf("CHAT-LOAD   sending took %.1f s, last delivery %.1f s after the last send%n",
+        (sent - t0) / 1e9, (System.nanoTime() - sent) / 1e9);
+    h.closeClients();
+  }
+
+  @Test
+  void fiveGroupsOf500At5PerSecond() throws Exception {
+    List<String> groups = new ArrayList<>();
+    for (int i = 0; i < 5; i++) {
+      groups.add(groupOf("g" + i));
+    }
+    connectMembers(groups);
+    latenciesNs.clear();
+    // -Dchat.load.jfr=<file>: a JFR recording of the sending and delivering, to see where the CPU goes
+    String jfrFile = System.getProperty("chat.load.jfr", "");
+    jdk.jfr.Recording jfr = null;
+    if (!jfrFile.isEmpty()) {
+      jfr = new jdk.jfr.Recording(jdk.jfr.Configuration.getConfiguration("profile"));
+      jfr.start();
+      System.out.println("CHAT-LOAD   jfr started");
+    }
+    long t0 = System.nanoTime();
+    sendToGroups(groups, 5);
+    long sent = System.nanoTime();
+    int expected = 5 * 50 * 500;
+    long deadline = System.nanoTime() + Duration.ofSeconds(300).toNanos();
+    while (latenciesNs.size() < expected && System.nanoTime() < deadline) {
+      Thread.sleep(10_000);
+      System.out.printf("CHAT-LOAD   %d/%d delivered%n", latenciesNs.size(), expected);
+    }
+    if (jfr != null) {
+      jfr.stop();
+      jfr.dump(java.nio.file.Path.of(jfrFile));
+      jfr.close();
+      System.out.println("CHAT-LOAD   jfr stopped");
+    }
+    report("five groups of 500 (50 messages each, 5/s each)", expected);
+    for (String g : groups) {
+      String id = g.split(" ")[0];
+      System.out.printf("CHAT-LOAD   group %s: %s deliveries%n", id, perConversation.get(id));
+    }
+    io.micrometer.core.instrument.MeterRegistry m = h.chat.getBean(io.micrometer.core.instrument.MeterRegistry.class);
+    m.find("chat.fanout.push").counters().forEach(c -> System.out.printf("CHAT-LOAD   chat.fanout.push %s: %.0f%n",
+        c.getId().getTag("result"), c.count()));
+    System.out.printf("CHAT-LOAD   sending took %.1f s, last delivery %.1f s after the last send%n",
+        (sent - t0) / 1e9, (System.nanoTime() - sent) / 1e9);
     h.closeClients();
   }
 
