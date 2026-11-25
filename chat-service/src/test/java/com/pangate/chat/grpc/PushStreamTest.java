@@ -31,7 +31,7 @@ class PushStreamTest {
 
   final ScriptedPushService api = new ScriptedPushService();
   final SimpleMeterRegistry meters = new SimpleMeterRegistry();
-  final ScheduledExecutorService timers = Executors.newSingleThreadScheduledExecutor();
+  final ScheduledExecutorService timers = new java.util.concurrent.ScheduledThreadPoolExecutor(1);
   Server server;
   ManagedChannel channel;
   final List<PushStream> made = new ArrayList<>();
@@ -412,5 +412,35 @@ class PushStreamTest {
     } finally {
       dead.shutdownNow();
     }
+  }
+
+  // --- perf 3b deferred minors ---
+
+  /** 3b minor: an answered request leaves no timer behind (thousands a second would pile up for 8 s each). */
+  @Test
+  void answeredRequestsLeaveNoTimers() {
+    api.autoAnswer = true;
+    PushStream s = stream(Duration.ofSeconds(5));
+    List<CompletableFuture<PushResponse>> all = new ArrayList<>();
+    for (int i = 0; i < 200; i++) {
+      all.add(s.send(req("p" + i), Priority.MUST));
+    }
+    await().until(() -> all.stream().allMatch(CompletableFuture::isDone));
+    await().atMost(Duration.ofSeconds(2)).until(
+        () -> ((java.util.concurrent.ScheduledThreadPoolExecutor) timers).getQueue().size() <= 2);
+  }
+
+  /** 3b minor: limits that cannot work are refused at start. */
+  @Test
+  void impossibleLimitsAreRefused() {
+    Duration s1 = Duration.ofSeconds(1);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> new PushStream.Limits(0, 0.2, s1, 10, s1, s1, s1))
+        .isInstanceOf(IllegalArgumentException.class);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> new PushStream.Limits(10, 1.5, s1, 10, s1, s1, s1))
+        .isInstanceOf(IllegalArgumentException.class);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> new PushStream.Limits(10, 0.2, s1, -1, s1, s1, s1))
+        .isInstanceOf(IllegalArgumentException.class);
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+        () -> new PushStream.Limits(10, 0.2, s1, 10, s1, Duration.ZERO, s1)).isInstanceOf(IllegalArgumentException.class);
   }
 }

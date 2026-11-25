@@ -50,7 +50,15 @@ public final class ReceiptWorkerLoop implements AutoCloseable {
    * Perf 3b (spec §4.1): a receipt push may wait {@code low-wait} (2 s) for room, then {@code timeout} (8 s) for its
    * answer; the round waits that long plus a second, so nothing still queued or in flight is resent.
    */
-  static final Duration ROUND_DEADLINE = Duration.ofSeconds(11);
+  public static final Duration ROUND_DEADLINE = Duration.ofSeconds(11);
+
+  /**
+   * 3b minor: false when a receipt push may still be queued or in flight at the end of a round ({@code low-wait} plus
+   * {@code timeout} past {@link #ROUND_DEADLINE}): the next round would resend it while the first try is pending.
+   */
+  public static boolean roundCovers(com.pangate.chat.config.ChatProperties.PushApi p) {
+    return p.timeout().plus(p.lowWait()).compareTo(ROUND_DEADLINE) < 0;
+  }
   /** Codex review of PR #6: at most this long is waited for a Push API {@code retry_after_ms} between rounds. */
   static final long MAX_RETRY_AFTER_MS = 2_000;
   static final long MAX_BACKOFF_MS = 5_000;

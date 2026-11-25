@@ -522,6 +522,11 @@ public class ChatConfig {
   com.pangate.chat.kafka.ReceiptWorkerLoop receiptWorkerLoop(ChatProperties p, ScyllaChatStore store,
       RedisChatCache cache, com.pangate.chat.core.PrivacyCache privacy, PushApiClient pusher, MeterRegistry meters,
       com.pangate.chat.core.Badge badge) {
+    if (!com.pangate.chat.kafka.ReceiptWorkerLoop.roundCovers(p.pushApi())) {
+      // 3b minor: a receipt push could still be pending when its round ends, and be sent again
+      log.warn("chat.push-api.timeout {} + low-wait {} reach the receipt round deadline {}: receipts may be pushed "
+          + "twice", p.pushApi().timeout(), p.pushApi().lowWait(), com.pangate.chat.kafka.ReceiptWorkerLoop.ROUND_DEADLINE);
+    }
     return new com.pangate.chat.kafka.ReceiptWorkerLoop(com.pangate.chat.kafka.ReceiptWorkerLoop.consumer(
         p.kafka().bootstrap(), com.pangate.chat.kafka.ReceiptWorkerLoop.GROUP), p.kafka().receiptsTopic(), store,
         new MemberLookup(store, cache), store, privacy, pusher, p.state(), meters, badge);

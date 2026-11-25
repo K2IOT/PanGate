@@ -30,4 +30,14 @@ class PusherPrioritiesTest {
     new PushNotifier(recording, x -> { }).rejected("u1", ChatRejected.newBuilder().setReason("too_long").build());
     assertThat(seen).containsExactly(Pusher.Priority.BEST_EFFORT);
   }
+
+  /** 3b minor: a rejection the client dropped for lack of room is counted as dropped, not unavailable. */
+  @Test
+  void droppedRejectionIsCountedAsDropped() {
+    java.util.List<String> results = new java.util.ArrayList<>();
+    new PushNotifier((r, p) -> java.util.concurrent.CompletableFuture.failedFuture(
+        new PushDroppedException(PushDroppedException.WAITED)), results::add)
+        .rejected("u1", ChatRejected.newBuilder().setReason("too_long").build());
+    assertThat(results).containsExactly("dropped");
+  }
 }

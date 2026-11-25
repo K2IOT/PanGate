@@ -29,8 +29,11 @@ public final class PushApiClient implements Pusher, AutoCloseable {
 
   public PushApiClient(ManagedChannel channel, ChatProperties.PushApi cfg, MeterRegistry meters) {
     this.channel = channel;
-    this.timers = Executors.newSingleThreadScheduledExecutor(r -> Thread.ofPlatform().daemon().name("push-timers")
-        .unstarted(r));
+    // 3b minor: a pool executor (not the single-thread wrapper), so cancelled timers leave its queue at once
+    java.util.concurrent.ScheduledThreadPoolExecutor t = new java.util.concurrent.ScheduledThreadPoolExecutor(1,
+        r -> Thread.ofPlatform().daemon().name("push-timers").unstarted(r));
+    t.setRemoveOnCancelPolicy(true);
+    this.timers = t;
     PushStream.Limits limits = new PushStream.Limits(cfg.window(), cfg.lowShare(), cfg.lowWait(), cfg.queueMax(),
         cfg.mustWait(), cfg.timeout(), cfg.streamMaxAge());
     this.streams = new PushStream[Math.max(1, cfg.streams())];

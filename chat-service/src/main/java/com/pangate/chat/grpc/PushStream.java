@@ -28,8 +28,9 @@ import java.util.function.LongSupplier;
 
 /**
  * Perf 3b (spec §4.1–§4.3): one long-lived {@code PushService.SendStream} with a client-side window. At most
- * {@code window} requests wait for an answer (the server's own window, so the count of what can sit in gRPC's buffers
- * is bounded); the rest wait in a queue per priority. MUST may use the whole window and leaves the queue first;
+ * {@code window} requests wait for an answer (the server's own window). That bounds the number of requests that can
+ * sit in gRPC's buffers, not their bytes: up to {@code window} times the largest payload per stream when HTTP/2 flow
+ * control is slow. The rest wait in a queue per priority. MUST may use the whole window and leaves the queue first;
  * BEST_EFFORT and DROPPABLE together use at most {@code lowShare} of it. A DROPPABLE that finds no room is dropped at
  * once, a BEST_EFFORT that waited {@code lowWait} is dropped, a MUST fails after {@code mustWait} without progress.
  * The timeout starts when a request is written; one that timed out keeps its slot until the server answers it (the
@@ -51,6 +52,19 @@ final class PushStream implements AutoCloseable {
   /** The limits of one stream (spec §4.5). */
   record Limits(int window, double lowShare, Duration lowWait, int queueMax, Duration mustWait, Duration timeout,
       Duration maxAge) {
+
+    /** 3b minor: values that cannot work are refused at start (chat.push-api.*). */
+    Limits {
+      if (window < 1 || !(lowShare >= 0 && lowShare <= 1) || queueMax < 0 || lowWait == null || lowWait.isNegative()
+          || !positive(mustWait) || !positive(timeout) || !positive(maxAge)) {
+        throw new IllegalArgumentException("chat.push-api: window >= 1, 0 <= low-share <= 1, queue-max >= 0, "
+            + "low-wait >= 0, must-wait, timeout and stream-max-age > 0");
+      }
+    }
+
+    private static boolean positive(Duration d) {
+      return d != null && !d.isZero() && !d.isNegative();
+    }
     int lowSlots() {
       return Math.max(1, (int) Math.floor(window * lowShare));
     }
@@ -66,6 +80,17 @@ final class PushStream implements AutoCloseable {
     Call call;
     boolean timedOut;
     long writtenNanos;
+    /** 3b minor: the wait timer while queued, then the timeout timer once written; cancelled when no longer needed. */
+    java.util.concurrent.ScheduledFuture<?> timer;
+    /** Put in a queue by admit (a refused request gets no wait timer). */
+    boolean queued;
+
+    void cancelTimer() {
+      if (timer != null) {
+        timer.cancel(false);
+        timer = null;
+      }
+    }
 
     Item(PushRequest request, Priority priority, CompletableFuture<PushResponse> reply, long enqueuedNanos) {
       this.request = request;
@@ -124,6 +149,10 @@ final class PushStream implements AutoCloseable {
   private final MeterRegistry meters;
   private final String index;
   private final Timer latency;
+  /** 3b minor: meters looked up once, not on every write or drop. */
+  private final Map<Priority, Timer> queueWait = new java.util.EnumMap<>(Priority.class);
+  private final Map<String, io.micrometer.core.instrument.Counter> dropped =
+      new java.util.concurrent.ConcurrentHashMap<>();
 
   // guarded by this
   private Call call;
@@ -149,6 +178,12 @@ final class PushStream implements AutoCloseable {
     this.meters = meters;
     this.index = Integer.toString(index);
     this.latency = meters.timer("chat.push.latency");
+    if (timers instanceof java.util.concurrent.ScheduledThreadPoolExecutor stpe) {
+      stpe.setRemoveOnCancelPolicy(true);   // 3b minor: a cancelled timer leaves the queue at once
+    }
+    for (Priority p : Priority.values()) {
+      queueWait.put(p, meters.timer("chat.push.queue.wait", "priority", name(p)));
+    }
     Gauge.builder("chat.push.inflight", this, PushStream::inFlightCount).tag("stream", this.index).register(meters);
     Gauge.builder("chat.push.queued", this, s -> s.queued(true)).tags("priority", "must", "stream", this.index)
         .register(meters);
@@ -198,6 +233,7 @@ final class PushStream implements AutoCloseable {
           drop(item, PushDroppedException.QUEUE_FULL, after);
         } else {
           lowQueue.add(item);
+          item.queued = true;
         }
       }
       case MUST -> {
@@ -207,6 +243,7 @@ final class PushStream implements AutoCloseable {
               new PushUnavailableException("push queue full (" + limits.queueMax() + ")", null)));
         } else {
           mustQueue.add(item);
+          item.queued = true;
         }
       }
     }
@@ -214,14 +251,14 @@ final class PushStream implements AutoCloseable {
 
   /** A request still queued after the first drain gets its wait limit: low-wait or must-wait. */
   private void armWaits(Item item) {
-    if (item.wireId != null || item.reply.isDone()) {
+    if (!item.queued || item.wireId != null || item.reply.isDone()) {
       return;
     }
     item.waitArmedNanos = nanos.getAsLong();
     if (item.priority == Priority.BEST_EFFORT) {
-      timers.schedule(() -> expireLow(item), limits.lowWait().toNanos(), TimeUnit.NANOSECONDS);
+      item.timer = timers.schedule(() -> expireLow(item), limits.lowWait().toNanos(), TimeUnit.NANOSECONDS);
     } else if (item.priority == Priority.MUST) {
-      timers.schedule(() -> expireMust(item), limits.mustWait().toNanos(), TimeUnit.NANOSECONDS);
+      item.timer = timers.schedule(() -> expireMust(item), limits.mustWait().toNanos(), TimeUnit.NANOSECONDS);
     }
   }
 
@@ -236,7 +273,7 @@ final class PushStream implements AutoCloseable {
       }
       if (lastProgressNanos > item.waitArmedNanos) {
         item.waitArmedNanos = nanos.getAsLong();
-        timers.schedule(() -> expireMust(item), limits.mustWait().toNanos(), TimeUnit.NANOSECONDS);
+        item.timer = timers.schedule(() -> expireMust(item), limits.mustWait().toNanos(), TimeUnit.NANOSECONDS);
         return;
       }
       mustQueue.remove(item);
@@ -340,27 +377,28 @@ final class PushStream implements AutoCloseable {
   }
 
   private void write(Item item, List<Runnable> after) {
+    item.cancelTimer();   // its wait timer: it is no longer queued
     item.wireId = Ids.next();
     item.call = call;
     inFlight.put(item.wireId, item);
     if (item.low()) {
       lowInFlight++;
     }
-    meters.timer("chat.push.queue.wait", "priority", name(item.priority))
-        .record(nanos.getAsLong() - item.enqueuedNanos, TimeUnit.NANOSECONDS);
+    queueWait.get(item.priority).record(nanos.getAsLong() - item.enqueuedNanos, TimeUnit.NANOSECONDS);
     item.writtenNanos = nanos.getAsLong();
+    // armed before the write: an answer can arrive inside onNext (direct executor) and must find a timer to cancel
+    String wire = item.wireId;
+    item.timer = timers.schedule(() -> timedOut(wire), limits.timeout().toNanos(), TimeUnit.NANOSECONDS);
     try {
       item.call.requests.onNext(item.request.toBuilder().setRequestId(item.wireId).build());
     } catch (RuntimeException e) {
       release(item);
       after.add(() -> item.reply.completeExceptionally(new PushUnavailableException(e.toString(), e)));
-      return;
     }
-    String wire = item.wireId;
-    timers.schedule(() -> timedOut(wire), limits.timeout().toNanos(), TimeUnit.NANOSECONDS);
   }
 
   private void release(Item item) {
+    item.cancelTimer();
     inFlight.remove(item.wireId);
     if (item.low()) {
       lowInFlight--;
@@ -368,12 +406,14 @@ final class PushStream implements AutoCloseable {
   }
 
   private void drop(Item item, String reason, List<Runnable> after) {
+    item.cancelTimer();
     count(name(item.priority), reason);
     after.add(() -> item.reply.completeExceptionally(new PushDroppedException(reason)));
   }
 
   private void count(String priority, String reason) {
-    meters.counter("chat.push.dropped", "priority", priority, "reason", reason).increment();
+    dropped.computeIfAbsent(priority + "|" + reason,
+        k -> meters.counter("chat.push.dropped", "priority", priority, "reason", reason)).increment();
   }
 
   private static String name(Priority p) {
