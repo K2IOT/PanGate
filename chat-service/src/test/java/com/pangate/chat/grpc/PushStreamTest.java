@@ -363,6 +363,17 @@ class PushStreamTest {
     assertThat(meters.counter("chat.push.stream.stalled").count()).isGreaterThanOrEqualTo(1);
   }
 
+  /** CI of #12: a rotated call is replaced at once, so a DROPPABLE right after a rotation finds a started call. */
+  @Test
+  void rotationOpensTheNextCallWithoutWaitingForAPush() {
+    api.autoAnswer = true;
+    PushStream s = stream(Duration.ofSeconds(5), Duration.ofSeconds(10), Duration.ofMillis(200));
+    s.send(req("p0"), Priority.MUST);
+    await().until(() -> api.received.size() == 1);
+    await().until(() -> meters.counter("chat.push.stream.rotations").count() >= 1);
+    await().atMost(Duration.ofSeconds(2)).until(() -> api.streams.get() >= 2);
+  }
+
   /** I4: must-wait does not fail requests while the stream keeps answering, however slowly. */
   @Test
   void mustDoesNotExpireWhileTheStreamProgresses() throws Exception {

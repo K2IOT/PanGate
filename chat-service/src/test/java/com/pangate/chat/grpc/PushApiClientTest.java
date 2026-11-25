@@ -44,6 +44,30 @@ class PushApiClientTest {
     return InProcessServerBuilder.forName(name).addService(api).build().start();
   }
 
+  /**
+   * CI of #12 (ChatStateE2EIT typing): a DROPPABLE is dropped when its stream's call has not started, and a call was
+   * only opened by the first push on its stream, so the first typing push towards a cold stream was always lost. The
+   * client opens every stream when it is made.
+   */
+  @Test
+  void streamsAreOpenBeforeTheFirstPushSoADroppableOneGoesThrough() throws Exception {
+    ScriptedPushService api = new ScriptedPushService();
+    api.autoAnswer = true;
+    String name = "pool-" + Ids.next();
+    Server server = inProcess(name, api);
+    try (PushApiClient c = new PushApiClient(InProcessChannelBuilder.forName(name).build(), cfg("x"),
+        new SimpleMeterRegistry())) {
+      await().atMost(Duration.ofSeconds(3)).until(() -> api.streams.get() == 4);
+      Thread.sleep(100);   // gRPC reports each call ready on its own executor
+      for (int i = 0; i < 4; i++) {
+        assertThat(c.send(req("cold-" + i, "1"), Priority.DROPPABLE).get(3, java.util.concurrent.TimeUnit.SECONDS)
+            .getCode()).isEqualTo(com.pangate.contracts.v1.PushResponse.Code.CODE_OK);
+      }
+    } finally {
+      server.shutdownNow();
+    }
+  }
+
   @Test
   void sameTargetAlwaysUsesTheSameStream() throws Exception {
     ScriptedPushService api = new ScriptedPushService();

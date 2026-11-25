@@ -199,6 +199,16 @@ final class PushStream implements AutoCloseable {
     return must ? mustQueue.size() : lowQueue.size();
   }
 
+  /**
+   * Opens the call now instead of on the first push (CI of #12): a DROPPABLE is dropped while its call has not
+   * started, so a stream opened by its first push lost that push when it was a typing or presence one.
+   */
+  void warm() {
+    synchronized (this) {
+      open();
+    }
+  }
+
   CompletableFuture<PushResponse> send(PushRequest r, Priority p) {
     CompletableFuture<PushResponse> reply = new CompletableFuture<>();
     Item item = new Item(r, p, reply, nanos.getAsLong());
@@ -322,6 +332,7 @@ final class PushStream implements AutoCloseable {
       }
       call = null;
       meters.counter("chat.push.stream.rotations").increment();
+      open();   // CI of #12: the next call starts now, so a DROPPABLE right after the rotation is not dropped
       after.add(() -> {
         try {
           c.requests.onCompleted();

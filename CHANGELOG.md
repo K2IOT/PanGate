@@ -10,6 +10,9 @@
   review of #12).
 - chat-service (3b): push timers are cancelled when no longer needed, dropped rejections count as `dropped`,
   `chat.push-api.*` is validated, and a start-up warning names a timeout + low-wait that reaches the receipt round.
+- chat-service (3b, CI of #12): every push stream opens its call at start-up and right after a rotation, so a typing
+  or presence push no longer finds a call that has not started (it was dropped: the first one towards each stream was
+  always lost).
 - chat-service (3a): badge scripts run by SHA (`EVALSHA`), a partial `raiseAll` failure forgets only the failed
   users' counters, a join reads `last_seq` after the insert.
 

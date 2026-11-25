@@ -40,6 +40,7 @@ public final class PushApiClient implements Pusher, AutoCloseable {
     for (int i = 0; i < streams.length; i++) {
       streams[i] = new PushStream(obs -> PushServiceGrpc.newStub(channel).sendStream(obs), limits, System::nanoTime,
           timers, meters, i);
+      streams[i].warm();   // CI of #12: every stream is open before its first push
     }
   }
 
