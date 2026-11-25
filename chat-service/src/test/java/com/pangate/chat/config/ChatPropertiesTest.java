@@ -60,4 +60,12 @@ class ChatPropertiesTest {
     assertThat(p.fanout().inboxConcurrency()).isEqualTo(256);
     assertThat(p.kafka().stateGroup()).isEqualTo("chat-state");
   }
+
+  /** 3a minor M4: the bound defaults of chat.limits.api are the ones tests use (Api.DEFAULTS). */
+  @Test
+  void apiLimitDefaultsBindToTheConstant() {
+    ChatProperties p = new Binder(new MapConfigurationPropertySource(Map.of("chat.cell", "c1")))
+        .bind("chat", ChatProperties.class).get();
+    assertThat(p.limits().api()).isEqualTo(ChatProperties.Api.DEFAULTS);
+  }
 }

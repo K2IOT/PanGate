@@ -321,7 +321,8 @@ public final class ChatStores {
     void raise(String user, String convId, long last, long read);
 
     /** {@code raise(u, convId, last, 0)} for each user, all sent before any answer is awaited. */
-    void raiseAll(List<String> users, String convId, long last);
+    /** 3a minor M5: returns the users whose raise is not known to have landed (failed or no answer in time). */
+    List<String> raiseAll(List<String> users, String convId, long last);
 
     /** Left: its unread leave the total and later raises of it are ignored until a join. */
     void drop(String user, String convId);

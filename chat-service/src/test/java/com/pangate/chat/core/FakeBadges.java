@@ -21,6 +21,9 @@ public final class FakeBadges implements ChatStores.BadgeStore {
   public final Map<String, Map<String, String>> hashes = new ConcurrentHashMap<>();
   /** Every call fails. */
   public volatile boolean down;
+  /** 3a minor M5: raiseAll reports these users as not written (the others are). */
+  public final java.util.Set<String> failUsers = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
   /** The next N calls fail, then they work again. */
   public int failNext;
   public final List<String> forgotten = new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -131,14 +134,20 @@ public final class FakeBadges implements ChatStores.BadgeStore {
   }
 
   @Override
-  public synchronized void raiseAll(List<String> users, String convId, long last) {
+  public synchronized List<String> raiseAll(List<String> users, String convId, long last) {
     call();
+    List<String> failed = new java.util.ArrayList<>();
     for (String u : users) {
+      if (failUsers.contains(u)) {
+        failed.add(u);
+        continue;
+      }
       Map<String, String> h = hashes.get(u);
       if (h != null) {
         apply(h, convId, last, 0);
       }
     }
+    return failed;
   }
 
   @Override

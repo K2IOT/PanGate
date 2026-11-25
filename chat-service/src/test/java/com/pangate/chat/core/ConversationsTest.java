@@ -315,4 +315,17 @@ class ConversationsTest {
     c.removeMember("u2", ch.id(), "u2");
     assertThat(b.calls).hasSize(2);
   }
+
+  /** 3a minor M2: the join reads last_seq after the insert, so a message sequenced meanwhile is not left unread. */
+  @Test
+  void joinUsesTheLastSeqAfterTheInsert() {
+    RecordingBadges b = new RecordingBadges();
+    Conversations c = new Conversations(stores, stores, new MemberLookup(stores, stores), FakeStores.LIMITS,
+        (user, conv) -> { }, UserDirectory.ANY, u -> ChatStores.Privacy.OPEN, b);
+    Conversation g = c.create("u1", ConversationKind.CONVERSATION_KIND_GROUP, "g", List.of("u2"), false);
+    stores.lastSeq.put(g.id(), 100L);
+    stores.beforeAdd = () -> stores.lastSeq.put(g.id(), 101L);
+    c.addMember("u1", g.id(), "u3");
+    assertThat(b.calls).containsExactly("join u3 " + g.id() + " 101");
+  }
 }

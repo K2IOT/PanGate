@@ -192,4 +192,21 @@ class RedisBadgesIT {
     assertThat(badges.rebuild("v1", List.of(), NOW, v2)).isTrue();
     assertThat(badges.totalWith("v1", null, 0, NOW)).isZero();
   }
+
+  /** 3a minor M3: scripts run by their SHA (EVALSHA), and still run after Redis forgot them (SCRIPT FLUSH). */
+  @Test
+  void scriptsRunByShaAndSurviveAFlush() {
+    build("sha", List.of(new BadgeRow("c", 1, 0)), NOW);
+    try (var c = raw.connect()) {
+      c.sync().configResetstat();
+      badges.raise("sha", "c", 2, 0);
+      badges.raiseAll(List.of("sha"), "c", 3);
+      assertThat(c.sync().info("commandstats")).contains("cmdstat_evalsha:");
+      c.sync().scriptFlush();
+    }
+    badges.raise("sha", "c", 4, 0);
+    badges.raiseAll(List.of("sha"), "c", 5);
+    badges.raiseAll(List.of("sha"), "c", 6);
+    assertThat(hget("sha", "c")).isEqualTo("6:0");
+  }
 }

@@ -208,4 +208,14 @@ class BadgeTest {
     };
     assertThat(badge.total("u", null, 0)).isEqualTo(10);
   }
+
+  /** 3a minor M5: one raiseAll that failed for some users forgets only theirs, not every recipient's. */
+  @Test
+  void partialRaiseAllForgetsOnlyTheFailedUsers() {
+    counters.failUsers.add("w2");
+    badge.raiseAll(java.util.List.of("w1", "w2", "w3"), "dm", 4);
+    wall.addAndGet(Badge.PAUSE_MS + 1);
+    badge.raise("y", "dm", 1, 0);
+    assertThat(counters.forgotten).containsExactly("w2");
+  }
 }

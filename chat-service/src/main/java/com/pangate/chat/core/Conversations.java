@@ -207,7 +207,8 @@ public final class Conversations {
     changeMembers(convId, () -> members.add(convId, new Member(userId, Role.MEMBER)));
     if (c.kind() != ConversationKind.CONVERSATION_KIND_CHANNEL) {
       // perf 3a: the history before the join is not unread (F1), whichever of this and a new message lands first
-      badges.join(userId, convId, c.lastSeq());
+      // 3a minor M2: last_seq read after the insert: a message sequenced meanwhile is history, not unread
+      badges.join(userId, convId, conversations.lastSeq(convId));
     }
   }
 

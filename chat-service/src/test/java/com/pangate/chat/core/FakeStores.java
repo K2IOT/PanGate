@@ -135,7 +135,11 @@ public final class FakeStores implements ChatStores.ConversationStore, ChatStore
     check();
     return Optional.ofNullable(members.getOrDefault(convId, Map.of()).get(userId));
   }
+  /** 3a minor: runs at the start of each member insert (a message sequenced meanwhile). */
+  public volatile Runnable beforeAdd = () -> { };
+
   @Override public void add(String convId, Member m) {
+    beforeAdd.run();
     check();
     members.computeIfAbsent(convId, k -> new ConcurrentHashMap<>()).put(m.userId(), m);
     joined.putIfAbsent(convId + "|" + m.userId(), joins.incrementAndGet());
