@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Perf 3a–3c minors
+- chat-service (3c): a key holds its lane across rebalances (no two batches of one conversation at once), a
+  handler `Error` is retried, retry warnings are rate-limited; the final commit survives a pending wakeup, a lane
+  that waited for a slot does not run after its partition went, poison counts are in a row, `chat.pipeline.*` is
+  validated, the sequencer dead-letters once.
+- chat-service (3b): push timers are cancelled when no longer needed, dropped rejections count as `dropped`,
+  `chat.push-api.*` is validated, and a start-up warning names a timeout + low-wait that reaches the receipt round.
+- chat-service (3a): badge scripts run by SHA (`EVALSHA`), a partial `raiseAll` failure forgets only the failed
+  users' counters, a join reads `last_seq` after the insert.
+
 ### Perf 3c (keyed Kafka pipelines)
 Design: `docs/superpowers/specs/2026-11-24-perf-3c-kafka-pipelines-design.md`.
 - chat-service: ingest, sequencer, fan-out and the offline notifier run on one keyed pipeline: one lane per record

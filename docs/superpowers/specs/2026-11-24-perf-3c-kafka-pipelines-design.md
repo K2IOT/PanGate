@@ -165,3 +165,12 @@ Thêm vào thiết kế từ các điểm nhỏ của builder check: hai mẻ c�
 - §2 "1-1 100 tin/s p99 < 300 ms": đạt (máy này nhanh hơn máy đo CH1, nên số gốc cũng đã đạt).
 - §2 "nhóm 500 ở 10 tin/s, lag không tăng dần": đạt.
 - §2 "5 nhóm × 5 tin/s": mọi tin tới đủ, nhưng hàng đợi dồn trong 10 s rồi rút: 12 500 push/s vượt sức của cả stack chạy chung trên 4 lõi (khoảng 6 000/s). Giới hạn là CPU của máy chung, không phải thứ tự theo hội thoại, nên không nới thứ tự (§7).
+
+## 9. Sau review cuối (2026-11-24, 2026-11-25)
+
+Reviewer độc lập: 1 Critical, 1 Important (đã sửa, mỗi sửa có test fail trước), 8 Minor; một Minor (log mỗi lần thử lại) được nâng lên Important và sửa cùng lượt.
+- **C1:** sau hai lần rebalance, một mẻ cũ không dừng khi bị interrupt và một mẻ mới của cùng khoá chạy song song: nay một làn giữ khoá của nó (bảng `holders`) từ trước mẻ đầu tới khi kết thúc, qua mọi lần rebalance.
+- **I1:** handler ném `Error` làm mẻ bị bỏ qua và commit kẹt: nay mọi `Throwable` (trừ interrupt) được thử lại như lỗi tất định.
+- **Log:** khi store sập, cảnh báo thử lại giới hạn khoảng một dòng mỗi giây mỗi pipeline, kèm số lần lỗi không in.
+
+Minor (sửa 2026-11-25): commit cuối khi đóng không mất vì một wakeup còn treo; làn chờ chỗ chạy không chạy mẻ sau khi mất partition; đếm lỗi tất định "liên tiếp" (lỗi tạm thời đặt lại); `chat.pipeline.*` không hợp lệ bị từ chối; `close()` chờ tới 2 × `revoke-wait` + 5 s; `chat.pipeline.lanes` đếm làn đang giữ khoá; sequencer chỉ đưa vào DLQ sau khi mẻ qua được (không gửi lại ở mỗi lần thử).
