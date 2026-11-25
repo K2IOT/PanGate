@@ -263,6 +263,14 @@ class ChatLoadIT {
     }
     connectMembers(groups);
     latenciesNs.clear();
+    // -Dchat.load.jfr=<file>: a JFR recording of the sending and delivering, to see where the CPU goes
+    String jfrFile = System.getProperty("chat.load.jfr", "");
+    jdk.jfr.Recording jfr = null;
+    if (!jfrFile.isEmpty()) {
+      jfr = new jdk.jfr.Recording(jdk.jfr.Configuration.getConfiguration("profile"));
+      jfr.start();
+      System.out.println("CHAT-LOAD   jfr started");
+    }
     long t0 = System.nanoTime();
     sendToGroups(groups, 5);
     long sent = System.nanoTime();
@@ -271,6 +279,12 @@ class ChatLoadIT {
     while (latenciesNs.size() < expected && System.nanoTime() < deadline) {
       Thread.sleep(10_000);
       System.out.printf("CHAT-LOAD   %d/%d delivered%n", latenciesNs.size(), expected);
+    }
+    if (jfr != null) {
+      jfr.stop();
+      jfr.dump(java.nio.file.Path.of(jfrFile));
+      jfr.close();
+      System.out.println("CHAT-LOAD   jfr stopped");
     }
     report("five groups of 500 (50 messages each, 5/s each)", expected);
     for (String g : groups) {
