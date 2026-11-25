@@ -28,7 +28,14 @@ public record ChatProperties(
       @DefaultValue("5s") Duration revokeWait) {}
 
   /** Perf 3c (spec §4.3): inbox rows being written at once, for the whole pod. */
-  public record Fanout(@DefaultValue("256") int inboxConcurrency) {}
+  public record Fanout(@DefaultValue("256") int inboxConcurrency) {
+    /** Codex review of #12: a semaphore with no permits would block every fan-out at its first inbox row. */
+    public Fanout {
+      if (inboxConcurrency < 1) {
+        throw new IllegalArgumentException("chat.fanout.inbox-concurrency must be at least 1: " + inboxConcurrency);
+      }
+    }
+  }
 
   /** CH4 spec §3, §4: offline notifications. */
   public record Notify(@DefaultValue("true") boolean enabled,

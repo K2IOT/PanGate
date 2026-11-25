@@ -1,6 +1,7 @@
 package com.pangate.chat.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
 import java.util.List;
@@ -67,5 +68,19 @@ class ChatPropertiesTest {
     ChatProperties p = new Binder(new MapConfigurationPropertySource(Map.of("chat.cell", "c1")))
         .bind("chat", ChatProperties.class).get();
     assertThat(p.limits().api()).isEqualTo(ChatProperties.Api.DEFAULTS);
+  }
+
+  /** Codex review of #12: a semaphore with no permits would block every fan-out at its first inbox row. */
+  @Test
+  void inboxConcurrencyBelowOneIsRefused() {
+    for (String bad : List.of("0", "-1")) {
+      assertThatThrownBy(() -> new Binder(new MapConfigurationPropertySource(
+          Map.of("chat.cell", "c1", "chat.fanout.inbox-concurrency", bad))).bind("chat", ChatProperties.class))
+          .rootCause().isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("chat.fanout.inbox-concurrency");
+    }
+    assertThat(new Binder(new MapConfigurationPropertySource(
+        Map.of("chat.cell", "c1", "chat.fanout.inbox-concurrency", "1"))).bind("chat", ChatProperties.class).get()
+        .fanout().inboxConcurrency()).isEqualTo(1);
   }
 }
