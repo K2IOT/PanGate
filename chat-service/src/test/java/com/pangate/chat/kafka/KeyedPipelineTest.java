@@ -37,7 +37,7 @@ class KeyedPipelineTest {
   KeyedPipeline pipeline;
 
   /** Records commits (MockConsumer forgets them once closed), seeks and polls. */
-  static final class TestConsumer extends MockConsumer<String, byte[]> {
+  static class TestConsumer extends MockConsumer<String, byte[]> {
     final Map<TopicPartition, Long> commits = new ConcurrentHashMap<>();
     final AtomicInteger seeks = new AtomicInteger();
     final AtomicInteger polls = new AtomicInteger();
@@ -470,6 +470,140 @@ class KeyedPipelineTest {
       assertThat(warnings).as("about one a second, not one per failure").isLessThan(10);
     } finally {
       logger.detachAppender(logs);
+    }
+  }
+
+  // --- perf 3c deferred minors ---
+
+  /** 3c minor: a wakeup still pending at close does not lose the final commit. */
+  @Test
+  void finalCommitSurvivesAPendingWakeup() {
+    AtomicBoolean wakeOnce = new AtomicBoolean(true);
+    TestConsumer wc = new TestConsumer() {
+      @Override
+      public synchronized void commitSync(Map<TopicPartition, OffsetAndMetadata> offsets) {
+        if (wakeOnce.getAndSet(false)) {
+          throw new org.apache.kafka.common.errors.WakeupException();
+        }
+        super.commitSync(offsets);
+      }
+    };
+    AtomicBoolean done = new AtomicBoolean();
+    pipeline = new KeyedPipeline("test", wc, T, new KeyedPipeline.Settings(100, 1, 16, Duration.ofSeconds(30),
+        Duration.ofSeconds(1), true), (batch, last) -> done.set(true), revoked::incrementAndGet, meters);
+    wc.schedulePollTask(() -> {
+      wc.rebalance(List.of(p0, p1));
+      wc.updateBeginningOffsets(new HashMap<>(Map.of(p0, 0L, p1, 0L)));
+    });
+    pipeline.start();
+    await().until(() -> wc.assignment().size() == 2);
+    wc.addRecord(new ConsumerRecord<>(T, 0, 0, "a", new byte[0]));
+    await().until(done::get);
+    await().pollDelay(Duration.ofMillis(100)).until(() -> true);
+    pipeline.close();
+    pipeline = null;
+    assertThat(wc.commits.get(p0)).isEqualTo(1L);
+  }
+
+  /** 3c minor: a lane that waited for a slot while its partition was revoked does not run its batch. */
+  @Test
+  void laneWaitingForASlotDoesNotRunAfterRevoke() throws Exception {
+    CountDownLatch holdSlot = new CountDownLatch(1);
+    List<String> ran = Collections.synchronizedList(new ArrayList<>());
+    start(settings(100, 1, 1, true), (batch, last) -> {
+      ran.add(batch.getFirst().key());
+      if ("a".equals(batch.getFirst().key())) {
+        holdSlot.await();
+      }
+    });
+    add(p1, 0, "a");
+    await().until(() -> ran.contains("a"));
+    add(p0, 0, "b");
+    Thread.sleep(200);   // b waits for the only slot
+    Thread.ofVirtual().start(() -> {
+      try {
+        Thread.sleep(300);
+      } catch (InterruptedException ignored) {
+        // test
+      }
+      holdSlot.countDown();   // within revoke-wait, while p0 is being released
+    });
+    c.schedulePollTask(() -> c.rebalance(List.of(p1)));
+    await().until(() -> revoked.get() == 1);
+    Thread.sleep(300);
+    assertThat(ran).doesNotContain("b");
+  }
+
+  /** 3c minor: a transient failure in between restarts the count of deterministic ones (spec §4.1 "in a row"). */
+  @Test
+  void transientFailureResetsThePoisonCount() {
+    List<Boolean> lastTries = Collections.synchronizedList(new ArrayList<>());
+    start(settings(100, 1, 16, true), (batch, last) -> {
+      lastTries.add(last);
+      if (lastTries.size() == 4) {
+        throw new StoreUnavailableException("down", null);
+      }
+      throw new IllegalArgumentException("bad");
+    });
+    add(p0, 0, "a");
+    await().atMost(Duration.ofSeconds(10)).until(() -> lastTries.size() >= 6);
+    assertThat(lastTries.subList(0, 6)).containsOnly(false);
+  }
+
+  /** 3c minor: settings that cannot work are refused at start. */
+  @Test
+  void impossibleSettingsAreRefused() {
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> settings(1, 1, 1, true))
+        .isInstanceOf(IllegalArgumentException.class);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> settings(100, 0, 1, true))
+        .isInstanceOf(IllegalArgumentException.class);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> settings(100, 1, 0, true))
+        .isInstanceOf(IllegalArgumentException.class);
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> new KeyedPipeline.Settings(100, 1, 1, Duration.ZERO,
+        Duration.ofSeconds(1), true)).isInstanceOf(IllegalArgumentException.class);
+  }
+
+  /** 3c minor: chat.pipeline.lanes counts lanes in their handler, a straggler from an old assignment too. */
+  @Test
+  void lanesGaugeCountsAStragglerStillRunning() {
+    CountDownLatch release = new CountDownLatch(1);
+    AtomicInteger calls = new AtomicInteger();
+    pipeline = new KeyedPipeline("test", c, T, new KeyedPipeline.Settings(100, 1, 16, Duration.ofMillis(50),
+        Duration.ofMillis(200), true), (batch, last) -> {
+          if (calls.incrementAndGet() == 1) {
+            boolean done = false;
+            while (!done) {
+              try {
+                release.await();
+                done = true;
+              } catch (InterruptedException ignored) {
+                // a straggler
+              }
+            }
+          }
+        }, revoked::incrementAndGet, meters);
+    c.schedulePollTask(() -> {
+      c.rebalance(List.of(p0, p1));
+      c.updateBeginningOffsets(new HashMap<>(Map.of(p0, 0L, p1, 0L)));
+    });
+    pipeline.start();
+    await().until(() -> c.assignment().size() == 2);
+    add(p0, 0, "a");
+    await().until(() -> calls.get() == 1);
+    c.schedulePollTask(() -> c.rebalance(List.of(p1)));
+    await().until(() -> revoked.get() == 1);
+    c.schedulePollTask(() -> {
+      c.rebalance(List.of(p0, p1));
+      add(p0, 0, "a");
+    });
+    await().pollDelay(Duration.ofMillis(200)).until(() -> true);
+    c.schedulePollTask(() -> c.rebalance(List.of(p1)));
+    await().until(() -> revoked.get() == 2);
+    await().pollDelay(Duration.ofMillis(200)).until(() -> true);
+    try {
+      assertThat(meters.get("chat.pipeline.lanes").tag("pipeline", "test").gauge().value()).isEqualTo(1.0);
+    } finally {
+      release.countDown();
     }
   }
 }

@@ -37,6 +37,7 @@ class SequencerLoopTest {
   final TopicPartition tp = new TopicPartition(ChatTopics.COMMANDS, 0);
   final MockConsumer<String, byte[]> consumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
   final MockProducer<String, byte[]> events = PoisonRecordTest.producer();
+  final MockProducer<String, byte[]> dlq = PoisonRecordTest.producer();
   final AtomicLong offset = new AtomicLong();
   SequencerLoop loop;
 
@@ -120,5 +121,27 @@ class SequencerLoopTest {
     send(c1, "second");
     await().until(() -> eventsOf(c1).size() == 2);
     assertThat(eventsOf(c1).get(1).getMessage().getConvSeq()).isEqualTo(6);
+  }
+
+  /** 3c minor: a malformed command in a batch that is retried is dead-lettered once, not on every try. */
+  @Test
+  void malformedCommandIsDeadLetteredOnceAcrossRetries() {
+    String c1 = conversation();
+    stores.failWrites = 2;
+    consumer.schedulePollTask(() -> { });
+    loop = new SequencerLoop(consumer, ChatTopics.COMMANDS,
+        new Sequencer(stores, stores, stores, stores, System::currentTimeMillis),
+        new EventProducer(events, "chat.events", Duration.ofSeconds(1)), SendResults.NONE,
+        new CommandProducer(dlq, Duration.ofSeconds(1), ChatTopics.COMMANDS), new SimpleMeterRegistry());
+    consumer.schedulePollTask(() -> {
+      consumer.rebalance(List.of(tp));
+      consumer.updateBeginningOffsets(new HashMap<>(Map.of(tp, 0L)));
+      consumer.addRecord(new ConsumerRecord<>(ChatTopics.COMMANDS, 0, offset.getAndIncrement(), c1,
+          new byte[] {(byte) 0xff, 1}));
+      send(c1, "ok");
+    });
+    loop.start();
+    await().atMost(Duration.ofSeconds(10)).until(() -> eventsOf(c1).size() == 1);
+    assertThat(dlq.history()).hasSize(1);
   }
 }

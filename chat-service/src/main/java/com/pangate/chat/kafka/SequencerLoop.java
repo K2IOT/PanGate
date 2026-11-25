@@ -105,6 +105,8 @@ public final class SequencerLoop implements AutoCloseable {
    * way; a conversation that fails again is sequenced command by command and the command that fails is dead-lettered.
    */
   private void partition(List<ConsumerRecord<String, byte[]>> recs, boolean lastTry) {
+    // 3c minor: dead letters go out only once the batch got through, so a retried batch does not send them again
+    List<Runnable> deadLetters = new ArrayList<>();
     Map<String, List<Cmd>> byConv = new LinkedHashMap<>();
     long now = System.currentTimeMillis();
     for (ConsumerRecord<String, byte[]> r : recs) {
@@ -116,8 +118,10 @@ public final class SequencerLoop implements AutoCloseable {
         c = null;
       }
       if (c == null || !c.hasSend() || c.getSend().getConversationId().isEmpty()) {
-        dlq.deadLetter(r.key(), r.value(), "malformed ChatCommand");
-        meters.counter("chat.sequencer.malformed").increment();
+        deadLetters.add(() -> {
+          dlq.deadLetter(r.key(), r.value(), "malformed ChatCommand");
+          meters.counter("chat.sequencer.malformed").increment();
+        });
         continue;
       }
       byConv.computeIfAbsent(c.getSend().getConversationId(), k -> new ArrayList<>()).add(new Cmd(c, r));
@@ -146,8 +150,10 @@ public final class SequencerLoop implements AutoCloseable {
             }
             log.error("command at {}@{} failed {} times: {}; dead-lettered", c.record().topic(),
                 c.record().offset(), PoisonGuard.MAX_ATTEMPTS, one.toString());
-            dlq.deadLetter(c.record().key(), c.record().value(), "poison: " + one);
-            meters.counter("chat.sequencer.poison").increment();
+            deadLetters.add(() -> {
+              dlq.deadLetter(c.record().key(), c.record().value(), "poison: " + one);
+              meters.counter("chat.sequencer.poison").increment();
+            });
           }
         }
       }
@@ -165,6 +171,7 @@ public final class SequencerLoop implements AutoCloseable {
       }
     }
     events.sendAll(out);
+    deadLetters.forEach(Runnable::run);
     long at = System.currentTimeMillis();
     received.forEach(t -> latency.record(Math.max(0, at - t), TimeUnit.MILLISECONDS));
     replies.forEach(m -> results.publish(m.replyTo(), m.message()));

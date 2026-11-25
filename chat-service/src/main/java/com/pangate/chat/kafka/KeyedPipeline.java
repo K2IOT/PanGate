@@ -49,6 +49,16 @@ public final class KeyedPipeline implements AutoCloseable {
   public record Settings(int maxPendingPerPartition, int maxBatch, int maxConcurrency, Duration commitInterval,
       Duration revokeWait, boolean deadLetters) {
 
+    /** 3c minor: values that would never resume, spin or block are refused at start. */
+    public Settings {
+      if (maxPendingPerPartition < 2 || maxBatch < 1 || maxConcurrency < 1 || commitInterval == null
+          || commitInterval.isZero() || commitInterval.isNegative() || revokeWait == null || revokeWait.isNegative()) {
+        throw new IllegalArgumentException("chat.pipeline: max-pending-per-partition >= 2, max-batch >= 1, "
+            + "max-concurrency >= 1, commit-interval > 0, revoke-wait >= 0; got " + maxPendingPerPartition + ", "
+            + maxBatch + ", " + maxConcurrency + ", " + commitInterval + ", " + revokeWait);
+      }
+    }
+
     public static Settings of(ChatProperties.Pipeline p, int maxBatch, boolean deadLetters) {
       return new Settings(p.maxPendingPerPartition(), maxBatch, p.maxConcurrency(), p.commitInterval(),
           p.revokeWait(), deadLetters);
@@ -202,6 +212,10 @@ public final class KeyedPipeline implements AutoCloseable {
         }
         boolean lastTry = settings.deadLetters() && failures >= PoisonGuard.MAX_ATTEMPTS - 1;
         slots.acquire();
+        if (part.gone() || !running) {   // 3c minor: the partition went while this lane waited for a slot
+          slots.release();
+          return false;
+        }
         long t0 = System.nanoTime();
         try {
           handler.handle(batch, lastTry);
@@ -212,6 +226,7 @@ public final class KeyedPipeline implements AutoCloseable {
           // final review I1: an Error too (a bug, a class that failed to load) is retried, never skipped
           if (PoisonGuard.isTransient(e)) {
             transientRetries.increment();
+            failures = 0;   // 3c minor: "in a row" (spec §4.1)
           } else {
             failures++;
             poisonRetries.increment();
@@ -256,7 +271,8 @@ public final class KeyedPipeline implements AutoCloseable {
     this.poisonRetries = meters.counter("chat.pipeline.retries", "pipeline", name, "reason", "poison");
     Gauge.builder("chat.pipeline.pending", parts, ps -> ps.values().stream().mapToInt(p -> p.pending.size()).sum())
         .tag("pipeline", name).register(meters);
-    Gauge.builder("chat.pipeline.lanes", lanes, Map::size).tag("pipeline", name).register(meters);
+    // 3c minor: lanes with work are those holding their key, a straggler of an old assignment included
+    Gauge.builder("chat.pipeline.lanes", holders, Map::size).tag("pipeline", name).register(meters);
     Gauge.builder("chat.pipeline.paused", this, x -> x.pausedCount).tag("pipeline", name).register(meters);
     Gauge.builder("chat.pipeline.oldest", this, KeyedPipeline::oldestMs).tag("pipeline", name).register(meters);
     Gauge.builder("chat.kafka.lag", this, x -> x.lag).tag("pipeline", name).register(meters);
@@ -453,7 +469,11 @@ public final class KeyedPipeline implements AutoCloseable {
     Map<TopicPartition, OffsetAndMetadata> out = watermarks(going);
     if (!out.isEmpty()) {
       try {
-        consumer.commitSync(out);
+        try {
+          consumer.commitSync(out);
+        } catch (WakeupException e) {
+          consumer.commitSync(out);   // 3c minor: a wakeup still pending from close(); it is cleared once thrown
+        }
       } catch (RuntimeException e) {
         log.warn("{}: commit of released partitions failed: {}", name, e.toString());
       }
@@ -467,13 +487,20 @@ public final class KeyedPipeline implements AutoCloseable {
     pausedCount = (int) parts.values().stream().filter(p -> p.paused).count();
   }
 
+  /** True while the poll thread still runs (tests; close() returns once it is false). */
+  boolean pollThreadAlive() {
+    Thread t = thread;
+    return t != null && t.isAlive();
+  }
+
   @Override
   public synchronized void close() {
     running = false;
     consumer.wakeup();
     if (thread != null) {
       try {
-        thread.join(settings.revokeWait().toMillis() + 5_000);
+        // 3c minor: a revoke in progress and the final release may each take revoke-wait
+        thread.join(2 * settings.revokeWait().toMillis() + 5_000);
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
       }
