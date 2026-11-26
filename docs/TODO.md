@@ -56,6 +56,40 @@ Việc:
 
 - [ ] Sửa dòng trạng thái của `docs/superpowers/specs/2026-11-03-gateway-service-design.md`: vẫn ghi "Draft, chờ duyệt" dù đã phát hành 0.1.0.
 
+## Review hiệu năng toàn bộ (2026-11-26)
+
+Một reviewer đọc lại toàn bộ đường đi của tin nhắn sau 3a–3c. F1–F4 và F6 đã được kiểm lại trong code. Chi phí một tin nhóm 500 (80 % offline, chưa tính biên nhận): khoảng 2 300 lệnh Redis, 1 700 lệnh ScyllaDB, 1 300 bản ghi Kafka.
+
+| # | Mức | Vấn đề | Hướng sửa |
+|---|---|---|---|
+| F1 | Chặn | Fan-out đẩy RELIABLE cho từng thành viên, kể cả người offline (`FanOutPlanner.plan`) | Fan-out biết ai online (`pres:<user>`), người offline đi thẳng notifier; lâu dài: multicast |
+| F2 | Chặn | Push API ghi hash trạng thái 7 trường mỗi push, TTL mặc định 86 400 s + 1 h, chat không đọc (~160 GB Redis ở 6k push/s) | Không ghi khi push không cần (`receipt`, idempotency); gộp INCR + trạng thái vào một `EVALSHA` |
+| F3 | Cao | Router giữ khoá người nhận tới khi thiết bị ACK (`ackTimeout` 6 s); EPHEMERAL dùng chung khoá | Cho N tin chưa ACK mỗi khoá; tách khoá EPHEMERAL; test với RTT 150 ms |
+| F4 | Cao | Fan-out `maxBatch 1`: mỗi tin chờ đủ câu trả lời, inbox, badge, mark rồi mới tới tin sau; 1-1 xếp sau push nhóm | Lô 16–32 tin, ghi inbox/badge/mark một lần ở seq cao nhất; hàng ưu tiên cho hội thoại nhỏ |
+| F5 | Cao | chat-service một Redis: ~900 lần gọi Lua mỗi tin nhóm 500 | Redis Cluster; sửa `DEL` nhiều khoá (`RedisBadges.forget`), `presgrace` một ZSET, `PUBLISH` → `SPUBLISH` |
+| F6 | Cao | Thông báo offline không gộp (collapse id = msgId); mỗi thông báo đọc lại `conversations`, quyền riêng tư, tắt tiếng | Gộp theo (người, hội thoại) 5–10 s, collapse id = hội thoại, cache vài giây; notify tra cứu bất đồng bộ |
+| F7 | Cao | Biên nhận: một pod bão hoà ở ~1,5 nhóm 500; kênh 100 000 người ~200 s mỗi cửa sổ | Mục 1 ở trên; thêm: kênh chỉ ghi `user_convs.read_seq`, không push biên nhận |
+| F8 | Trung bình | Mỗi tin 1-1 một LWT; đọc `send_dedup` trước khi ghi | Dedup song song trong lô; cache loại hội thoại ở Ingest; cân nhắc fencing theo epoch |
+| F9 | Trung bình | `/v1/state`, `/v1/conversations` đọc cả partition inbox mỗi trang; N+1 cho DM | Gom bất đồng bộ, cache ngắn theo người, sau đó bảng chỉ mục có thứ tự |
+| F10 | Trung bình | Presence một luồng mỗi pod, 8–10 lượt Redis mỗi sự kiện; `dropNode` 100 000 kết nối đứng ~1 phút | Một `EVALSHA` mỗi sự kiện, `dropNode` pipeline, chia `presgrace` |
+| F11 | Trung bình | Một lane thử lại mãi làm dừng partition sau 1 000 bản ghi và chặn commit | Chuyển lane kẹt sang topic thử lại; cảnh báo theo `chat.pipeline.oldest` |
+| F12 | Trung bình | `broadcast-rate` 10/s mỗi pod push-api; typing/biên nhận chung bucket với tin; khoá `synchronized` toàn cục | Bucket riêng cho push trạng thái; nâng mặc định; bỏ monitor trên đường nóng |
+| F13 | Trung bình | 4 stream cố định: mỗi pod chat dùng tối đa 4 pod Push API | Số stream ≥ số backend, hoặc một stream mỗi subchannel |
+| F14 | Trung bình | Channel notifier đọc quyền riêng tư từng người theo dõi | Đọc theo lô mỗi trang |
+| F15 | Thấp | Cache registry router xoá trắng ở 100 000 mục; vài map không giới hạn; payload parse lại ~5 lần mỗi người nhận | Caffeine ~2M mục, xoá theo sự kiện CONNECTED |
+
+Thứ tự đề xuất:
+- [ ] 3d (chat): F1, F4, F7.
+- [ ] 3e (push-api): F2, F12.
+- [ ] 3f (notify): F6.
+- [ ] 3g (router): F3.
+- [ ] Spec riêng: F5 Redis Cluster, F10 presence.
+- [ ] Sau: F8, F9, F11, F13–F15, multicast.
+
+Câu hỏi mở cho F1: người có một thiết bị online và một thiết bị offline xử lý thế nào khi quyết định online/offline chuyển về chat.
+
+Sơ đồ luồng dữ liệu: `docs/architecture/data-flow.html` (mở bằng trình duyệt, cuộn chuột để phóng to).
+
 ## Chấp nhận được, giữ nguyên
 
 - Mỗi tin mới tốn một lần đọc `send_dedup` từ ScyllaDB khi cache Redis không có. Cần giữ để đúng khi Redis mất dữ liệu.
