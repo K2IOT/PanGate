@@ -2,72 +2,73 @@
 <title>Kiến trúc PanGate</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600;7..72,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-/* VOICE work: technical diagram for the team
-   IDEA a transit network map: services are stations, Kafka is the trunk line every message rides
+/* VOICE work, read calmly: a reference page people study like a book
+   IDEA a printed atlas plate on warm paper: services are stations, Kafka is the trunk line every message rides
    PICTURE the full data-flow map, pannable and zoomable, with flows that light up their route
-   COLOUR deep green #00463c map ground, white stations, lime Kafka line, sky gRPC, coral bottlenecks
-   TYPE Inter Tight 700 + Inter
+   COLOUR warm paper ground, brown ink, olive Kafka line, slate-blue gRPC, terracotta for bottlenecks; sepia at night
+   TYPE Literata (made for long reading) for text and titles, Inter for small diagram labels
    LAYOUT laptop: title + figures across the top, map full width with a details rail; phone: title, map, details below */
-:root{color-scheme:light dark;--bg:light-dark(#ffffff,#0c1714);--ink:light-dark(#10231f,#e8f1ee);--muted:light-dark(#4a5e59,#9db3ad);--rule:light-dark(#d6e2de,#24403a);--soft:light-dark(#eef5f2,#13241f);--map:#00463c;--map2:#003a32;--lime:#c6ef7a;--pale:#e6f5c8;--sky:#86d5ff;--coral:#ff6f59;--white:#ffffff}
+:root{color-scheme:light dark;--bg:light-dark(#f7f1e3,#1d1a15);--ink:light-dark(#3a2f24,#e8ddc8);--muted:light-dark(#76664f,#b3a58c);--rule:light-dark(#e0d3ba,#3a342a);--soft:light-dark(#efe6d3,#2a261f);--paper:light-dark(#fbf7ee,#24211b);--panel:light-dark(#fffdf8,#2d2922);--sub:light-dark(#f4ecdc,#332e26);--box:light-dark(#f1e8d6,#28241e);--band:light-dark(#ece5cf,#2b2a1f);--storeZone:light-dark(#efe7d6,#221f19);--line:light-dark(#cdbb9c,#5a4f3f);--line2:light-dark(#b39f7f,#6b5e4b);--lWs:light-dark(#5a4632,#e1d4bc);--lGrpc:light-dark(#3f6e96,#8cb8de);--lKafka:light-dark(#6b8a2c,#a9c46a);--lDb:light-dark(#a8977c,#8a7d68);--hot:light-dark(#b8533a,#e48a6e);--topic:light-dark(#eaf0d6,#2f3522);--topicInk:light-dark(#3d4d1c,#d6e4b0);--store:light-dark(#ede3cf,#2e2a22);--storeTop:light-dark(#e2d5ba,#3a342a);--chipOn:light-dark(#3a2f24,#e8ddc8);--chipOnInk:light-dark(#f7f1e3,#1d1a15)}
 :root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
 *{box-sizing:border-box;min-width:0}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 Inter,system-ui,sans-serif;overflow-x:clip}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.6 Literata,Georgia,serif;overflow-x:clip}
 .band{padding-block:clamp(24px,3.5vw,48px);padding-left:max(5vw,16px,env(safe-area-inset-left,0px));padding-right:max(5vw,16px,env(safe-area-inset-right,0px))}
 .wrap{max-width:1400px;margin:0 auto}
-.top{background:var(--map);color:var(--white);margin-top:calc(-1*env(safe-area-inset-top,0px));padding-top:calc(env(safe-area-inset-top,0px) + clamp(24px,3.5vw,44px));padding-bottom:20px}
-h1{font:700 clamp(30px,4vw,46px)/1.05 "Inter Tight",Inter,sans-serif;letter-spacing:-.02em;margin:0 0 10px}
-h2{font:700 clamp(22px,2.4vw,28px)/1.15 "Inter Tight",Inter,sans-serif;letter-spacing:-.01em;margin:0 0 14px}
+.top{padding-bottom:20px}
+h1{font:700 clamp(32px,4vw,46px)/1.08 Literata,Georgia,serif;letter-spacing:-.015em;margin:0 0 10px}
+h2{font:700 clamp(22px,2.4vw,28px)/1.2 Literata,Georgia,serif;margin:0 0 12px}
 .head{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:24px 40px;align-items:end}
-.lede{margin:0;color:var(--pale);max-width:62ch}
-.figs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;border-top:1px solid #2f7a6b}
+.lede{margin:0;color:var(--ink);max-width:62ch}
+.figs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--line)}
 .figs div{padding:10px 12px 0 0}
-.figs b{display:block;font:700 clamp(26px,3vw,36px)/1 "Inter Tight",sans-serif;color:var(--lime)}
-.figs span{font-size:13px;color:var(--pale)}
+.figs b{display:block;font:700 clamp(28px,3vw,38px)/1 Literata,Georgia,serif;color:var(--lKafka)}
+.figs span{font:14px Inter,sans-serif;color:var(--muted)}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
-.chip{font:500 14px Inter,sans-serif;color:var(--white);background:transparent;border:1px solid #3f8f7e;border-radius:999px;padding:8px 14px;min-height:40px;cursor:pointer}
-.chip:hover{border-color:var(--lime)}
-.chip[aria-pressed=true]{background:var(--pale);color:var(--map);border-color:var(--pale)}
-.chip.hot[aria-pressed=true]{background:var(--coral);border-color:var(--coral);color:#fff}
-.chip:focus-visible,.zb:focus-visible{outline:2px solid var(--lime);outline-offset:2px}
-.mapband{background:var(--map);padding-bottom:clamp(20px,3vw,40px);padding-left:max(5vw,16px,env(safe-area-inset-left,0px));padding-right:max(5vw,16px,env(safe-area-inset-right,0px))}
-.stage{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px;max-width:1400px;margin:0 auto}
-.fig{position:relative;height:min(76vh,780px);min-height:420px;background:var(--map2);border:1px solid #1d6a5b;border-radius:10px;overflow:hidden;touch-action:none;cursor:grab}
+.chip{font:500 14px Inter,sans-serif;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:8px 14px;min-height:40px;cursor:pointer}
+.chip:hover{border-color:var(--ink)}
+.chip[aria-pressed=true]{background:var(--chipOn);color:var(--chipOnInk);border-color:var(--chipOn)}
+.chip.hot[aria-pressed=true]{background:var(--hot);border-color:var(--hot);color:#fff}
+.chip:focus-visible,.zb:focus-visible{outline:2px solid var(--lGrpc);outline-offset:2px}
+.mapband{padding-bottom:clamp(20px,3vw,40px);padding-left:max(5vw,16px,env(safe-area-inset-left,0px));padding-right:max(5vw,16px,env(safe-area-inset-right,0px))}
+.stage{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:16px;max-width:1400px;margin:0 auto}
+.fig{position:relative;height:min(76vh,780px);min-height:420px;background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden;touch-action:none;cursor:grab}
 .fig.drag{cursor:grabbing}
 .fig>svg{position:absolute;inset:0;width:100%;height:100%;display:block}
 .zoom{position:absolute;right:12px;bottom:12px;display:flex;flex-direction:column;gap:6px}
-.zb{width:44px;height:44px;border-radius:8px;border:1px solid #3f8f7e;background:#00463cee;color:#fff;font:600 20px Inter,sans-serif;cursor:pointer}
+.zb{width:44px;height:44px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font:600 20px Inter,sans-serif;cursor:pointer}
 .zb.small{font-size:12px}
-.hint{position:absolute;left:12px;bottom:12px;font-size:13px;color:var(--pale);background:#00463ccc;padding:4px 10px;border-radius:6px;pointer-events:none}
-.legend{position:absolute;left:12px;top:12px;display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--pale);background:#00463cd9;padding:8px 12px;border-radius:8px;max-width:calc(100% - 24px);pointer-events:none}
+.hint{position:absolute;left:12px;bottom:12px;font:13px Inter,sans-serif;color:var(--muted);background:var(--panel);border:1px solid var(--rule);padding:4px 10px;border-radius:6px;pointer-events:none}
+.legend{position:absolute;left:12px;top:12px;display:flex;flex-wrap:wrap;gap:6px 14px;font:13px Inter,sans-serif;color:var(--ink);background:var(--panel);border:1px solid var(--rule);padding:8px 12px;border-radius:8px;max-width:calc(100% - 24px);pointer-events:none}
 .legend i{display:inline-block;width:22px;height:0;border-top:3px solid;vertical-align:middle;margin-right:6px}
-.rail{background:#00332c;border:1px solid #1d6a5b;border-radius:10px;color:var(--white);padding:18px;height:min(76vh,780px);min-height:420px;overflow:auto}
-.rail h3{font:700 22px/1.15 "Inter Tight",sans-serif;margin:0 0 4px}
-.rail .kind{font-size:13px;color:var(--lime);margin:0 0 12px}
-.rail p{margin:0 0 12px;color:#dcebe6;font-size:15px}
-.rail ul{margin:0 0 12px;padding-left:18px;font-size:15px;color:#dcebe6}
+.rail{background:var(--panel);border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:20px;height:min(76vh,780px);min-height:420px;overflow:auto}
+.rail h3{font:700 23px/1.2 Literata,Georgia,serif;margin:0 0 4px}
+.rail .kind{font:600 13px Inter,sans-serif;color:var(--lKafka);margin:0 0 12px}
+.rail p{margin:0 0 12px;font-size:16px}
+.rail ul{margin:0 0 12px;padding-left:18px;font-size:16px}
 .rail li{margin-bottom:6px}
-.rail .f{border-left:3px solid var(--coral);padding:6px 10px;margin:0 0 8px;background:#ff6f5914;font-size:14px}
-.rail .f b{color:var(--coral)}
-.rail .step{display:grid;grid-template-columns:28px minmax(0,1fr);gap:8px;font-size:14px;margin-bottom:8px;color:#dcebe6}
-.rail .step span{font:700 13px/26px Inter;width:26px;height:26px;border-radius:50%;background:var(--pale);color:var(--map);text-align:center}
+.rail .f{border-left:3px solid var(--hot);padding:6px 10px;margin:0 0 8px;background:color-mix(in srgb,var(--hot) 9%,transparent);font-size:15px}
+.rail .f b{color:var(--hot);font-family:Inter,sans-serif}
+.rail .step{display:grid;grid-template-columns:30px minmax(0,1fr);gap:8px;font-size:16px;margin-bottom:10px}
+.rail .step span{font:700 13px/26px Inter,sans-serif;width:26px;height:26px;border-radius:50%;background:var(--chipOn);color:var(--chipOnInk);text-align:center}
+.rail .tip{font:13px Inter,sans-serif;color:var(--muted)}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:32px 48px;max-width:1400px;margin:0 auto}
-.sec p.note{color:var(--muted);font-size:15px;margin:0 0 12px}
+.sec p.note{color:var(--muted);font-size:16px;margin:0 0 12px}
 .scroll{overflow-x:auto}
-table{border-collapse:collapse;width:100%;font-size:15px}
-th{text-align:left;font-weight:600;font-size:13px;color:var(--muted);border-bottom:2px solid var(--ink);padding:8px 10px 8px 0}
+table{border-collapse:collapse;width:100%;font-size:16px}
+th{text-align:left;font:600 13px Inter,sans-serif;color:var(--muted);border-bottom:2px solid var(--ink);padding:8px 10px 8px 0}
 td{border-bottom:1px solid var(--rule);padding:9px 10px 9px 0;vertical-align:top}
 td.n{font-variant-numeric:tabular-nums;white-space:nowrap}
 code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--soft);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
 .flist{list-style:none;margin:0;padding:0}
 .flist li{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:10px;border-bottom:1px solid var(--rule);padding:10px 0;align-items:baseline}
-.flist b{color:var(--coral);font-family:"Inter Tight",sans-serif}
-.sev{font-size:13px;color:var(--muted);white-space:nowrap}
-.foot{color:var(--muted);font-size:14px;max-width:1400px;margin:0 auto}
+.flist b{color:var(--hot);font-family:Inter,sans-serif}
+.sev{font:13px Inter,sans-serif;color:var(--muted);white-space:nowrap}
+.foot{color:var(--muted);font-size:15px;max-width:1400px;margin:0 auto}
 @media(max-width:1000px){.stage{grid-template-columns:minmax(0,1fr)}.rail{height:auto;min-height:0}.head{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:760px){.grid2{grid-template-columns:minmax(0,1fr)}.fig{height:68svh;min-height:360px}.legend{display:none}}
-@media(max-width:600px){.figs{grid-template-columns:repeat(2,minmax(0,1fr))}table{font-size:13px}th,td{padding:6px 6px 6px 0}.stack thead{display:none}.stack tr{display:grid;padding-block:8px;border-bottom:1px solid var(--rule)}.stack td{display:flex;justify-content:space-between;gap:12px;border:0;padding:3px 0}.stack td::before{content:attr(data-l);color:var(--muted);font-size:13px}}
+@media(max-width:600px){.figs{grid-template-columns:repeat(2,minmax(0,1fr))}table{font-size:14px}th,td{padding:6px 6px 6px 0}.stack thead{display:none}.stack tr{display:grid;padding-block:8px;border-bottom:1px solid var(--rule)}.stack td{display:flex;justify-content:space-between;gap:12px;border:0;padding:3px 0}.stack td::before{content:attr(data-l);color:var(--muted);font:13px Inter,sans-serif}}
 @media(prefers-reduced-motion:no-preference){.flowing{animation:dash 1.1s linear infinite}}
 @keyframes dash{to{stroke-dashoffset:-28}}
 </style>
@@ -92,7 +93,7 @@ code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--soft
   <div class="stage">
     <div class="fig" id="fig" aria-label="Sơ đồ luồng dữ liệu, cuộn chuột để phóng to, kéo để di chuyển">
       <svg id="svg" xmlns="http://www.w3.org/2000/svg"><defs id="defs"></defs><g id="world"></g></svg>
-      <div class="legend"><span><i style="border-color:#fff"></i>WebSocket / HTTP</span><span><i style="border-color:var(--sky)"></i>gRPC</span><span><i style="border-color:var(--lime)"></i>Kafka</span><span><i style="border-color:#8fb3aa;border-top-style:dashed"></i>Kho dữ liệu</span></div>
+      <div class="legend"><span><i style="border-color:var(--lWs)"></i>WebSocket / HTTP</span><span><i style="border-color:var(--lGrpc)"></i>gRPC</span><span><i style="border-color:var(--lKafka)"></i>Kafka</span><span><i style="border-color:var(--lDb);border-top-style:dashed"></i>Kho dữ liệu</span></div>
       <div class="hint" id="hint">Cuộn chuột để phóng to, kéo để di chuyển</div>
       <div class="zoom"><button class="zb" id="zin" aria-label="Phóng to">+</button><button class="zb" id="zout" aria-label="Thu nhỏ">−</button><button class="zb small" id="zfit" aria-label="Vừa khung">Vừa</button></div>
     </div>
@@ -133,7 +134,7 @@ code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--soft
 <script>
 {
 const WW = 2020, WH = 1130;
-const COL = {ws: '#ffffff', http: '#ffffff', grpc: '#86d5ff', kp: '#c6ef7a', kc: '#c6ef7a', db: '#8fb3aa'};
+const COL = {ws: 'var(--lWs)', http: 'var(--lWs)', grpc: 'var(--lGrpc)', kp: 'var(--lKafka)', kc: 'var(--lKafka)', db: 'var(--lDb)'};
 const FIND = {
   F1: ['Fan-out đẩy cho từng thành viên, kể cả người offline', 'Chặn'],
   F2: ['Push API ghi hash trạng thái 25 giờ cho mỗi push (~160 GB ở 6k/s)', 'Chặn'],
@@ -288,44 +289,44 @@ function pathOf(e) {
   return {d: `M${x1} ${y1}C${c1[0]} ${c1[1]} ${c2[0]} ${c2[1]} ${x2} ${y2}`, mid};
 }
 // zones
-el('rect', {x: 20, y: 380, width: 1980, height: 100, rx: 50, fill: '#00594c', opacity: 0.55}, world);
-const zl = el('text', {x: 40, y: 438, fill: '#c6ef7a', 'font-size': 15, 'font-weight': 700, 'font-family': 'Inter Tight, sans-serif'}, world); zl.textContent = 'Kafka';
-el('rect', {x: 20, y: 950, width: 1980, height: 160, rx: 14, fill: '#002d26', opacity: 0.7}, world);
+el('rect', {x: 20, y: 380, width: 1980, height: 100, rx: 50, fill: 'var(--band)'}, world);
+const zl = el('text', {x: 40, y: 438, fill: 'var(--lKafka)', 'font-size': 15, 'font-weight': 700, 'font-family': 'Inter, sans-serif'}, world); zl.textContent = 'Kafka';
+el('rect', {x: 20, y: 950, width: 1980, height: 160, rx: 14, fill: 'var(--storeZone)'}, world);
 const eg = el('g', {}, world), lg = el('g', {}, world), ng = el('g', {}, world), hg = el('g', {}, world);
 const edgeEls = E.map(e => {
   const p = pathOf(e);
   const path = el('path', {d: p.d, fill: 'none', stroke: COL[e.k], 'stroke-width': e.k === 'db' ? 1.6 : 2.4, 'stroke-dasharray': e.k === 'db' ? '5 6' : 'none', 'marker-end': mk(e.k), opacity: e.k === 'db' ? 0.6 : 0.85}, eg);
   const tt = el('title', {}, path); tt.textContent = byId[e.a].t + ' → ' + byId[e.b].t + (e.l ? ': ' + e.l : '');
-  const lab = el('text', {x: p.mid[0], y: p.mid[1], 'text-anchor': 'middle', 'font-size': 14, fill: '#fff', stroke: '#003a32', 'stroke-width': 5, 'paint-order': 'stroke', 'font-family': 'Inter, sans-serif', opacity: 0}, lg);
+  const lab = el('text', {x: p.mid[0], y: p.mid[1], 'text-anchor': 'middle', 'font-size': 14, fill: 'var(--ink)', stroke: 'var(--paper)', 'stroke-width': 5, 'paint-order': 'stroke', 'font-family': 'Inter, sans-serif', opacity: 0}, lg);
   lab.textContent = e.l;
   return {e, path, lab};
 });
 const nodeEls = N.map(n => {
   const g = el('g', {tabindex: 0, role: 'button', 'aria-label': n.t, style: 'cursor:pointer'}, ng);
   if (n.k === 'box') {
-    el('rect', {x: n.x, y: n.y, width: n.w, height: n.h, rx: 16, fill: '#063d34', stroke: '#3f8f7e', 'stroke-width': 2}, g);
-    const t = el('text', {x: n.x + n.w - 18, y: n.y + 34, 'text-anchor': 'end', fill: '#fff', 'font-size': 22, 'font-weight': 700, 'font-family': 'Inter Tight, sans-serif'}, g); t.textContent = n.t;
+    el('rect', {x: n.x, y: n.y, width: n.w, height: n.h, rx: 16, fill: 'var(--box)', stroke: 'var(--line)', 'stroke-width': 2}, g);
+    const t = el('text', {x: n.x + n.w - 18, y: n.y + n.h - 8, 'text-anchor': 'end', fill: 'var(--ink)', 'font-size': 20, 'font-weight': 700, 'font-family': 'Literata, Georgia, serif'}, g); t.textContent = n.t;
     return {n, g};
   }
   if (n.k === 'store') {
     const ry = 14;
-    el('path', {d: `M${n.x} ${n.y + ry}v${n.h - 2 * ry}a${n.w / 2} ${ry} 0 0 0 ${n.w} 0v${-(n.h - 2 * ry)}`, fill: '#0d4a40', stroke: '#8fb3aa', 'stroke-width': 1.5}, g);
-    el('ellipse', {cx: n.x + n.w / 2, cy: n.y + ry, rx: n.w / 2, ry, fill: '#1a6355', stroke: '#8fb3aa', 'stroke-width': 1.5}, g);
+    el('path', {d: `M${n.x} ${n.y + ry}v${n.h - 2 * ry}a${n.w / 2} ${ry} 0 0 0 ${n.w} 0v${-(n.h - 2 * ry)}`, fill: 'var(--store)', stroke: 'var(--lDb)', 'stroke-width': 1.5}, g);
+    el('ellipse', {cx: n.x + n.w / 2, cy: n.y + ry, rx: n.w / 2, ry, fill: 'var(--storeTop)', stroke: 'var(--lDb)', 'stroke-width': 1.5}, g);
   } else if (n.k === 'topic') {
-    el('rect', {x: n.x, y: n.y, width: n.w, height: n.h, rx: n.h / 2, fill: '#e6f5c8', stroke: '#c6ef7a', 'stroke-width': 2}, g);
+    el('rect', {x: n.x, y: n.y, width: n.w, height: n.h, rx: n.h / 2, fill: 'var(--topic)', stroke: 'var(--lKafka)', 'stroke-width': 2}, g);
   } else {
-    el('rect', {x: n.x, y: n.y, width: n.w, height: n.h, rx: 10, fill: n.k === 'ext' ? 'transparent' : n.k === 'sub' ? '#0b5a4d' : '#0f6a5a', stroke: n.k === 'ext' ? '#ffffff' : '#5fb3a1', 'stroke-width': n.k === 'ext' ? 1.5 : 2, 'stroke-dasharray': n.k === 'ext' ? '6 5' : 'none'}, g);
+    el('rect', {x: n.x, y: n.y, width: n.w, height: n.h, rx: 10, fill: n.k === 'ext' ? 'transparent' : n.k === 'sub' ? 'var(--sub)' : 'var(--panel)', stroke: n.k === 'ext' ? 'var(--lWs)' : 'var(--line2)', 'stroke-width': n.k === 'ext' ? 1.5 : 2, 'stroke-dasharray': n.k === 'ext' ? '6 5' : 'none'}, g);
   }
-  const ink = n.k === 'topic' ? '#00463c' : '#ffffff';
+  const ink = n.k === 'topic' ? 'var(--topicInk)' : 'var(--ink)';
   const cx = n.x + n.w / 2, big = n.k === 'topic' ? 14 : n.k === 'sub' ? 17 : 19;
   const ty = n.k === 'store' ? n.y + n.h / 2 + 12 : n.k === 'topic' ? n.y + 23 : n.y + n.h / 2 - 2;
-  const t1 = el('text', {x: cx, y: ty, 'text-anchor': 'middle', fill: ink, 'font-size': big, 'font-weight': 700, 'font-family': 'Inter Tight, sans-serif'}, g); t1.textContent = n.t;
-  const t2 = el('text', {x: cx, y: ty + (n.k === 'topic' ? 17 : 22), 'text-anchor': 'middle', fill: n.k === 'topic' ? '#2f6b5f' : '#cfe6df', 'font-size': n.k === 'topic' ? 12 : 14, 'font-family': 'Inter, sans-serif'}, g); t2.textContent = n.s;
+  const t1 = el('text', {x: cx, y: ty, 'text-anchor': 'middle', fill: ink, 'font-size': big, 'font-weight': 600, 'font-family': 'Inter, sans-serif'}, g); t1.textContent = n.t;
+  const t2 = el('text', {x: cx, y: ty + (n.k === 'topic' ? 17 : 22), 'text-anchor': 'middle', fill: n.k === 'topic' ? 'var(--topicInk)' : 'var(--muted)', 'font-size': n.k === 'topic' ? 12 : 14, 'font-family': 'Inter, sans-serif'}, g); t2.textContent = n.s;
   const hot = el('g', {opacity: 0}, hg);
   n.f.forEach((f, i) => {
     const hx = n.x + n.w - 8 - i * 46, hy = n.y - 8;
-    el('rect', {x: hx - 40, y: hy - 13, width: 42, height: 26, rx: 13, fill: '#ff6f59'}, hot);
-    const ht = el('text', {x: hx - 19, y: hy + 5, 'text-anchor': 'middle', fill: '#fff', 'font-size': 14, 'font-weight': 700, 'font-family': 'Inter Tight, sans-serif'}, hot); ht.textContent = f;
+    el('rect', {x: hx - 40, y: hy - 13, width: 42, height: 26, rx: 13, fill: 'var(--hot)'}, hot);
+    const ht = el('text', {x: hx - 19, y: hy + 5, 'text-anchor': 'middle', fill: '#fff', 'font-size': 14, 'font-weight': 700, 'font-family': 'Inter, sans-serif'}, hot); ht.textContent = f;
   });
   return {n, g, hot};
 });
@@ -370,12 +371,12 @@ function showRail() {
       (ins.length ? `<p class="kind">Nhận từ</p><ul>${ins.map(x => `<li>${x}</li>`).join('')}</ul>` : '') +
       (outs.length ? `<p class="kind">Gửi tới</p><ul>${outs.map(x => `<li>${x}</li>`).join('')}</ul>` : '') +
       n.f.map(f => `<div class="f"><b>${f}</b> ${FIND[f][0]}</div>`).join('') +
-      '<p style="font-size:13px;color:#9fc7bd">Bấm vào nền sơ đồ để bỏ chọn.</p>';
+      '<p class="tip">Bấm vào nền sơ đồ để bỏ chọn.</p>';
     return;
   }
   const f = FLOWS.find(x => x[0] === flow);
   if (flow === 'all') {
-    rail.innerHTML = '<h3>Đọc sơ đồ</h3><p class="kind">Bảy dịch vụ quanh một trục Kafka</p><p>Hàng trên là cửa vào: gateway giữ WebSocket, auth cấp token, account quản lý tài khoản. Dải giữa là 11 topic Kafka. Hàng dưới là chat-service và đường push: Push API, router, notify. Dưới cùng là kho dữ liệu.</p><ul><li>Đường trắng: WebSocket và HTTP</li><li>Đường xanh trời: gRPC</li><li>Đường xanh lá: ghi và đọc Kafka</li><li>Đường đứt: đọc ghi kho dữ liệu</li></ul><p>Chọn một luồng ở trên để xem từng bước, hoặc bấm một trạm để xem nó làm gì.</p>';
+    rail.innerHTML = '<h3>Đọc sơ đồ</h3><p class="kind">Bảy dịch vụ quanh một trục Kafka</p><p>Hàng trên là cửa vào: gateway giữ WebSocket, auth cấp token, account quản lý tài khoản. Dải giữa là 11 topic Kafka. Hàng dưới là chat-service và đường push: Push API, router, notify. Dưới cùng là kho dữ liệu.</p><ul><li>Đường nâu: WebSocket và HTTP</li><li>Đường xanh lam: gRPC</li><li>Đường xanh ô liu: ghi và đọc Kafka</li><li>Đường đứt: đọc ghi kho dữ liệu</li></ul><p>Chọn một luồng ở trên để xem từng bước, hoặc bấm một trạm để xem nó làm gì.</p>';
     return;
   }
   rail.innerHTML = `<h3>${f[1]}</h3><p class="kind">Các bước</p>` + f[2].map((s, i) => `<div class="step"><span>${i + 1}</span><div>${s}</div></div>`).join('');
