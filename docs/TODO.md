@@ -47,7 +47,7 @@ Việc:
 
 ### 3. Push API chuyển sang `EVALSHA` (việc nhỏ)
 
-Hiện trạng: `RedisMessageStatus` (accepted, offline, delivered) và `RedisIdemStore` gửi nguyên văn script Lua mỗi lần push (`EVAL`), nên Redis phải băm lại script mỗi lần.
+Hiện trạng: các script của `RedisMessageStatus` gửi nguyên văn mỗi lần chạy (`EVAL`), nên Redis phải băm lại script mỗi lần: `ACCEPTED` chạy cho mọi push, `OFFLINE` và `DELIVERED` cho từng kết quả. `RedisIdemStore` không nằm trên đường nóng: chỉ push có idempotency key mới dùng nó, đường thành công là GET/SET NX/SET, và script `DELETE_IF_EQUALS` chỉ chạy khi ghi Kafka thất bại (Codex review của #13).
 
 Việc:
 - [ ] Chạy bằng `EVALSHA`, về `EVAL` khi Redis báo `NOSCRIPT`, như badge của chat (`RedisBadges.sha`). Thêm IT sống sót qua `SCRIPT FLUSH`.

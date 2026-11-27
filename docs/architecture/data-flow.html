@@ -81,7 +81,7 @@ code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--soft
     </div>
     <div class="figs">
       <div><b>7</b><span>dịch vụ</span></div>
-      <div><b>11</b><span>topic Kafka</span></div>
+      <div><b>12</b><span>topic Kafka</span></div>
       <div><b>4</b><span>kho dữ liệu</span></div>
       <div><b>12</b><span>PR đã merge</span></div>
     </div>
@@ -184,6 +184,7 @@ const TOP = [
   ['t_ctl', 'gw.control', 8, 'auth', 'gateway, chat, account, notify, push-api'],
   ['t_usr', 'account.users', 12, 'account', 'chat'],
   ['t_cmd', 'chat.commands', 64, 'chat ingest, REST', 'chat sequencer'],
+  ['t_dlq', 'chat.commands.dlq', 8, 'chat ingest, sequencer (thư chết)', 'người vận hành'],
   ['t_ev', 'chat.events', 64, 'chat sequencer', 'fan-out, channel notifier'],
   ['t_rcp', 'chat.receipts', 64, 'chat-state', 'receipt worker'],
   ['t_req', 'c1.push.requests', 64, 'push-api', 'router'],
@@ -191,7 +192,7 @@ const TOP = [
   ['t_off', 'c1.push.offline', 16, 'router', 'offline notifier, push-api'],
   ['t_not', 'c1.notify.requests', 32, 'offline và channel notifier', 'notify']
 ];
-TOP.forEach((t, i) => N.push({id: t[0], x: 230 + i * 160, y: 405, w: 150, h: 52, k: 'topic', t: t[1], s: t[2] + ' partition', f: [], d: 'Ghi: ' + t[3] + '. Đọc: ' + t[4] + '.'}));
+TOP.forEach((t, i) => N.push({id: t[0], x: 222 + i * 148, y: 405, w: 140, h: 52, k: 'topic', t: t[1], s: t[2] + ' partition', f: [], d: 'Ghi: ' + t[3] + '. Đọc: ' + t[4] + '.'}));
 const byId = Object.fromEntries(N.map(n => [n.id, n]));
 // edges: from, to, kind, label, flows
 const E = [
@@ -209,6 +210,8 @@ const E = [
   ['t_up', 'ing', 'kc', 'gửi tin', 'msg'],
   ['t_up', 'st', 'kc', 'mark, typing', 'rcp typ'],
   ['ing', 't_cmd', 'kp', '', 'msg'],
+  ['ing', 't_dlq', 'kp', 'lệnh hỏng', ''],
+  ['seq', 't_dlq', 'kp', 'thư chết', ''],
   ['http', 't_cmd', 'kp', 'gửi qua HTTP', 'chn'],
   ['t_cmd', 'seq', 'kc', '', 'msg chn'],
   ['seq', 't_ev', 'kp', 'tin đã đánh số', 'msg chn'],
@@ -318,7 +321,7 @@ const nodeEls = N.map(n => {
     el('rect', {x: n.x, y: n.y, width: n.w, height: n.h, rx: 10, fill: n.k === 'ext' ? 'transparent' : n.k === 'sub' ? 'var(--sub)' : 'var(--panel)', stroke: n.k === 'ext' ? 'var(--lWs)' : 'var(--line2)', 'stroke-width': n.k === 'ext' ? 1.5 : 2, 'stroke-dasharray': n.k === 'ext' ? '6 5' : 'none'}, g);
   }
   const ink = n.k === 'topic' ? 'var(--topicInk)' : 'var(--ink)';
-  const cx = n.x + n.w / 2, big = n.k === 'topic' ? 14 : n.k === 'sub' ? 17 : 19;
+  const cx = n.x + n.w / 2, big = n.k === 'topic' ? 13 : n.k === 'sub' ? 17 : 19;
   const ty = n.k === 'store' ? n.y + n.h / 2 + 12 : n.k === 'topic' ? n.y + 23 : n.y + n.h / 2 - 2;
   const t1 = el('text', {x: cx, y: ty, 'text-anchor': 'middle', fill: ink, 'font-size': big, 'font-weight': 600, 'font-family': 'Inter, sans-serif'}, g); t1.textContent = n.t;
   const t2 = el('text', {x: cx, y: ty + (n.k === 'topic' ? 17 : 22), 'text-anchor': 'middle', fill: n.k === 'topic' ? 'var(--topicInk)' : 'var(--muted)', 'font-size': n.k === 'topic' ? 12 : 14, 'font-family': 'Inter, sans-serif'}, g); t2.textContent = n.s;
@@ -376,7 +379,7 @@ function showRail() {
   }
   const f = FLOWS.find(x => x[0] === flow);
   if (flow === 'all') {
-    rail.innerHTML = '<h3>Đọc sơ đồ</h3><p class="kind">Bảy dịch vụ quanh một trục Kafka</p><p>Hàng trên là cửa vào: gateway giữ WebSocket, auth cấp token, account quản lý tài khoản. Dải giữa là 11 topic Kafka. Hàng dưới là chat-service và đường push: Push API, router, notify. Dưới cùng là kho dữ liệu.</p><ul><li>Đường nâu: WebSocket và HTTP</li><li>Đường xanh lam: gRPC</li><li>Đường xanh ô liu: ghi và đọc Kafka</li><li>Đường đứt: đọc ghi kho dữ liệu</li></ul><p>Chọn một luồng ở trên để xem từng bước, hoặc bấm một trạm để xem nó làm gì.</p>';
+    rail.innerHTML = '<h3>Đọc sơ đồ</h3><p class="kind">Bảy dịch vụ quanh một trục Kafka</p><p>Hàng trên là cửa vào: gateway giữ WebSocket, auth cấp token, account quản lý tài khoản. Dải giữa là 12 topic Kafka, gồm một topic thư chết. Hàng dưới là chat-service và đường push: Push API, router, notify. Dưới cùng là kho dữ liệu.</p><ul><li>Đường nâu: WebSocket và HTTP</li><li>Đường xanh lam: gRPC</li><li>Đường xanh ô liu: ghi và đọc Kafka</li><li>Đường đứt: đọc ghi kho dữ liệu</li></ul><p>Chọn một luồng ở trên để xem từng bước, hoặc bấm một trạm để xem nó làm gì.</p>';
     return;
   }
   rail.innerHTML = `<h3>${f[1]}</h3><p class="kind">Các bước</p>` + f[2].map((s, i) => `<div class="step"><span>${i + 1}</span><div>${s}</div></div>`).join('');
